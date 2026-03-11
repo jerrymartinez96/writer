@@ -2,13 +2,16 @@ import React from 'react';
 import { auth, googleProvider } from '../firebase';
 import { signInWithPopup } from 'firebase/auth';
 import { LogIn, Sparkles, BookOpen } from 'lucide-react';
+import { useToast } from './Toast';
 
 const Login = () => {
+    const toast = useToast();
     const handleLogin = async () => {
         try {
             await signInWithPopup(auth, googleProvider);
         } catch (error) {
             console.error("Login failed:", error);
+            toast.error("Error al iniciar sesión. Por favor, intenta de nuevo.");
         }
     };
 

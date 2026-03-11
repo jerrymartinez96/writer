@@ -25,7 +25,9 @@ import {
     getUserProfile,
     createUserProfile,
     updateUserProfile as updateUserProfileApi,
-    subscribeToChapter
+    subscribeToChapter,
+    claimChapterLock as claimLockApi,
+    releaseChapterLock as releaseLockApi
 } from '../services/db';
 import { decompressData } from '../services/compression';
 import { uploadImageToCloudinary } from '../services/cloudinary';
@@ -55,6 +57,14 @@ export const DataProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
+    const [sessionId] = useState(() => {
+        const stored = localStorage.getItem('writer_device_id');
+        if (stored) return stored;
+        const newId = Math.random().toString(36).substring(2, 10);
+        localStorage.setItem('writer_device_id', newId);
+        return newId;
+    });
+    const [chapterLock, setChapterLock] = useState({ isLocked: false, activeEditorId: null, deviceName: 'Esta computadora' });
 
     // XSS Protection - Sanitize HTML content
     const sanitizeHtml = useCallback((html) => {
@@ -81,6 +91,7 @@ export const DataProvider = ({ children }) => {
                 catch (error) { console.error("Error flushing save", error); }
             }
         }
+        pendingSaves.current = {};
     }, []);
 
     useEffect(() => {
@@ -147,7 +158,7 @@ export const DataProvider = ({ children }) => {
         loadBooks();
     }, [user]);
 
-    // Real-time synchronization for active chapter
+    // Real-time synchronization and Presence for active chapter
     useEffect(() => {
         if (!activeBook || !activeChapter || !activeChapter.id) return;
 
@@ -155,19 +166,30 @@ export const DataProvider = ({ children }) => {
             const saveKey = `chap_${activeChapter.id}`;
             const hasPendingSave = !!pendingSaves.current[saveKey];
 
-            // Only update if our token is different AND we don't have local changes waiting to be pushed
+            // 1. Handle Content Sync
             if (cloudData.lastSyncToken !== activeChapter.lastSyncToken && !hasPendingSave) {
-                console.log(`[RealTime] External change detected for chapter ${activeChapter.id}. Updating local state.`);
                 const safeContent = sanitizeHtml(cloudData.content);
                 setActiveChapter(prev => ({ ...prev, ...cloudData, content: safeContent, isLoaded: true }));
                 setChapters(prev => prev.map(ch => ch.id === cloudData.id ? { ...cloudData, content: safeContent, isLoaded: true } : ch));
                 lastCloudContentRef.current[cloudData.id] = cloudData.content;
                 setLastSaved(new Date());
             }
+
+            // 2. Handle Presence / Locking
+            const { activeEditorId, lastEditTime } = cloudData;
+            const now = Date.now();
+            const lastEditMs = lastEditTime?.toMillis ? lastEditTime.toMillis() : (lastEditTime instanceof Date ? lastEditTime.getTime() : now);
+            const isActiveLock = activeEditorId && activeEditorId !== sessionId && (now - lastEditMs < 60000);
+
+            setChapterLock({
+                isLocked: isActiveLock,
+                activeEditorId: activeEditorId,
+                deviceName: activeEditorId === sessionId ? 'Este dispositivo' : 'Otro dispositivo'
+            });
         });
 
         return () => unsubscribe();
-    }, [activeBook?.id, activeChapter?.id, sanitizeHtml]); // Depend on IDs to avoid excessive resubs
+    }, [activeBook?.id, activeChapter?.id, sessionId, sanitizeHtml]);
 
     const handleSelectBook = async (book) => {
         await flushAllSaves();
@@ -278,7 +300,6 @@ export const DataProvider = ({ children }) => {
     };
 
     const handleDeleteBook = async (bookId) => {
-        if (!confirm("¿Seguro que quieres eliminar todo el libro? Esta acción no se puede deshacer.")) return;
         try {
             await deleteBookApi(bookId);
             const remainingBooks = books.filter(b => b.id !== bookId);
@@ -578,6 +599,7 @@ export const DataProvider = ({ children }) => {
         // Adaptive Debounce: 10s default, 30s for massive chapters (>20,000 chars)
         const contentSize = content.length;
         const debounceTime = contentSize > 20000 ? 30000 : 10000;
+        const safetyLimit = 30000; // 30 seconds forced save
 
         // Detection logic for significant change (>15%)
         const detectSignificantChange = (oldHtml, newHtml) => {
@@ -589,45 +611,48 @@ export const DataProvider = ({ children }) => {
             return diffPercent > 0.15;
         };
 
-        // Define the save function (History + Cloud)
+        // Track when this specific save sequence started
+        if (!pendingSaves.current[saveKey]) {
+            pendingSaves.current[saveKey] = { startTime: Date.now() };
+        }
+        const timeElapsed = Date.now() - pendingSaves.current[saveKey].startTime;
+
+        // Define the save function
         const fn = async () => {
+            const currentSave = pendingSaves.current[saveKey];
+            if (currentSave && currentSave.timeoutId) {
+                clearTimeout(currentSave.timeoutId);
+            }
             delete pendingSaves.current[saveKey];
             
-            // Save to Cloud (Main state)
             try {
-                // Use the lastSyncToken as the anchor for this save
                 const expectedToken = activeChapter.lastSyncToken;
-                console.log(`[Sync] Attempting cloud save with Token: ${expectedToken}`);
-                const newToken = await updateChapterContent(bookId, chapId, content, expectedToken);
+                const newToken = await updateChapterContent(bookId, chapId, content, expectedToken, sessionId);
                 
-                // Update the anchor token for the next save cycle
                 setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 setChapters(prev => prev.map(ch => ch.id === chapId ? { ...ch, lastSyncToken: newToken } : ch));
-                
-                // Track cloud content for dirty checking
                 lastCloudContentRef.current[chapId] = content;
 
-                // 4. Significant change detection (>15%)
                 const lastMajor = lastMajorBackupContentRef.current[chapId] || activeChapter.content || '';
                 if (detectSignificantChange(lastMajor, content)) {
-                    console.log(`[Backup] Significant change detected (>15%). Triggering major backup.`);
                     await saveChapterSnapshotApi(bookId, chapId, content);
                     lastMajorBackupContentRef.current[chapId] = content;
                 }
 
-                console.log(`[Sync] Cloud save successful for chapter ${chapId}. New token: ${newToken}`);
                 setLastSaved(new Date());
             } catch (error) {
                 console.warn("Cloud sync failed.", error);
             }
         };
 
-        // 2. Set new debounce timer
-        pendingSaves.current[saveKey] = {
-            timeoutId: setTimeout(fn, debounceTime),
-            fn
-        };
-    }, [activeBook, activeChapter]);
+        // Decide: Normal debounce or Safety Force?
+        if (timeElapsed >= safetyLimit) {
+            fn();
+        } else {
+            pendingSaves.current[saveKey].timeoutId = setTimeout(fn, debounceTime);
+            pendingSaves.current[saveKey].fn = fn;
+        }
+    }, [activeBook, activeChapter, sanitizeHtml, sessionId]);
 
     const handleRestoreTrashItem = async (item) => {
         if (!activeBook) return;
@@ -678,6 +703,16 @@ export const DataProvider = ({ children }) => {
         }
     };
 
+    const handleClaimLock = async () => {
+        if (!activeBook || !activeChapter) return;
+        await claimLockApi(activeBook.id, activeChapter.id, sessionId);
+    };
+
+    const handleReleaseLock = async () => {
+        if (!activeBook || !activeChapter) return;
+        await releaseLockApi(activeBook.id, activeChapter.id, sessionId);
+    };
+
     const contextValue = {
         saveChapterContent,
         books,
@@ -713,6 +748,10 @@ export const DataProvider = ({ children }) => {
         reorderChapters: handleReorderChapters,
         finalizeChapterCleanup,
         lastSaved,
+        chapterLock,
+        sessionId,
+        claimLock: handleClaimLock,
+        releaseLock: handleReleaseLock,
         user,
         profile,
         authLoading,

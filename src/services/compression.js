@@ -11,12 +11,8 @@ export const compressData = (data) => {
         // though lz-string's compressToUTF16 is also good for storage.
         // For broad compatibility, compressToEncodedURIComponent is very safe.
         const compressed = LZString.compressToEncodedURIComponent(data);
-        if (data.length > 500) {
-            console.log(`[Compression] In: ${data.length} chars | Out: ${compressed.length} chars (Saved ${Math.round((1 - compressed.length/data.length)*100)}%)`);
-        }
         return compressed;
     } catch (e) {
-        console.error("Compression failed", e);
         return data;
     }
 };

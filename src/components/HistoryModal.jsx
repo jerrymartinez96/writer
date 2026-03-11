@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
 import Modal from './Modal';
+import ConfirmModal from './ConfirmModal';
 import { History, Save, RotateCcw, Clock, Cloud, Info } from 'lucide-react';
 
 const HistoryModal = ({ isOpen, onClose, editor }) => {
@@ -10,6 +11,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
     const [snapshots, setSnapshots] = useState([]);
     const [loading, setLoading] = useState(false);
     const [previewContent, setPreviewContent] = useState(null);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
     useEffect(() => {
         if (isOpen && activeChapter) {
@@ -51,14 +53,16 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
         }
     };
 
-    const handleRestore = (content) => {
-        if (!editor) return;
-        if (confirm("¿Estás seguro de restaurar esta versión? Se perderán los cambios actuales no guardados.")) {
-            editor.commands.setContent(content || '');
-            toast.success("¡Versión restaurada con éxito!");
-            setPreviewContent(null);
-            onClose();
-        }
+    const handleRestoreAction = () => {
+        if (!editor || !previewContent) return;
+        setIsConfirmOpen(true);
+    };
+
+    const confirmRestore = () => {
+        editor.commands.setContent(previewContent || '');
+        toast.success("¡Versión restaurada con éxito!");
+        setPreviewContent(null);
+        onClose();
     };
 
     const formatDate = (timestamp) => {
@@ -139,7 +143,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                             <>
                                 <div className="p-3 border-b border-[var(--border-main)] bg-[var(--bg-editor)] flex justify-end">
                                     <button
-                                        onClick={() => handleRestore(previewContent)}
+                                        onClick={handleRestoreAction}
                                         className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-500/20"
                                     >
                                         <RotateCcw size={14} />
@@ -155,6 +159,16 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                     </div>
                 </div>
             </div>
+
+            <ConfirmModal 
+                isOpen={isConfirmOpen}
+                onClose={() => setIsConfirmOpen(false)}
+                onConfirm={confirmRestore}
+                title="¿Restaurar versión?"
+                message="¿Estás seguro de restaurar esta versión? Se perderán todos los cambios que hayas realizado en el editor desde el último guardado."
+                confirmText="Sí, restaurar ahora"
+                type="info"
+            />
         </Modal>
     );
 };

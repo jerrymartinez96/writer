@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Plus, Book, Clock, ChevronRight, Search, BookMarked, Trash2, Edit3, Play, Upload, Loader2, Image as ImageIcon } from 'lucide-react';
 import Modal from './Modal';
+import ConfirmModal from './ConfirmModal';
 
 const LibraryView = () => {
     const { books, selectBook, createBook, deleteBook, user, uploadCover } = useData();
@@ -10,6 +11,7 @@ const LibraryView = () => {
     const [coverUrl, setCoverUrl] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, bookId: null });
 
     const filteredBooks = books.filter(b => 
         b.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -116,7 +118,7 @@ const LibraryView = () => {
                                             {/* Action Buttons */}
                                             <div className="w-full flex justify-end">
                                                 <button 
-                                                    onClick={(e) => { e.stopPropagation(); if(confirm('¿Seguro que quieres eliminar esta obra?')) deleteBook(book.id); }}
+                                                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({ isOpen: true, bookId: book.id }); }}
                                                     className="p-3 bg-red-500/90 hover:bg-red-600 text-white rounded-xl sm:transform sm:translate-y-[-20px] sm:group-hover:translate-y-0 transition-transform duration-300 shadow-lg"
                                                     title="Eliminar obra"
                                                 >
@@ -137,7 +139,7 @@ const LibraryView = () => {
                                         {/* Mobile-Only Delete/Menu trigger (Optional, but let's just make the overlay simpler) */}
                                         <div className="sm:hidden absolute top-2 right-2 z-30">
                                              <button 
-                                                onClick={(e) => { e.stopPropagation(); if(confirm('¿Seguro que quieres eliminar esta obra?')) deleteBook(book.id); }}
+                                                onClick={(e) => { e.stopPropagation(); setConfirmDelete({ isOpen: true, bookId: book.id }); }}
                                                 className="p-2 bg-black/40 backdrop-blur-md text-white rounded-lg active:bg-red-500 transition-colors shadow-lg border border-white/10"
                                             >
                                                 <Trash2 size={14} />
@@ -258,6 +260,15 @@ const LibraryView = () => {
                     </div>
                 </div>
             </Modal>
+
+            <ConfirmModal 
+                isOpen={confirmDelete.isOpen}
+                onClose={() => setConfirmDelete({ isOpen: false, bookId: null })}
+                onConfirm={() => deleteBook(confirmDelete.bookId)}
+                title="¿Eliminar esta obra?"
+                message="¿Estás seguro de que deseas eliminar para siempre esta obra maestra? Esta acción no se puede deshacer y perderás todo el progreso."
+                confirmText="Sí, eliminar definitivamente"
+            />
         </div>
     );
 };

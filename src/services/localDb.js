@@ -22,7 +22,6 @@ export const saveLightweightBackup = async (chapterId, content) => {
             createdAt: now,
             expiresAt
         });
-        console.log(`[IndexedDB] Backup local guardado para el capítulo ${chapterId} (${new Date(now).toLocaleTimeString()})`);
 
         // ... (rest of cleanup logic)
         const backups = await localDb.lightweightBackups

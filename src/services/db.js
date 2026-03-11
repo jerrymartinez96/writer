@@ -271,7 +271,7 @@ export const getChapters = async (bookId) => {
 /**
  * Atomic update for chapter content with sync token validation
  */
-export const updateChapterContent = async (bookId, chapterId, newContent, expectedToken = null) => {
+export const updateChapterContent = async (bookId, chapterId, newContent, expectedToken = null, activeEditorId = 'unknown') => {
     try {
         const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);
@@ -288,7 +288,10 @@ export const updateChapterContent = async (bookId, chapterId, newContent, expect
             transaction.update(chapterRef, {
                 content: compressData(newContent),
                 lastSyncToken: newToken,
-                updatedAt: serverTimestamp()
+                updatedAt: serverTimestamp(),
+                // Session Presence fields (Persistent Device ID)
+                lastEditTime: serverTimestamp(),
+                activeEditorId: activeEditorId 
             });
 
             transaction.update(bookRef, {
@@ -339,6 +342,37 @@ export const updateChapter = async (bookId, chapterId, updateData, expectedToken
             console.error("Error updating chapter metadata atomicly: ", error);
         }
         throw error;
+    }
+};
+
+export const claimChapterLock = async (bookId, chapterId, sessionId) => {
+    try {
+        const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
+        await setDoc(chapterRef, {
+            activeEditorId: sessionId,
+            lastEditTime: serverTimestamp()
+        }, { merge: true });
+        return true;
+    } catch (error) {
+        console.error("Error claiming lock:", error);
+        return false;
+    }
+};
+
+export const releaseChapterLock = async (bookId, chapterId, sessionId) => {
+    try {
+        const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
+        const chapDoc = await getDoc(chapterRef);
+        if (chapDoc.exists() && chapDoc.data().activeEditorId === sessionId) {
+            await setDoc(chapterRef, {
+                activeEditorId: null,
+                lastEditTime: serverTimestamp()
+            }, { merge: true });
+        }
+        return true;
+    } catch (error) {
+        console.error("Error releasing lock:", error);
+        return false;
     }
 };
 

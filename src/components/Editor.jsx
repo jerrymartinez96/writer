@@ -1,5 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -112,7 +112,7 @@ const Editor = () => {
     const { 
         chapters, activeChapter, saveChapterContent, characters, updateChapter, 
         activeView, selectChapter, setActiveView, setPromptStudioPreload,
-        finalizeChapterCleanup
+        finalizeChapterCleanup, chapterLock, claimLock, releaseLock
     } = useData();
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
@@ -344,7 +344,6 @@ const Editor = () => {
                 // 1. Trigger MAJOR backup preventively before erasing everything
                 const currentContent = editor.getHTML();
                 if (currentContent && currentContent !== '<p></p>') {
-                    console.log(`[Safety] Creating major backup before clipboard replacement.`);
                     await saveChapterSnapshot(activeChapter.id, currentContent);
                     toast.success("Respaldo de seguridad creado.");
                 }
@@ -671,12 +670,13 @@ const Editor = () => {
         }
     }, [activeChapter?.id, activeChapter?.lastSyncToken, editor]); 
 
-    // Handle Read-Only state for Focus Mode
+    // Handle Editable state (Focus Mode + Real-time Lock)
     useEffect(() => {
         if (editor) {
-            editor.setEditable(!isFocusMode);
+            const isEditable = !isFocusMode && !chapterLock.isLocked;
+            editor.setEditable(isEditable);
         }
-    }, [isFocusMode, editor]);
+    }, [isFocusMode, chapterLock.isLocked, editor]);
 
     // ===== Text-to-Speech Handlers =====
     const handleStopTTS = useCallback(() => {
@@ -789,6 +789,30 @@ const Editor = () => {
 
     return (
         <div className={`flex flex-col bg-[var(--bg-editor)] overflow-hidden transition-all duration-300 ${isFocusMode ? 'fixed inset-0 z-50' : 'w-full h-full'}`}>
+            {/* Multi-device Presence Banner */}
+            {chapterLock.isLocked && (
+                <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2 flex items-center justify-between animate-in slide-in-from-top duration-300">
+                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-sm font-medium">
+                        <Lock size={16} />
+                        <span>Este capítulo está siendo editado desde otro dispositivo.</span>
+                    </div>
+                    <button 
+                        onClick={() => claimLock()}
+                        className="text-xs bg-amber-500 text-white px-3 py-1 rounded-full font-bold hover:bg-amber-600 transition-colors shadow-sm flex items-center gap-1"
+                    >
+                        <Unlock size={12} />
+                        Tomar el control
+                    </button>
+                </div>
+            )}
+            
+            {!chapterLock.isLocked && chapterLock.activeEditorId && (
+                <div className="bg-indigo-500/10 border-b border-indigo-500/20 px-6 py-1 flex items-center gap-2 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
+                    <Check size={10} />
+                    <span>Tienes el control de edición en este dispositivo</span>
+                </div>
+            )}
+
             {/* Editor Toolbar */}
             {true && (
                 <>

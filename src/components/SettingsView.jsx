@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
 import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const SettingsView = () => {
     const { activeBook, updateBook, deleteBook, uploadCover } = useData();
@@ -11,6 +12,7 @@ const SettingsView = () => {
     const [coverUrl, setCoverUrl] = useState(activeBook?.coverUrl || '');
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef(null);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
@@ -147,11 +149,7 @@ const SettingsView = () => {
 
                         <button
                             type="button"
-                            onClick={() => {
-                                if(window.confirm("¿Estás seguro de que deseas eliminar para siempre esta obra maestra? Esta acción no se puede deshacer.")) {
-                                    deleteBook(activeBook.id);
-                                }
-                            }}
+                            onClick={() => setIsConfirmOpen(true)}
                             className="w-full sm:w-auto p-5 text-red-500 hover:bg-red-500/10 rounded-[24px] transition-all border-2 border-red-500/10 flex items-center justify-center gap-2 group"
                             title="Descartar obra definitivamente"
                         >
@@ -176,6 +174,16 @@ const SettingsView = () => {
                     </div>
                 </div>
             </div>
+
+            <ConfirmModal 
+                isOpen={isConfirmOpen}
+                onClose={() => setIsConfirmOpen(false)}
+                onConfirm={() => deleteBook(activeBook.id)}
+                title="¿Eliminar proyecto?"
+                message="Esta acción borrará todos los capítulos, personajes y notas de esta obra de forma permanente. ¿Estás seguro de que quieres continuar?"
+                confirmText="Sí, borrar libro"
+                type="danger"
+            />
         </div>
     );
 };
