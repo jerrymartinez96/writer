@@ -1,0 +1,419 @@
+@import "tailwindcss";
+
+@theme {
+  /* Color Palette - Refined Slate & Indigo */
+  --color-primary-50: #eef2ff;
+  --color-primary-100: #e0e7ff;
+  --color-primary-200: #c7d2fe;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+  --color-primary-700: #4338ca;
+  --color-primary-900: #312e81;
+
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-200: #e2e8f0;
+  --color-surface-300: #cbd5e1;
+  --color-surface-400: #94a3b8;
+  --color-surface-500: #64748b;
+  --color-surface-600: #475569;
+  --color-surface-700: #334155;
+  --color-surface-800: #1e293b;
+  --color-surface-900: #0f172a;
+  --color-surface-950: #020617;
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-serif: 'Merriweather', 'Georgia', serif;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+:root {
+  --bg-app: var(--color-surface-50);
+  --bg-sidebar: var(--color-surface-100);
+  --bg-editor: #ffffff;
+  --text-main: var(--color-surface-900);
+  --text-muted: var(--color-surface-500);
+  --border-main: var(--color-surface-200);
+  --accent-main: var(--color-primary-600);
+  --accent-soft: var(--color-primary-50);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+:root.dark,
+:root:not(.light) {
+  @media (prefers-color-scheme: dark) {
+    --bg-app: var(--color-surface-950);
+    --bg-sidebar: var(--color-surface-900);
+    --bg-editor: var(--color-surface-900);
+    --text-main: var(--color-surface-50);
+    --text-muted: var(--color-surface-400);
+    --border-main: var(--color-surface-800);
+    --accent-main: var(--color-primary-500);
+    --accent-soft: rgba(99, 102, 241, 0.1);
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  }
+}
+
+:root.dark {
+  --bg-app: var(--color-surface-950);
+  --bg-sidebar: var(--color-surface-900);
+  --bg-editor: var(--color-surface-900);
+  --text-main: var(--color-surface-50);
+  --text-muted: var(--color-surface-400);
+  --border-main: var(--color-surface-800);
+  --accent-main: var(--color-primary-500);
+  --accent-soft: rgba(99, 102, 241, 0.1);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* TipTap Editor Styles & Generic Prose */
+.ProseMirror,
+.prose {
+  outline: none;
+  font-family: inherit;
+  font-size: 1.25rem;
+  /* default fallback */
+  line-height: 1.8;
+  color: var(--text-main);
+}
+
+.ProseMirror {
+  min-height: 70vh;
+}
+
+/* Typography Scales */
+.prose-sm,
+.ProseMirror.prose-sm {
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.prose-base,
+.ProseMirror.prose-base {
+  font-size: 1.15rem;
+  line-height: 1.7;
+}
+
+.prose-lg,
+.ProseMirror.prose-lg {
+  font-size: 1.45rem;
+  line-height: 1.8;
+}
+
+.prose-xl,
+.ProseMirror.prose-xl {
+  font-size: 1.8rem;
+  line-height: 1.9;
+}
+
+.prose-2xl,
+.ProseMirror.prose-2xl {
+  font-size: 2.1rem;
+  line-height: 2;
+}
+
+.ProseMirror p,
+.prose p {
+  margin-bottom: 1.25em;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-muted) !important;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+  opacity: 0.5;
+}
+
+.ProseMirror {
+  padding-bottom: 8rem;
+  min-height: 100%;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.prose h1,
+.prose h2,
+.prose h3 {
+  font-family: inherit;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.025em;
+}
+
+.ProseMirror h1,
+.prose h1 {
+  font-size: 2.2em;
+}
+
+.ProseMirror h2,
+.prose h2 {
+  font-size: 1.8em;
+}
+
+.ProseMirror h3,
+.prose h3 {
+  font-size: 1.4em;
+}
+
+/* Custom Scrollbar for a cleaner UI */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 3D Flip Card Utilities */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Modo Zen (Focus Dynamic Writer Mode) */
+.editor-zen-mode .ProseMirror {
+  padding-top: 40vh;
+  padding-bottom: 50vh;
+}
+
+.editor-zen-mode .ProseMirror>*:not(.has-focus) {
+  opacity: 0.2;
+  transition: opacity 0.5s ease-in-out, filter 0.5s ease-in-out;
+  filter: blur(1.5px);
+}
+
+.editor-zen-mode .ProseMirror>.has-focus {
+  opacity: 1;
+  transition: opacity 0.3s ease-out, filter 0.3s ease-out;
+  filter: blur(0px);
+}
+
+/* ============================================
+   @ Mention Autocomplete Dropdown
+   ============================================ */
+.mention-dropdown {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  border-radius: 0.75rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 10px 24px -4px rgba(0, 0, 0, 0.15);
+  padding: 0.35rem;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 9999;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, transform 0.1s ease;
+  font-family: inherit;
+}
+
+.mention-item:hover,
+.mention-item.is-selected {
+  background: var(--accent-soft);
+}
+
+.mention-item.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--accent-main);
+}
+
+.mention-item-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, var(--accent-main), #a855f7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.mention-item-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mention-item-avatar span {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: white;
+  text-transform: uppercase;
+}
+
+.mention-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.mention-item-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-item-role {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mention-item-empty {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Mention Node Inline (Rendered in editor) */
+.character-mention-node {
+  color: var(--accent-main);
+  font-weight: 700;
+  background: var(--accent-soft);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border-bottom: 2px dashed color-mix(in srgb, var(--accent-main) 50%, transparent);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+  white-space: nowrap;
+}
+
+.character-mention-node:hover {
+  background: var(--accent-main);
+  color: white;
+  border-bottom-color: transparent;
+}
+
+.ghost-mention-node {
+  border-bottom: 2px dotted var(--accent-main);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0 1px;
+}
+
+.ghost-mention-node:hover {
+  background: var(--accent-soft);
+  border-bottom-style: solid;
+}
+
+/* Tippy.js box reset — remove default tippy arrow/border */
+.tippy-box[data-theme~='mention'] {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.tippy-box {
+  max-width: 350px !important;
+}
+
+/* ============================================
+   Inline Notes (Highlighted text with annotations)
+   ============================================ */
+.inline-note {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.2) 100%);
+  border-bottom: 2px solid rgba(245, 158, 11, 0.5);
+  padding: 1px 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  position: relative;
+}
+
+.inline-note:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(251, 191, 36, 0.35) 100%);
+  border-bottom-color: rgba(245, 158, 11, 0.8);
+}
+
+.inline-note::after {
+  content: '📌';
+  font-size: 0.55em;
+  position: relative;
+  top: -0.5em;
+  margin-left: 1px;
+}
+
+/* ============================================
+   Text-to-Speech Reading Highlight
+   ============================================ */
+.tts-reading-highlight {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.15) 100%);
+  border-left: 3px solid rgba(34, 197, 94, 0.6);
+  padding-left: 12px;
+  border-radius: 4px;
+  transition: background 0.4s ease, border-color 0.4s ease;
+}
