@@ -138,6 +138,7 @@ const Editor = () => {
     const [viewingNote, setViewingNote] = useState(null); // { noteId, noteText, highlightedText }
     const [isEditingNote, setIsEditingNote] = useState(false);
     const [editNoteText, setEditNoteText] = useState('');
+    const [isChapterInfoModalOpen, setIsChapterInfoModalOpen] = useState(false);
 
     // Refs to avoid stale closures in editor callbacks
     const charactersRef = useRef(characters);
@@ -177,6 +178,36 @@ const Editor = () => {
     const activeIndex = activeChapter ? orderedChapters.findIndex(c => c.id === activeChapter.id) : -1;
     const prevChapter = activeIndex > 0 ? orderedChapters[activeIndex - 1] : null;
     const nextChapter = activeIndex >= 0 && activeIndex < orderedChapters.length - 1 ? orderedChapters[activeIndex + 1] : null;
+
+    const activeChapterHeader = useMemo(() => {
+        if (!activeChapter || !chapters) return null;
+
+        let volumeLabel = '';
+        let chapterLabel = '';
+
+        // Find if it belongs to a volume
+        const parentVolume = chapters.find(c => c.id === activeChapter.parentId && c.isVolume);
+
+        // Count volumes for numbering - sort by orderIndex
+        const volumes = chapters.filter(c => c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+        if (parentVolume) {
+            const volIndex = volumes.findIndex(v => v.id === parentVolume.id);
+            volumeLabel = `Volumen ${volIndex + 1}: ${parentVolume.title}`;
+
+            // Count chapters in this volume
+            const chaptersInVol = chapters.filter(c => c.parentId === parentVolume.id).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+            const chapIndex = chaptersInVol.findIndex(c => c.id === activeChapter.id);
+            chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
+        } else {
+            // Standalone chapters
+            const standaloneChapters = chapters.filter(c => !c.parentId && !c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+            const chapIndex = standaloneChapters.findIndex(c => c.id === activeChapter.id);
+            chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
+        }
+
+        return { volumeLabel, chapterLabel };
+    }, [activeChapter, chapters]);
 
     const handleConvertGhostMention = (charId, text, pos) => {
         if (!editor) return;
@@ -843,6 +874,13 @@ const Editor = () => {
                                         <Volume2 size={16} />
                                     </button>
                                     <button
+                                        onClick={() => setIsChapterInfoModalOpen(true)}
+                                        className="hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
+                                        title="Información del Capítulo"
+                                    >
+                                        <Info size={12} />
+                                    </button>
+                                    <button
                                         onClick={() => setIsFocusMode(true)}
                                         className="hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
                                         title="Modo Lectura"
@@ -854,6 +892,13 @@ const Editor = () => {
                         ) : (
                             <div className="flex items-center justify-between p-2 px-3 md:px-6 w-full animate-in fade-in duration-300">
                                 <div className="flex items-center gap-1 sm:gap-2">
+                                    <button
+                                        onClick={() => setIsChapterInfoModalOpen(true)}
+                                        className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--bg-editor)] text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white hover:border-[var(--accent-main)] shadow-sm"
+                                        title="Información del Capítulo"
+                                    >
+                                        <Info size={12} />
+                                    </button>
                                     <button
                                         onClick={() => setIsReadingSettingsModalOpen(true)}
                                         className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white hover:border-[var(--accent-main)] shadow-sm"
@@ -905,34 +950,43 @@ const Editor = () => {
                     {!isFocusMode && (
                         <div className="flex md:hidden items-center justify-center gap-2 p-1.5 px-3 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/50">
                             {activeChapter && (
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
-                                    <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                                        activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
-                                            activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
-                                                'bg-gray-400/50'
-                                        }`}></div>
-                                    <select
-                                        className="bg-transparent text-[10px] font-bold text-[var(--text-main)] focus:outline-none cursor-pointer appearance-none pr-3 uppercase tracking-wider"
-                                        value={activeChapter.status || 'Idea'}
-                                        onChange={(e) => {
-                                            const newStatus = e.target.value;
-                                            updateChapter(activeChapter.id, { status: newStatus });
-                                            if (newStatus === 'Finalizado') {
-                                                confetti({
-                                                    particleCount: 150,
-                                                    spread: 70,
-                                                    origin: { y: 0.6 },
-                                                    colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
-                                                });
-                                            }
-                                        }}
+                                <>
+                                    <button
+                                        onClick={() => setIsChapterInfoModalOpen(true)}
+                                        className="p-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] text-[var(--accent-main)] hover:bg-[var(--accent-soft)] transition-all shadow-sm"
+                                        title="Información del Capítulo"
                                     >
-                                        <option value="Idea">Idea</option>
-                                        <option value="Borrador">Borrador</option>
-                                        <option value="Revisión">Revisión</option>
-                                        <option value="Finalizado">Finalizado</option>
-                                    </select>
-                                </div>
+                                        <Info size={16} />
+                                    </button>
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
+                                        <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
+                                            activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
+                                                activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
+                                                    'bg-gray-400/50'
+                                            }`}></div>
+                                        <select
+                                            className="bg-transparent text-[10px] font-bold text-[var(--text-main)] focus:outline-none cursor-pointer appearance-none pr-3 uppercase tracking-wider"
+                                            value={activeChapter.status || 'Idea'}
+                                            onChange={(e) => {
+                                                const newStatus = e.target.value;
+                                                updateChapter(activeChapter.id, { status: newStatus });
+                                                if (newStatus === 'Finalizado') {
+                                                    confetti({
+                                                        particleCount: 150,
+                                                        spread: 70,
+                                                        origin: { y: 0.6 },
+                                                        colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
+                                                    });
+                                                }
+                                            }}
+                                        >
+                                            <option value="Idea">Idea</option>
+                                            <option value="Borrador">Borrador</option>
+                                            <option value="Revisión">Revisión</option>
+                                            <option value="Finalizado">Finalizado</option>
+                                        </select>
+                                    </div>
+                                </>
                             )}
 
                             <button
@@ -1413,6 +1467,65 @@ const Editor = () => {
                     </div>
                 )}
             </Modal>
+
+            {/* Chapter Info Modal (Transparent Blur) */}
+            {isChapterInfoModalOpen && activeChapterHeader && (
+                <div
+                    className="fixed inset-0 z-[250] flex items-center justify-center p-6 bg-black/20 backdrop-blur-md animate-in fade-in duration-300"
+                    onClick={() => setIsChapterInfoModalOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-lg bg-[var(--bg-app)]/40 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] p-8 md:p-12 shadow-2xl animate-in zoom-in-95 duration-300 relative overflow-hidden group"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Decorative background elements */}
+                        <div className="absolute -top-24 -right-24 w-48 h-48 bg-[var(--accent-main)]/10 rounded-full blur-3xl group-hover:bg-[var(--accent-main)]/20 transition-all duration-1000"></div>
+                        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
+
+                        <button
+                            onClick={() => setIsChapterInfoModalOpen(false)}
+                            className="absolute top-6 right-6 p-2 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-white/10 rounded-full transition-all"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div className="relative z-10 text-center">
+                            {activeChapterHeader.volumeLabel && (
+                                <div className="text-sm font-black uppercase tracking-[0.4em] text-[var(--accent-main)] mb-6 opacity-80">
+                                    {activeChapterHeader.volumeLabel}
+                                </div>
+                            )}
+
+                            <div className="w-12 h-1 bg-[var(--accent-main)] mx-auto mb-8 opacity-40 rounded-full"></div>
+
+                            <h2 className="text-3xl md:text-5xl font-black font-serif text-[var(--text-main)] leading-tight tracking-tight mb-8">
+                                {activeChapterHeader.chapterLabel}
+                            </h2>
+
+                            <div className="flex justify-center items-center gap-6 text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                                <div className="flex items-center gap-2">
+                                    <BookOpen size={14} className="opacity-50" />
+                                    <span>{activeChapter?.content?.replace(/<[^>]*>/g, '').length || 0} Caracteres</span>
+                                </div>
+                                <div className="w-1.5 h-1.5 rounded-full bg-[var(--border-main)]"></div>
+                                <div className="flex items-center gap-2">
+                                    <Tag size={14} className="opacity-50" />
+                                    <span>Estado: {activeChapter.status || 'Borrador'}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-12 pt-8 border-t border-white/10 text-center">
+                            <button
+                                onClick={() => setIsChapterInfoModalOpen(false)}
+                                className="px-8 py-3 bg-[var(--accent-main)] hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-[var(--accent-main)]/20 hover:scale-105 active:scale-95"
+                            >
+                                Continuar Escribiendo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     )
 }
