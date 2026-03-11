@@ -260,11 +260,10 @@ export const saveChapterSnapshot = async (bookId, chapterId, content) => {
         // 1. Get existing snapshots
         const existingSnapshots = await getChapterSnapshots(bookId, chapterId);
 
-        // 2. Enforce Max 3 rule (FIFO). If we have 3, we need to delete the oldest (which is at the end because of 'desc' order)
-        // If we have more than 3 for some reason, we delete all excess.
-        if (existingSnapshots.length >= 3) {
-            // keep the 2 newest, delete the rest
-            const snapshotsToDelete = existingSnapshots.slice(2);
+        // 2. Enforce Max 5 rule (FIFO). If we have 5, we need to delete the oldest
+        if (existingSnapshots.length >= 5) {
+            // keep the 4 newest, delete the rest
+            const snapshotsToDelete = existingSnapshots.slice(4);
             for (const snap of snapshotsToDelete) {
                 await deleteDoc(doc(snapshotsRef, snap.id));
             }
@@ -279,6 +278,20 @@ export const saveChapterSnapshot = async (bookId, chapterId, content) => {
         return { id: docRef.id, content };
     } catch (error) {
         console.error("Error saving chapter snapshot: ", error);
+        throw error;
+    }
+};
+
+export const deleteAllChapterSnapshots = async (bookId, chapterId) => {
+    try {
+        const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
+        const snapshotsRef = collection(chapterRef, SNAPSHOTS_COLLECTION);
+        const querySnapshot = await getDocs(snapshotsRef);
+        const deletePromises = querySnapshot.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(deletePromises);
+        return true;
+    } catch (error) {
+        console.error("Error deleting all snapshots: ", error);
         throw error;
     }
 };

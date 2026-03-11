@@ -19,11 +19,13 @@ import {
     deleteWorldItem as deleteWorldItemApi,
     getChapterSnapshots as getChapterSnapshotsApi,
     saveChapterSnapshot as saveChapterSnapshotApi,
+    deleteAllChapterSnapshots as deleteAllSnapshotsApi,
     getUserProfile,
     createUserProfile,
     updateUserProfile as updateUserProfileApi
 } from '../services/db';
 import { uploadImageToCloudinary } from '../services/cloudinary';
+import { saveLightweightBackup, getLightweightBackups, clearChapterLightweightBackups } from '../services/localDb';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
@@ -43,9 +45,23 @@ export const DataProvider = ({ children }) => {
     const [activeView, setActiveView] = useState('editor'); // 'editor', 'characters', 'world', 'settings'
     const [promptStudioPreload, setPromptStudioPreload] = useState(null);
     const [loading, setLoading] = useState(true);
+    const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    // Online/Offline listener
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     const flushAllSaves = useCallback(async () => {
         const keys = Object.keys(pendingSaves.current);
@@ -331,6 +347,18 @@ export const DataProvider = ({ children }) => {
         };
     };
 
+    const finalizeChapterCleanup = async (chapterId) => {
+        if (!activeBook) return;
+        try {
+            await clearChapterLightweightBackups(chapterId);
+            await deleteAllSnapshotsApi(activeBook.id, chapterId);
+            return true;
+        } catch (error) {
+            console.error("Cleanup failed", error);
+            return false;
+        }
+    };
+
     const handleReorderChapters = async (orderedIds, parentId) => {
         if (!activeBook) return;
         // Update local state immediately for snappy UX
@@ -352,8 +380,53 @@ export const DataProvider = ({ children }) => {
         });
     };
 
+    const [syncConflict, setSyncConflict] = useState(null); // { local, cloud, chapterId }
+
+    const resolveSyncConflict = async (winner) => {
+        if (!syncConflict) return;
+        const { local, chapterId } = syncConflict;
+        
+        if (winner === 'local') {
+            // Update cloud with local content
+            const content = local.content;
+            setActiveChapter(prev => ({ ...prev, content }));
+            setChapters(prev => prev.map(ch => ch.id === chapterId ? { ...ch, content } : ch));
+            await updateChapterContent(activeBook.id, chapterId, content);
+        }
+        // If winner is 'cloud', we don't need to do anything as cloud is already loaded 
+        // in activeChapter (unless we want to clear local, but we keep it for safety)
+        
+        setSyncConflict(null);
+    };
+
     const handleSelectChapter = async (chapter) => {
         await flushAllSaves();
+        
+        if (chapter && isOnline) {
+            // Check for potential sync conflict
+            try {
+                const localBackups = await getLightweightBackups(chapter.id);
+                if (localBackups.length > 0) {
+                    const latestLocal = localBackups[0];
+                    const cloudTimestamp = chapter.updatedAt?.toDate ? chapter.updatedAt.toDate().getTime() : (chapter.updatedAt || 0);
+                    
+                    // If local is newer by more than 2 seconds (to avoid tiny clock skews)
+                    if (latestLocal.createdAt > (cloudTimestamp + 2000)) {
+                        // Check if content is actually different
+                        if (latestLocal.content !== chapter.content) {
+                            setSyncConflict({
+                                local: latestLocal,
+                                cloud: chapter,
+                                chapterId: chapter.id
+                            });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Conflict detection failed", err);
+            }
+        }
+
         setActiveChapter(chapter);
         setActiveView('editor');
         if (activeBook && chapter) {
@@ -463,10 +536,14 @@ export const DataProvider = ({ children }) => {
     // Auto-save for chapters
     const saveChapterContent = useCallback(async (content) => {
         if (!activeBook || !activeChapter) return;
+        
+        // 1. Update In-Memory State Immediately for UI responsiveness
         setActiveChapter(prev => ({ ...prev, content }));
         setChapters(prev => prev.map(ch => ch.id === activeChapter.id ? { ...ch, content } : ch));
 
         const saveKey = `chap_${activeChapter.id}`;
+        
+        // Cancel existing timer
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
@@ -474,15 +551,46 @@ export const DataProvider = ({ children }) => {
         const bookId = activeBook.id;
         const chapId = activeChapter.id;
 
+        // Detection logic for significant change (>15%)
+        const detectSignificantChange = (oldHtml, newHtml) => {
+            if (!oldHtml) return false;
+            const oldLen = oldHtml.replace(/<[^>]*>/g, '').length;
+            const newLen = newHtml.replace(/<[^>]*>/g, '').length;
+            if (oldLen === 0) return false;
+            const diffPercent = Math.abs(oldLen - newLen) / oldLen;
+            return diffPercent > 0.15;
+        };
+
+        // Define the save function (History + Cloud)
         const fn = async () => {
             delete pendingSaves.current[saveKey];
+            
+            // 1. Save to Local History (Always attempt, very fast)
+            try {
+                await saveLightweightBackup(chapId, content);
+            } catch (err) {
+                console.error("Local backup failed", err);
+            }
+
+            // 2. Save to Cloud (Main state)
             try {
                 await updateChapterContent(bookId, chapId, content);
+                
+                // 3. Significant change detection (>15%)
+                const lastMajor = lastMajorBackupContentRef.current[chapId] || activeChapter.content || '';
+                if (detectSignificantChange(lastMajor, content)) {
+                    console.log(`[Backup] Significant change detected (>15%). Triggering major backup.`);
+                    await saveChapterSnapshotApi(bookId, chapId, content);
+                    lastMajorBackupContentRef.current[chapId] = content;
+                }
+
+                console.log(`[Sync] Cloud save successful for chapter ${chapId}`);
             } catch (error) {
-                console.error("Failed to sync content", error);
+                console.warn("Cloud sync failed (possibly offline). Content is safe in Local History.", error);
             }
         };
 
+        // 2. Set new debounce timer (10s)
         pendingSaves.current[saveKey] = {
             timeoutId: setTimeout(fn, 10000),
             fn
@@ -571,6 +679,12 @@ export const DataProvider = ({ children }) => {
         promptStudioPreload,
         setPromptStudioPreload,
         reorderChapters: handleReorderChapters,
+        getLightweightBackups,
+        clearChapterLightweightBackups,
+        isOnline,
+        syncConflict,
+        resolveSyncConflict,
+        finalizeChapterCleanup,
         user,
         profile,
         authLoading,

@@ -1,9 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { 
+    initializeFirestore, 
+    persistentLocalCache, 
+    persistentMultipleTabManager 
+} from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 // TODO: Replace with your Firebase project configuration
-// These should be environment variables in a real app (.env.local)
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "YOUR_API_KEY",
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "YOUR_AUTH_DOMAIN",
@@ -16,6 +19,14 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// Initialize Firestore with robust persistence settings
+// BloomFilterError often happens due to misconfigured or corrupted persistent cache
+export const db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+    })
+});
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

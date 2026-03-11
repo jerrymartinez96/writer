@@ -1,5 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Wifi, WifiOff, Database } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -12,6 +12,8 @@ import { useData } from '../context/DataContext'
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Focus from '@tiptap/extension-focus'
 import createSuggestion from './MentionSuggestionConfig'
+import SyncConflictModal from './SyncConflictModal'
+import FinalizeModal from './FinalizeModal'
 
 const CharacterMention = Mark.create({
     name: 'characterMention',
@@ -108,7 +110,11 @@ const GhostMention = Mark.create({
 })
 
 const Editor = () => {
-    const { chapters, activeChapter, saveChapterContent, characters, updateChapter, activeView, selectChapter, setActiveView, setPromptStudioPreload } = useData();
+    const { 
+        chapters, activeChapter, saveChapterContent, characters, updateChapter, 
+        activeView, selectChapter, setActiveView, setPromptStudioPreload,
+        syncConflict, resolveSyncConflict, finalizeChapterCleanup, isOnline 
+    } = useData();
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
     const [readingFont, setReadingFont] = useState('font-[Arial,sans-serif]');
@@ -139,6 +145,7 @@ const Editor = () => {
     const [isEditingNote, setIsEditingNote] = useState(false);
     const [editNoteText, setEditNoteText] = useState('');
     const [isChapterInfoModalOpen, setIsChapterInfoModalOpen] = useState(false);
+    const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
 
     // Refs to avoid stale closures in editor callbacks
     const charactersRef = useRef(characters);
@@ -331,10 +338,18 @@ const Editor = () => {
     };
 
     const handleReplaceFromClipboard = async () => {
-        if (!editor) return;
+        if (!editor || !activeChapter) return;
         try {
             const text = await navigator.clipboard.readText();
             if (text) {
+                // 1. Trigger MAJOR backup preventively before erasing everything
+                const currentContent = editor.getHTML();
+                if (currentContent && currentContent !== '<p></p>') {
+                    console.log(`[Safety] Creating major backup before clipboard replacement.`);
+                    await saveChapterSnapshot(activeChapter.id, currentContent);
+                    toast.success("Respaldo de seguridad creado.");
+                }
+
                 let htmlContent = '';
                 if (text.includes('<p>') || text.includes('<h1>')) {
                     htmlContent = text;
@@ -444,6 +459,53 @@ const Editor = () => {
         setViewingNote(prev => ({ ...prev, noteText: editNoteText.trim() }));
         setIsEditingNote(false);
         toast.success('Nota actualizada.');
+    };
+
+    const handleStatusChange = (newStatus) => {
+        if (!activeChapter) return;
+        
+        if (newStatus === 'Finalizado') {
+            setIsFinalizeModalOpen(true);
+        } else {
+            updateChapter(activeChapter.id, { status: newStatus });
+            if (newStatus === 'Completado') {
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#10b981', '#34d399', '#6ee7b7']
+                });
+            }
+        }
+    };
+
+    const confirmFinalize = async (shouldCleanup) => {
+        if (!activeChapter) return;
+        
+        try {
+            // 1. Update status in cloud
+            await updateChapter(activeChapter.id, { status: 'Finalizado' });
+            
+            // 2. Perform cleanup if selected
+            if (shouldCleanup) {
+                await finalizeChapterCleanup(activeChapter.id);
+                toast.success("Capítulo finalizado y respaldos optimizados.");
+            } else {
+                toast.success("Capítulo marcado como finalizado.");
+            }
+            
+            // 3. Visual Effects
+            confetti({
+                particleCount: 200,
+                spread: 90,
+                origin: { y: 0.6 },
+                colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
+            });
+        } catch (error) {
+            toast.error("Error al finalizar el capítulo.");
+        } finally {
+            setIsFinalizeModalOpen(false);
+        }
     };
 
     const handleSendToPromptStudio = () => {
@@ -825,6 +887,22 @@ const Editor = () => {
 
                                 {/* Right: History (all screens) + Status (desktop only) + Focus toggle */}
                                 <div className="flex items-center gap-1.5 shrink-0">
+                                    {/* Connectivity Badges */}
+                                    <div className="hidden lg:flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] shrink-0 grayscale hover:grayscale-0 transition-all cursor-help"
+                                         title={isOnline ? "Conectado a la nube. Sincronización activa." : "Modo Offline activo. Los cambios se guardan localmente hasta recuperar la red."}
+                                    >
+                                        <div className="relative">
+                                            {isOnline ? (
+                                                <Wifi size={12} className="text-emerald-500" />
+                                            ) : (
+                                                <WifiOff size={12} className="text-amber-500" />
+                                            )}
+                                        </div>
+                                        <div className="w-[1px] h-3 bg-[var(--border-main)]"></div>
+                                        <Database size={12} className="text-indigo-400" />
+                                        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter">Sync Local</span>
+                                    </div>
+
                                     {activeChapter && (
                                         <button
                                             onClick={() => setIsHistoryModalOpen(true)}
@@ -837,30 +915,21 @@ const Editor = () => {
                                     )}
                                     {activeChapter && (
                                         <div className="hidden md:flex items-center gap-2 px-2.5 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
-                                            <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                                                activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
-                                                    activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
-                                                        'bg-gray-400/50'
-                                                }`}></div>
+                                            <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.6)]' :
+                                                activeChapter.status === 'Completado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
+                                                    activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
+                                                        activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
+                                                            'bg-gray-400/50'
+                                                 }`}></div>
                                             <select
                                                 className="bg-transparent text-[var(--text-main)] text-[11px] font-bold focus:outline-none cursor-pointer appearance-none pr-4 uppercase tracking-wider"
                                                 value={activeChapter.status || 'Idea'}
-                                                onChange={(e) => {
-                                                    const newStatus = e.target.value;
-                                                    updateChapter(activeChapter.id, { status: newStatus });
-                                                    if (newStatus === 'Finalizado') {
-                                                        confetti({
-                                                            particleCount: 150,
-                                                            spread: 70,
-                                                            origin: { y: 0.6 },
-                                                            colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
-                                                        });
-                                                    }
-                                                }}
+                                                onChange={(e) => handleStatusChange(e.target.value)}
                                             >
                                                 <option value="Idea">Idea</option>
                                                 <option value="Borrador">Borrador</option>
                                                 <option value="Revisión">Revisión</option>
+                                                <option value="Completado">Completado</option>
                                                 <option value="Finalizado">Finalizado</option>
                                             </select>
                                         </div>
@@ -878,7 +947,7 @@ const Editor = () => {
                                         className="hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
                                         title="Información del Capítulo"
                                     >
-                                        <Info size={12} />
+                                        <Info size={16} />
                                     </button>
                                     <button
                                         onClick={() => setIsFocusMode(true)}
@@ -959,30 +1028,21 @@ const Editor = () => {
                                         <Info size={16} />
                                     </button>
                                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
-                                        <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                                            activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
-                                                activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
-                                                    'bg-gray-400/50'
+                                        <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.6)]' :
+                                            activeChapter.status === 'Completado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
+                                                activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
+                                                    activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
+                                                        'bg-gray-400/50'
                                             }`}></div>
                                         <select
                                             className="bg-transparent text-[10px] font-bold text-[var(--text-main)] focus:outline-none cursor-pointer appearance-none pr-3 uppercase tracking-wider"
                                             value={activeChapter.status || 'Idea'}
-                                            onChange={(e) => {
-                                                const newStatus = e.target.value;
-                                                updateChapter(activeChapter.id, { status: newStatus });
-                                                if (newStatus === 'Finalizado') {
-                                                    confetti({
-                                                        particleCount: 150,
-                                                        spread: 70,
-                                                        origin: { y: 0.6 },
-                                                        colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
-                                                    });
-                                                }
-                                            }}
+                                            onChange={(e) => handleStatusChange(e.target.value)}
                                         >
                                             <option value="Idea">Idea</option>
                                             <option value="Borrador">Borrador</option>
                                             <option value="Revisión">Revisión</option>
+                                            <option value="Completado">Completado</option>
                                             <option value="Finalizado">Finalizado</option>
                                         </select>
                                     </div>
@@ -1526,6 +1586,18 @@ const Editor = () => {
                     </div>
                 </div>
             )}
+
+            <SyncConflictModal 
+                isOpen={!!syncConflict} 
+                conflict={syncConflict} 
+                onResolve={resolveSyncConflict} 
+            />
+
+            <FinalizeModal 
+                isOpen={isFinalizeModalOpen} 
+                onClose={() => setIsFinalizeModalOpen(false)} 
+                onConfirm={confirmFinalize} 
+            />
         </div >
     )
 }
