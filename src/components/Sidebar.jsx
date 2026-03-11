@@ -74,7 +74,8 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
 
     const getStatusColor = (status) => {
         switch (status) {
-            case 'Finalizado': return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]';
+            case 'Finalizado': return 'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.5)]';
+            case 'Completado': return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]';
             case 'Revisión': return 'bg-amber-500';
             case 'Borrador': return 'bg-blue-500';
             case 'Idea': default: return 'bg-gray-400 opacity-50';

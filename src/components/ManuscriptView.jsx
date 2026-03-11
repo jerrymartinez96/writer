@@ -18,7 +18,18 @@ const ManuscriptView = () => {
 
     // Filter data
     const volumes = chapters.filter(c => c.isVolume);
+    // Standalone chapters
     const standaloneChapters = chapters.filter(c => !c.parentId && !c.isVolume);
+
+    const getStatusBorderColor = (status) => {
+        switch (status) {
+            case 'Finalizado': return 'border-l-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.15)]';
+            case 'Completado': return 'border-l-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.15)]';
+            case 'Revisión': return 'border-l-amber-500';
+            case 'Borrador': return 'border-l-blue-500';
+            case 'Idea': default: return 'border-l-gray-300 dark:border-l-gray-700';
+        }
+    };
 
     const getVolumeLabels = () => {
         const labels = {};
@@ -186,7 +197,7 @@ const ManuscriptView = () => {
                                         selectChapter(chap);
                                         setActiveView('editor');
                                     }}
-                                    className={`group bg-[var(--bg-app)] border border-[var(--border-main)] p-5 rounded-xl hover:border-[var(--accent-main)] cursor-pointer transition-all flex flex-col shadow-sm border-l-4 border-l-emerald-500 h-32 ${isEmpty ? 'opacity-50 hover:opacity-100' : ''}`}
+                                    className={`group bg-[var(--bg-app)] border border-[var(--border-main)] p-5 rounded-xl hover:border-[var(--accent-main)] cursor-pointer transition-all flex flex-col shadow-sm border-l-4 ${getStatusBorderColor(chap.status)} h-32 ${isEmpty ? 'opacity-50 hover:opacity-100' : ''}`}
                                 >
                                     <div className="flex justify-between items-center mb-3 shrink-0">
                                         <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
@@ -278,7 +289,7 @@ const ManuscriptView = () => {
                                                 selectChapter(chap);
                                                 setActiveView('editor');
                                             }}
-                                            className={`group bg-[var(--bg-app)] border border-[var(--border-main)] p-5 rounded-xl hover:border-[var(--accent-main)] cursor-pointer transition-all flex flex-col shadow-sm border-l-4 border-l-emerald-500 h-32 ${isEmpty ? 'opacity-50 hover:opacity-100' : ''}`}
+                                            className={`group bg-[var(--bg-app)] border border-[var(--border-main)] p-5 rounded-xl hover:border-[var(--accent-main)] cursor-pointer transition-all flex flex-col shadow-sm border-l-4 ${getStatusBorderColor(chap.status)} h-32 ${isEmpty ? 'opacity-50 hover:opacity-100' : ''}`}
                                         >
                                             <div className="flex justify-between items-center mb-3 shrink-0">
                                                 <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">

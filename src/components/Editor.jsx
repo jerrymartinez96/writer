@@ -112,7 +112,7 @@ const Editor = () => {
     const { 
         chapters, activeChapter, saveChapterContent, characters, updateChapter, 
         activeView, selectChapter, setActiveView, setPromptStudioPreload,
-        finalizeChapterCleanup, chapterLock, claimLock, releaseLock
+        finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot
     } = useData();
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
