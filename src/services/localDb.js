@@ -1,16 +1,15 @@
 import Dexie from 'dexie';
+import { compressData, decompressData } from './compression';
 
 export const localDb = new Dexie('WriterLocalDB');
 
-// Define the database schema
+// ... (schema stays same)
 localDb.version(1).stores({
     lightweightBackups: '++id, chapterId, createdAt, expiresAt'
 });
 
 /**
  * Saves a new lightweight backup for a chapter.
- * @param {string} chapterId 
- * @param {string} content 
  */
 export const saveLightweightBackup = async (chapterId, content) => {
     const now = Date.now();
@@ -19,12 +18,13 @@ export const saveLightweightBackup = async (chapterId, content) => {
     try {
         await localDb.lightweightBackups.add({
             chapterId,
-            content,
+            content: compressData(content),
             createdAt: now,
             expiresAt
         });
+        console.log(`[IndexedDB] Backup local guardado para el capítulo ${chapterId} (${new Date(now).toLocaleTimeString()})`);
 
-        // Cleanup: Keep only the last 30 backups for this chapter
+        // ... (rest of cleanup logic)
         const backups = await localDb.lightweightBackups
             .where('chapterId')
             .equals(chapterId)
@@ -36,7 +36,6 @@ export const saveLightweightBackup = async (chapterId, content) => {
             await localDb.lightweightBackups.bulkDelete(idsToDelete);
         }
 
-        // Periodic Cleanup: Remove expired backups from ANY chapter
         await localDb.lightweightBackups
             .where('expiresAt')
             .below(now)
@@ -49,16 +48,19 @@ export const saveLightweightBackup = async (chapterId, content) => {
 
 /**
  * Retrieves lightweight backups for a chapter, sorted by newest first.
- * @param {string} chapterId 
- * @returns {Promise<Array>}
  */
 export const getLightweightBackups = async (chapterId) => {
     try {
-        return await localDb.lightweightBackups
+        const backups = await localDb.lightweightBackups
             .where('chapterId')
             .equals(chapterId)
             .reverse()
             .sortBy('createdAt');
+        
+        return backups.map(b => ({
+            ...b,
+            content: decompressData(b.content)
+        }));
     } catch (error) {
         console.error('Error getting lightweight backups from IndexedDB:', error);
         return [];

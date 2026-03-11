@@ -15,7 +15,7 @@ import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut } from '
 import { useState, useEffect } from 'react'
 
 function AppContent() {
-  const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook } = useData();
+  const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, isOnline } = useData();
   const [isBookModalOpen, setIsBookModalOpen] = useState(false);
   const [newBookTitle, setNewBookTitle] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -208,10 +208,17 @@ function AppContent() {
           <div className="flex items-center gap-3 sm:gap-6 shrink-0">
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-black opacity-50">Sincronización</span>
-              <span className="text-[10px] text-green-500 font-black uppercase flex items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                En la nube
-              </span>
+              {isOnline ? (
+                <span className="text-[10px] text-green-500 font-black uppercase flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                  En la nube
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-500 font-black uppercase flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                  Modo Offline
+                </span>
+              )}
             </div>
 
             <button

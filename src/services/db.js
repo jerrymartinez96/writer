@@ -10,13 +10,24 @@ import {
     query,
     orderBy,
     where,
-    setDoc
+    setDoc,
+    runTransaction
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { compressData, decompressData } from './compression';
 
 const BOOKS_COLLECTION = 'books';
 const CHAPTERS_COLLECTION = 'chapters';
 const USERS_COLLECTION = 'users';
+
+// Utility to generate sync tokens
+const generateSyncToken = () => {
+    try {
+        return window.crypto.randomUUID();
+    } catch (e) {
+        return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    }
+};
 
 // --- PROFILES / USERS ---
 
@@ -146,18 +157,47 @@ export const createChapter = async (bookId, itemData) => {
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);
         const chaptersRef = collection(bookRef, CHAPTERS_COLLECTION);
 
+        const newSyncToken = generateSyncToken();
+
         const docRef = await addDoc(chaptersRef, {
             ...itemData,
-            content: itemData.content || '', // Empty initial content
+            content: compressData(itemData.content || ''),
             status: itemData.status || 'Idea',
             povCharacterId: itemData.povCharacterId || null,
+            lastSyncToken: newSyncToken,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
 
-        return { id: docRef.id, ...itemData, content: itemData.content || '' };
+        return { 
+            id: docRef.id, 
+            ...itemData, 
+            content: itemData.content || '',
+            lastSyncToken: newSyncToken 
+        };
     } catch (error) {
         console.error("Error creating chapter: ", error);
+        throw error;
+    }
+};
+
+export const getChapter = async (bookId, chapterId) => {
+    try {
+        const bookRef = doc(db, BOOKS_COLLECTION, bookId);
+        const chapterRef = doc(bookRef, CHAPTERS_COLLECTION, chapterId);
+        const docSnap = await getDoc(chapterRef);
+
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            return {
+                id: docSnap.id,
+                ...data,
+                content: decompressData(data.content || '')
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error("Error getting single chapter: ", error);
         throw error;
     }
 };
@@ -168,54 +208,101 @@ export const getChapters = async (bookId) => {
         const q = query(collection(bookRef, CHAPTERS_COLLECTION), orderBy('orderIndex', 'asc'));
         const querySnapshot = await getDocs(q);
 
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
+        return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                content: decompressData(data.content || '')
+            };
+        });
     } catch (error) {
         console.error("Error getting chapters: ", error);
         throw error;
     }
 };
 
-export const updateChapterContent = async (bookId, chapterId, newContent) => {
+/**
+ * Atomic update for chapter content with sync token validation
+ */
+export const updateChapterContent = async (bookId, chapterId, newContent, expectedToken = null) => {
     try {
         const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
-        await updateDoc(chapterRef, {
-            content: newContent,
-            updatedAt: serverTimestamp()
-        });
-
-        // Also update the book's updatedAt timestamp
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);
-        await updateDoc(bookRef, {
-            updatedAt: serverTimestamp()
+        const newToken = generateSyncToken();
+
+        await runTransaction(db, async (transaction) => {
+            const chapDoc = await transaction.get(chapterRef);
+            if (!chapDoc.exists()) throw new Error("Chapter does not exist");
+
+            const currentToken = chapDoc.data().lastSyncToken;
+
+            // If a token was expected and it doesn't match, we have a sync conflict
+            if (expectedToken && currentToken !== expectedToken) {
+                const error = new Error("Sync conflict detected");
+                error.code = 'SYNC_CONFLICT';
+                error.serverData = chapDoc.data();
+                throw error;
+            }
+
+            transaction.update(chapterRef, {
+                content: compressData(newContent),
+                lastSyncToken: newToken,
+                updatedAt: serverTimestamp()
+            });
+
+            transaction.update(bookRef, {
+                updatedAt: serverTimestamp()
+            });
         });
 
-        return true;
+        return newToken;
     } catch (error) {
-        console.error("Error updating chapter content: ", error);
+        if (error.code !== 'SYNC_CONFLICT') {
+            console.error("Error updating chapter content atomicly: ", error);
+        }
         throw error;
     }
 };
 
-export const updateChapter = async (bookId, chapterId, updateData) => {
+/**
+ * Atomic update for chapter metadata with sync token validation
+ */
+export const updateChapter = async (bookId, chapterId, updateData, expectedToken = null) => {
     try {
         const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
-        await updateDoc(chapterRef, {
-            ...updateData,
-            updatedAt: serverTimestamp()
-        });
-
-        // Also update the book's updatedAt timestamp
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);
-        await updateDoc(bookRef, {
-            updatedAt: serverTimestamp()
+        const newToken = generateSyncToken();
+
+        await runTransaction(db, async (transaction) => {
+            const chapDoc = await transaction.get(chapterRef);
+            if (!chapDoc.exists()) throw new Error("Chapter does not exist");
+
+            const currentToken = chapDoc.data().lastSyncToken;
+
+            if (expectedToken && currentToken !== expectedToken) {
+                const error = new Error("Sync conflict detected");
+                error.code = 'SYNC_CONFLICT';
+                error.serverData = chapDoc.data();
+                throw error;
+            }
+
+            transaction.update(chapterRef, {
+                ...updateData,
+                lastSyncToken: newToken,
+                updatedAt: serverTimestamp()
+            });
+
+            transaction.update(bookRef, {
+                updatedAt: serverTimestamp()
+            });
         });
 
-        return true;
+        return newToken;
     } catch (error) {
-        console.error("Error updating chapter metadata: ", error);
+        if (error.code !== 'SYNC_CONFLICT') {
+            console.error("Error updating chapter metadata atomicly: ", error);
+        }
         throw error;
     }
 };
@@ -242,10 +329,14 @@ export const getChapterSnapshots = async (bookId, chapterId) => {
         const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
         const q = query(collection(chapterRef, SNAPSHOTS_COLLECTION), orderBy('createdAt', 'desc'));
         const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
+        return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                content: decompressData(data.content || '')
+            };
+        });
     } catch (error) {
         console.error("Error getting chapter snapshots: ", error);
         throw error;
@@ -271,7 +362,7 @@ export const saveChapterSnapshot = async (bookId, chapterId, content) => {
 
         // 3. Add the new snapshot
         const docRef = await addDoc(snapshotsRef, {
-            content,
+            content: compressData(content),
             createdAt: serverTimestamp(),
         });
 

@@ -1,5 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Wifi, WifiOff, Database } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -887,22 +887,6 @@ const Editor = () => {
 
                                 {/* Right: History (all screens) + Status (desktop only) + Focus toggle */}
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    {/* Connectivity Badges */}
-                                    <div className="hidden lg:flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] shrink-0 grayscale hover:grayscale-0 transition-all cursor-help"
-                                         title={isOnline ? "Conectado a la nube. Sincronización activa." : "Modo Offline activo. Los cambios se guardan localmente hasta recuperar la red."}
-                                    >
-                                        <div className="relative">
-                                            {isOnline ? (
-                                                <Wifi size={12} className="text-emerald-500" />
-                                            ) : (
-                                                <WifiOff size={12} className="text-amber-500" />
-                                            )}
-                                        </div>
-                                        <div className="w-[1px] h-3 bg-[var(--border-main)]"></div>
-                                        <Database size={12} className="text-indigo-400" />
-                                        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter">Sync Local</span>
-                                    </div>
-
                                     {activeChapter && (
                                         <button
                                             onClick={() => setIsHistoryModalOpen(true)}
