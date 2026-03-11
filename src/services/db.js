@@ -202,6 +202,35 @@ export const getChapter = async (bookId, chapterId) => {
     }
 };
 
+/**
+ * Fetches only chapter metadata (title, order, pov, etc.) without the heavy content.
+ * Used for initial sidebar load to save bandwidth.
+ */
+export const getChaptersMetadata = async (bookId) => {
+    try {
+        const bookRef = doc(db, BOOKS_COLLECTION, bookId);
+        // We still fetch the whole document because Firestore doesn't support field exclusion,
+        // but we avoid the CPU-intensive decompression here.
+        // NOTE: In a more advanced version, content should be in a separate sub-collection.
+        const q = query(collection(bookRef, CHAPTERS_COLLECTION), orderBy('orderIndex', 'asc'));
+        const querySnapshot = await getDocs(q);
+
+        return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            const { content, ...metadata } = data; // Destructure to exclude content
+            return {
+                id: doc.id,
+                ...metadata,
+                hasContent: !!content,
+                isLoaded: false // Flag to indicate content hasn't been fetched/decompressed yet
+            };
+        });
+    } catch (error) {
+        console.error("Error getting chapters metadata: ", error);
+        throw error;
+    }
+};
+
 export const getChapters = async (bookId) => {
     try {
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);

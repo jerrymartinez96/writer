@@ -1,18 +1,30 @@
+import { lazy, Suspense, useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
-import Editor from './components/Editor'
-import CharactersView from './components/CharactersView'
-import WorldView from './components/WorldView'
-import SettingsView from './components/SettingsView'
-import PromptStudioView from './components/PromptStudioView'
-import ManuscriptView from './components/ManuscriptView'
-import TrashView from './components/TrashView'
 import CommandPalette from './components/CommandPalette'
 import Modal from './components/Modal'
 import Login from './components/Login'
-import LibraryView from './components/LibraryView'
 import { DataProvider, useData } from './context/DataContext'
-import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2 } from 'lucide-react'
+
+// Lazy loaded views
+const Editor = lazy(() => import('./components/Editor'))
+const CharactersView = lazy(() => import('./components/CharactersView'))
+const WorldView = lazy(() => import('./components/WorldView'))
+const SettingsView = lazy(() => import('./components/SettingsView'))
+const PromptStudioView = lazy(() => import('./components/PromptStudioView'))
+const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
+const TrashView = lazy(() => import('./components/TrashView'))
+const LibraryView = lazy(() => import('./components/LibraryView'))
+
+const LoadingScreen = () => (
+  <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
+    <div className="relative">
+      <div className="absolute inset-0 bg-indigo-500/20 blur-3xl rounded-full"></div>
+      <Loader2 className="animate-spin text-indigo-500 relative z-10" size={48} strokeWidth={1.5} />
+    </div>
+    <span className="mt-6 text-[10px] font-black uppercase tracking-[0.3em] opacity-50">Cargando Módulo</span>
+  </div>
+);
 
 function AppContent() {
   const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, isOnline } = useData();
@@ -138,7 +150,9 @@ function AppContent() {
           </div>
         </header>
         <div className="flex-1 overflow-y-auto">
-          <LibraryView />
+          <Suspense fallback={<LoadingScreen />}>
+            <LibraryView />
+          </Suspense>
         </div>
       </div>
     );
@@ -286,7 +300,9 @@ function AppContent() {
         {/* View Transitioning Container */}
         <div className="flex-1 min-h-0 overflow-hidden relative">
           <div className="absolute inset-0 overflow-y-auto scrollbar-hide">
-            {renderActiveView()}
+            <Suspense fallback={<LoadingScreen />}>
+              {renderActiveView()}
+            </Suspense>
           </div>
         </div>
       </main>

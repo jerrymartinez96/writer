@@ -5,6 +5,7 @@ import {
     updateBook as updateBookApi,
     deleteBook as deleteBookApi,
     getChapters,
+    getChaptersMetadata,
     createChapter as createChapterApi,
     updateChapter as updateChapterApi,
     deleteChapter as deleteChapterApi,
@@ -30,6 +31,7 @@ import { uploadImageToCloudinary } from '../services/cloudinary';
 import { saveLightweightBackup, getLightweightBackups, clearChapterLightweightBackups } from '../services/localDb';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import DOMPurify from 'dompurify';
 
 const DataContext = createContext();
 
@@ -53,6 +55,15 @@ export const DataProvider = ({ children }) => {
     const [profile, setProfile] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    // XSS Protection - Sanitize HTML content
+    const sanitizeHtml = useCallback((html) => {
+        if (!html) return '';
+        return DOMPurify.sanitize(html, {
+            ALLOWED_TAGS: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'span', 'strong', 'em', 'u', 's', 'a', 'br', 'blockquote', 'pre', 'code', 'mark', 'img'],
+            ALLOWED_ATTR: ['href', 'title', 'target', 'src', 'alt', 'width', 'height', 'style', 'class', 'data-type', 'data-id']
+        });
+    }, []);
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -106,6 +117,11 @@ export const DataProvider = ({ children }) => {
                                     isTokenConflict: false
                                 });
                              }
+                        } else if (latestLocal.content !== cloudChapter.content) {
+                            // PROACTIVE SYNC: Same token, but local content is newer/different
+                            // Let's force a cloud save to unify states
+                            console.log("[Sync] Proactive sync: Local content is different, pushing to cloud...");
+                            saveChapterContent(latestLocal.content);
                         }
                     }
                 } catch (err) {
@@ -213,8 +229,8 @@ export const DataProvider = ({ children }) => {
 
         setLoading(true);
         try {
-            // Load Chapters
-            const allChapters = await getChapters(book.id);
+            // Load Chapters Metadata (Optimized initial load)
+            const allChapters = await getChaptersMetadata(book.id);
             const fetchedChapters = allChapters.filter(c => !c.deletedAt);
             const trashChaps = allChapters.filter(c => c.deletedAt).map(c => ({ ...c, collectionType: 'chapters' }));
             setChapters(fetchedChapters);
@@ -477,7 +493,7 @@ export const DataProvider = ({ children }) => {
             // Cloud version wins
             // Backend already has the right content, we just need to load it locally
             // IMPORTANT: Since 'cloud' in syncConflict comes from Firestore, it is COMPRESSED.
-            const cloudContent = decompressData(cloud.content);
+            const cloudContent = sanitizeHtml(decompressData(cloud.content));
             const updatedChapter = { ...cloud, content: cloudContent };
             
             setActiveChapter(updatedChapter);
@@ -490,23 +506,43 @@ export const DataProvider = ({ children }) => {
 
     const handleSelectChapter = async (chapter) => {
         await flushAllSaves();
+
+        let chapterToActivate = chapter;
+
+        // LAZY LOAD: If chapter exists but content is not loaded, fetch it now
+        if (chapter && !chapter.isLoaded && isOnline) {
+            try {
+                const fullChapter = await getChapter(activeBook.id, chapter.id);
+                if (fullChapter) {
+                    const safeContent = sanitizeHtml(fullChapter.content);
+                    chapterToActivate = { ...fullChapter, content: safeContent, isLoaded: true };
+                    // Update master list with the now-loaded chapter (prevents re-fetching)
+                    setChapters(prev => prev.map(ch => ch.id === chapter.id ? chapterToActivate : ch));
+                }
+            } catch (error) {
+                console.error("Lazy loading failed, using metadata-only chapter", error);
+            }
+        }
         
-        if (chapter && isOnline) {
+        setActiveChapter(chapterToActivate);
+        const activeItem = chapterToActivate; // Alias for logic below
+
+        if (activeItem && isOnline) {
             // Check for potential sync conflict
             try {
-                const localBackups = await getLightweightBackups(chapter.id);
+                const localBackups = await getLightweightBackups(activeItem.id);
                 if (localBackups.length > 0) {
                     const latestLocal = localBackups[0];
-                    const cloudTimestamp = chapter.updatedAt?.toDate ? chapter.updatedAt.toDate().getTime() : (chapter.updatedAt || 0);
-                    
+                    const cloudTimestamp = activeItem.updatedAt?.toDate ? activeItem.updatedAt.toDate().getTime() : (activeItem.updatedAt || 0);
+
                     // If local is newer by more than 2 seconds (to avoid tiny clock skews)
                     if (latestLocal.createdAt > (cloudTimestamp + 2000)) {
                         // Check if content is actually different
-                        if (latestLocal.content !== chapter.content) {
+                        if (latestLocal.content !== activeItem.content) {
                             setSyncConflict({
                                 local: latestLocal,
-                                cloud: chapter,
-                                chapterId: chapter.id
+                                cloud: activeItem,
+                                chapterId: activeItem.id
                             });
                         }
                     }

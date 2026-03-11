@@ -653,7 +653,7 @@ const Editor = () => {
                     });
                 });
 
-                if (hasChanges) {
+                if (hasChanges && editor && !editor.isDestroyed && editor.view) {
                     editor.view.dispatch(tr.setMeta('addToHistory', false));
                 }
             }, 1500);
@@ -728,6 +728,7 @@ const Editor = () => {
         window.speechSynthesis.cancel();
 
         // Extract paragraphs from editor DOM
+        if (!editor || !editor.view?.dom) return;
         const editorDom = editor.view.dom;
         const blocks = editorDom.querySelectorAll('p, h1, h2, h3');
         const paragraphs = Array.from(blocks)
@@ -772,7 +773,7 @@ const Editor = () => {
 
     // Update typography classes dynamically when size changes
     useEffect(() => {
-        if (!editor) return;
+        if (!editor || editor.isDestroyed || !editor.view?.dom) return;
         const sizeClass = readingTextSize === 'sm' ? 'prose-sm' :
             readingTextSize === 'lg' ? 'prose-lg' :
                 readingTextSize === 'xl' ? 'prose-xl' :
