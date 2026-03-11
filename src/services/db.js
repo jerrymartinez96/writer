@@ -11,7 +11,8 @@ import {
     orderBy,
     where,
     setDoc,
-    runTransaction
+    runTransaction,
+    onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { compressData, decompressData } from './compression';
@@ -181,6 +182,22 @@ export const createChapter = async (bookId, itemData) => {
     }
 };
 
+export const subscribeToChapter = (bookId, chapterId, onUpdate) => {
+    const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
+    return onSnapshot(chapterRef, (docSnap) => {
+        if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
+            const data = docSnap.data();
+            onUpdate({
+                id: docSnap.id,
+                ...data,
+                content: decompressData(data.content || '')
+            });
+        }
+    }, (error) => {
+        console.error("Error subscribing to chapter: ", error);
+    });
+};
+
 export const getChapter = async (bookId, chapterId) => {
     try {
         const bookRef = doc(db, BOOKS_COLLECTION, bookId);
@@ -266,13 +283,7 @@ export const updateChapterContent = async (bookId, chapterId, newContent, expect
 
             const currentToken = chapDoc.data().lastSyncToken;
 
-            // If a token was expected and it doesn't match, we have a sync conflict
-            if (expectedToken && currentToken !== expectedToken) {
-                const error = new Error("Sync conflict detected");
-                error.code = 'SYNC_CONFLICT';
-                error.serverData = chapDoc.data();
-                throw error;
-            }
+            // Token validation removed for forced saving
 
             transaction.update(chapterRef, {
                 content: compressData(newContent),
@@ -309,12 +320,7 @@ export const updateChapter = async (bookId, chapterId, updateData, expectedToken
 
             const currentToken = chapDoc.data().lastSyncToken;
 
-            if (expectedToken && currentToken !== expectedToken) {
-                const error = new Error("Sync conflict detected");
-                error.code = 'SYNC_CONFLICT';
-                error.serverData = chapDoc.data();
-                throw error;
-            }
+            // Forced save: ignoring token mismatches
 
             transaction.update(chapterRef, {
                 ...updateData,

@@ -4,7 +4,7 @@ import CommandPalette from './components/CommandPalette'
 import Modal from './components/Modal'
 import Login from './components/Login'
 import { DataProvider, useData } from './context/DataContext'
-import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2 } from 'lucide-react'
+import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2, Check } from 'lucide-react'
 
 // Lazy loaded views
 const Editor = lazy(() => import('./components/Editor'))
@@ -27,7 +27,23 @@ const LoadingScreen = () => (
 );
 
 function AppContent() {
-  const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, isOnline } = useData();
+  const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
+  const [timeSinceSave, setTimeSinceSave] = useState('Recién');
+
+  useEffect(() => {
+    const updateRelativeTime = () => {
+      if (!lastSaved) return;
+      const seconds = Math.floor((new Date() - new Date(lastSaved)) / 1000);
+      
+      if (seconds < 60) setTimeSinceSave('Recién');
+      else if (seconds < 3600) setTimeSinceSave(`hace ${Math.floor(seconds / 60)} min`);
+      else setTimeSinceSave(`hace ${Math.floor(seconds / 3600)} h`);
+    };
+
+    updateRelativeTime();
+    const interval = setInterval(updateRelativeTime, 30000); // 30s update
+    return () => clearInterval(interval);
+  }, [lastSaved]);
   const [isBookModalOpen, setIsBookModalOpen] = useState(false);
   const [newBookTitle, setNewBookTitle] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -220,19 +236,12 @@ function AppContent() {
           </div>
 
           <div className="flex items-center gap-3 sm:gap-6 shrink-0">
-            <div className="hidden sm:flex flex-col items-end">
-              <span className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-black opacity-50">Sincronización</span>
-              {isOnline ? (
-                <span className="text-[10px] text-green-500 font-black uppercase flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                  En la nube
-                </span>
-              ) : (
-                <span className="text-[10px] text-amber-500 font-black uppercase flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                  Modo Offline
-                </span>
-              )}
+            <div className="hidden sm:flex flex-col items-end mr-2">
+              <span className="text-[9px] uppercase tracking-widest text-[var(--text-muted)] font-black opacity-40">Auto-Guardado</span>
+              <span className="text-[10px] text-emerald-500 font-bold uppercase flex items-center gap-1.5 bg-emerald-500/5 px-2 py-0.5 rounded-full border border-emerald-500/10">
+                <Check size={12} strokeWidth={3} />
+                Guardado {timeSinceSave}
+              </span>
             </div>
 
             <button

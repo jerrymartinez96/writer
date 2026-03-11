@@ -24,11 +24,11 @@ import {
     deleteAllChapterSnapshots as deleteAllSnapshotsApi,
     getUserProfile,
     createUserProfile,
-    updateUserProfile as updateUserProfileApi
+    updateUserProfile as updateUserProfileApi,
+    subscribeToChapter
 } from '../services/db';
 import { decompressData } from '../services/compression';
 import { uploadImageToCloudinary } from '../services/cloudinary';
-import { saveLightweightBackup, getLightweightBackups, clearChapterLightweightBackups } from '../services/localDb';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import DOMPurify from 'dompurify';
@@ -49,12 +49,12 @@ export const DataProvider = ({ children }) => {
     const [activeView, setActiveView] = useState('editor'); // 'editor', 'characters', 'world', 'settings'
     const [promptStudioPreload, setPromptStudioPreload] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [lastSaved, setLastSaved] = useState(new Date());
     const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
     const lastCloudContentRef = useRef({}); // { chapterId: string }
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
     // XSS Protection - Sanitize HTML content
     const sanitizeHtml = useCallback((html) => {
@@ -65,73 +65,7 @@ export const DataProvider = ({ children }) => {
         });
     }, []);
 
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
 
-    // Reconnection & Conflict Detection Logic
-    useEffect(() => {
-        if (isOnline && activeChapter && activeBook) {
-            const checkReconConflict = async () => {
-                try {
-                    console.log(`[Sync] Reconnected. Checking for potential conflicts in ${activeChapter.id}...`);
-                    
-                    // 1. Fetch latest state from cloud
-                    const cloudChapter = await getChapter(activeBook.id, activeChapter.id);
-                    if (!cloudChapter) return;
-
-                    // 2. Check for Token Drift (Edited on another device while offline)
-                    if (cloudChapter.lastSyncToken !== activeChapter.lastSyncToken) {
-                        console.warn("[Sync] TOKEN DRIFT DETECTED on Reconnect!");
-                        setSyncConflict({
-                            local: activeChapter,
-                            cloud: cloudChapter,
-                            chapterId: activeChapter.id,
-                            isTokenConflict: true
-                        });
-                        return;
-                    }
-
-                    // 3. Check for Pending Local Changes (Saved to IndexedDb but not Cloud)
-                    const localBackups = await getLightweightBackups(activeChapter.id);
-                    if (localBackups.length > 0) {
-                        const latestLocal = localBackups[0];
-                        const cloudTimestamp = cloudChapter.updatedAt?.toDate ? cloudChapter.updatedAt.toDate().getTime() : (cloudChapter.updatedAt || 0);
-
-                        // If local is noticeably newer and content is different
-                        if (latestLocal.createdAt > (cloudTimestamp + 2000)) {
-                             // Compare text (normalized)
-                             if (latestLocal.content !== cloudChapter.content) {
-                                console.warn("[Sync] Local-only changes detected on reconnect.");
-                                setSyncConflict({
-                                    local: latestLocal,
-                                    cloud: cloudChapter,
-                                    chapterId: activeChapter.id,
-                                    isTokenConflict: false
-                                });
-                             }
-                        } else if (latestLocal.content !== cloudChapter.content) {
-                            // PROACTIVE SYNC: Same token, but local content is newer/different
-                            // Let's force a cloud save to unify states
-                            console.log("[Sync] Proactive sync: Local content is different, pushing to cloud...");
-                            saveChapterContent(latestLocal.content);
-                        }
-                    }
-                } catch (err) {
-                    console.error("Conflict check on reconnect failed", err);
-                }
-            };
-            
-            checkReconConflict();
-        }
-    }, [isOnline]); // Trigger only on connectivity status changes
 
     const flushAllSaves = useCallback(async () => {
         const keys = Object.keys(pendingSaves.current);
@@ -213,6 +147,28 @@ export const DataProvider = ({ children }) => {
         loadBooks();
     }, [user]);
 
+    // Real-time synchronization for active chapter
+    useEffect(() => {
+        if (!activeBook || !activeChapter || !activeChapter.id) return;
+
+        const unsubscribe = subscribeToChapter(activeBook.id, activeChapter.id, (cloudData) => {
+            const saveKey = `chap_${activeChapter.id}`;
+            const hasPendingSave = !!pendingSaves.current[saveKey];
+
+            // Only update if our token is different AND we don't have local changes waiting to be pushed
+            if (cloudData.lastSyncToken !== activeChapter.lastSyncToken && !hasPendingSave) {
+                console.log(`[RealTime] External change detected for chapter ${activeChapter.id}. Updating local state.`);
+                const safeContent = sanitizeHtml(cloudData.content);
+                setActiveChapter(prev => ({ ...prev, ...cloudData, content: safeContent, isLoaded: true }));
+                setChapters(prev => prev.map(ch => ch.id === cloudData.id ? { ...cloudData, content: safeContent, isLoaded: true } : ch));
+                lastCloudContentRef.current[cloudData.id] = cloudData.content;
+                setLastSaved(new Date());
+            }
+        });
+
+        return () => unsubscribe();
+    }, [activeBook?.id, activeChapter?.id, sanitizeHtml]); // Depend on IDs to avoid excessive resubs
+
     const handleSelectBook = async (book) => {
         await flushAllSaves();
         setActiveBook(book);
@@ -238,7 +194,8 @@ export const DataProvider = ({ children }) => {
             if (fetchedChapters.length > 0) {
                 const savedChapterId = localStorage.getItem(`lastChapter_${book.id}`);
                 const savedChapter = savedChapterId ? fetchedChapters.find(c => c.id === savedChapterId) : null;
-                setActiveChapter(savedChapter || fetchedChapters[0]);
+                // Important: Use handleSelectChapter to trigger lazy loading of content
+                handleSelectChapter(savedChapter || fetchedChapters[0], book.id);
             } else {
                 setActiveChapter(null);
             }
@@ -281,6 +238,7 @@ export const DataProvider = ({ children }) => {
             delete pendingSaves.current[saveKey];
             try {
                 await updateBookApi(bookId, data);
+                setLastSaved(new Date());
             } catch (error) {
                 console.error("Failed to update book data", error);
             }
@@ -414,18 +372,9 @@ export const DataProvider = ({ children }) => {
                     setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 }
                 setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, lastSyncToken: newToken } : c));
+                setLastSaved(new Date());
             } catch (error) {
-                if (error.code === 'SYNC_CONFLICT') {
-                    console.warn("Metadata sync conflict for chapter", chapterId);
-                    setSyncConflict({
-                        local: { ...activeChapter, ...updateData },
-                        cloud: error.serverData,
-                        chapterId: chapterId,
-                        isTokenConflict: true
-                    });
-                } else {
-                    console.error("Failed to update chapter", error);
-                }
+                console.error("Failed to update chapter", error);
             }
         };
 
@@ -438,7 +387,6 @@ export const DataProvider = ({ children }) => {
     const finalizeChapterCleanup = async (chapterId) => {
         if (!activeBook) return;
         try {
-            await clearChapterLightweightBackups(chapterId);
             await deleteAllSnapshotsApi(activeBook.id, chapterId);
             return true;
         } catch (error) {
@@ -468,51 +416,19 @@ export const DataProvider = ({ children }) => {
         });
     };
 
-    const [syncConflict, setSyncConflict] = useState(null); // { local, cloud, chapterId }
 
-    const resolveSyncConflict = async (winner) => {
-        if (!syncConflict) return;
-        const { local, cloud, chapterId } = syncConflict;
-        
-        if (winner === 'local') {
-            // Force local content to cloud by ignoring current token (force save)
-            // We pass null as expectedToken to skip validation if we want to FORCE, 
-            // but here it's better to just perform a standard update which will generate a NEW token.
-            const content = local.content;
-            setActiveChapter(prev => ({ ...prev, content }));
-            setChapters(prev => prev.map(ch => ch.id === chapterId ? { ...ch, content } : ch));
-            
-            // To force local over cloud, we update and get the absolute latest token
-            const newToken = await updateChapterContent(activeBook.id, chapterId, content);
-            
-            // Update the state with the NEW valid token from cloud
-            setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
-            setChapters(prev => prev.map(ch => ch.id === chapterId ? { ...ch, lastSyncToken: newToken } : ch));
-            lastCloudContentRef.current[chapterId] = content;
-        } else {
-            // Cloud version wins
-            // Backend already has the right content, we just need to load it locally
-            // IMPORTANT: Since 'cloud' in syncConflict comes from Firestore, it is COMPRESSED.
-            const cloudContent = sanitizeHtml(decompressData(cloud.content));
-            const updatedChapter = { ...cloud, content: cloudContent };
-            
-            setActiveChapter(updatedChapter);
-            setChapters(prev => prev.map(ch => ch.id === chapterId ? updatedChapter : ch));
-            lastCloudContentRef.current[chapterId] = cloudContent;
-        }
-        
-        setSyncConflict(null);
-    };
 
-    const handleSelectChapter = async (chapter) => {
+
+    const handleSelectChapter = async (chapter, bookIdOverride = null) => {
         await flushAllSaves();
 
         let chapterToActivate = chapter;
+        const bookId = bookIdOverride || (activeBook ? activeBook.id : null);
 
         // LAZY LOAD: If chapter exists but content is not loaded, fetch it now
-        if (chapter && !chapter.isLoaded && isOnline) {
+        if (chapter && !chapter.isLoaded && bookId) {
             try {
-                const fullChapter = await getChapter(activeBook.id, chapter.id);
+                const fullChapter = await getChapter(bookId, chapter.id);
                 if (fullChapter) {
                     const safeContent = sanitizeHtml(fullChapter.content);
                     chapterToActivate = { ...fullChapter, content: safeContent, isLoaded: true };
@@ -525,40 +441,13 @@ export const DataProvider = ({ children }) => {
         }
         
         setActiveChapter(chapterToActivate);
-        const activeItem = chapterToActivate; // Alias for logic below
-
-        if (activeItem && isOnline) {
-            // Check for potential sync conflict
-            try {
-                const localBackups = await getLightweightBackups(activeItem.id);
-                if (localBackups.length > 0) {
-                    const latestLocal = localBackups[0];
-                    const cloudTimestamp = activeItem.updatedAt?.toDate ? activeItem.updatedAt.toDate().getTime() : (activeItem.updatedAt || 0);
-
-                    // If local is newer by more than 2 seconds (to avoid tiny clock skews)
-                    if (latestLocal.createdAt > (cloudTimestamp + 2000)) {
-                        // Check if content is actually different
-                        if (latestLocal.content !== activeItem.content) {
-                            setSyncConflict({
-                                local: latestLocal,
-                                cloud: activeItem,
-                                chapterId: activeItem.id
-                            });
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("Conflict detection failed", err);
-            }
-        }
-
-        setActiveChapter(chapter);
-        if (chapter) {
-            lastCloudContentRef.current[chapter.id] = chapter.content;
+        
+        if (chapterToActivate) {
+            lastCloudContentRef.current[chapterToActivate.id] = chapterToActivate.content;
         }
         setActiveView('editor');
-        if (activeBook && chapter) {
-            localStorage.setItem(`lastChapter_${activeBook.id}`, chapter.id);
+        if (bookId && chapter) {
+            localStorage.setItem(`lastChapter_${bookId}`, chapter.id);
         }
     }
 
@@ -683,8 +572,6 @@ export const DataProvider = ({ children }) => {
         const isDirty = lastCloudContentRef.current[chapId] !== content;
         
         if (!isDirty) {
-            // Even if not dirty for cloud, we update local history for "cursor/status" safety
-            saveLightweightBackup(chapId, content);
             return;
         }
 
@@ -706,26 +593,14 @@ export const DataProvider = ({ children }) => {
         const fn = async () => {
             delete pendingSaves.current[saveKey];
             
-            // 1. Save to Local History (Always attempt, very fast)
+            // Save to Cloud (Main state)
             try {
-                await saveLightweightBackup(chapId, content);
-            } catch (err) {
-                console.error("Local backup failed", err);
-            }
-
-            // 2. Save to Cloud (Main state)
-            try {
-                if (!isOnline) {
-                    console.log(`[Sync] App is OFFLINE. Save to Cloud skipped, only local backup performed.`);
-                    return;
-                }
-
                 // Use the lastSyncToken as the anchor for this save
                 const expectedToken = activeChapter.lastSyncToken;
                 console.log(`[Sync] Attempting cloud save with Token: ${expectedToken}`);
                 const newToken = await updateChapterContent(bookId, chapId, content, expectedToken);
                 
-                // 3. Update the anchor token for the next save cycle
+                // Update the anchor token for the next save cycle
                 setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 setChapters(prev => prev.map(ch => ch.id === chapId ? { ...ch, lastSyncToken: newToken } : ch));
                 
@@ -741,18 +616,9 @@ export const DataProvider = ({ children }) => {
                 }
 
                 console.log(`[Sync] Cloud save successful for chapter ${chapId}. New token: ${newToken}`);
+                setLastSaved(new Date());
             } catch (error) {
-                if (error.code === 'SYNC_CONFLICT') {
-                    console.warn("Sync conflict detected during auto-save!");
-                    setSyncConflict({
-                        local: { ...activeChapter, content },
-                        cloud: error.serverData,
-                        chapterId: chapId,
-                        isTokenConflict: true
-                    });
-                } else {
-                    console.warn("Cloud sync failed (possibly offline). Content is safe in Local History.", error);
-                }
+                console.warn("Cloud sync failed.", error);
             }
         };
 
@@ -845,12 +711,8 @@ export const DataProvider = ({ children }) => {
         promptStudioPreload,
         setPromptStudioPreload,
         reorderChapters: handleReorderChapters,
-        getLightweightBackups,
-        clearChapterLightweightBackups,
-        isOnline,
-        syncConflict,
-        resolveSyncConflict,
         finalizeChapterCleanup,
+        lastSaved,
         user,
         profile,
         authLoading,

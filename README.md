@@ -37,6 +37,11 @@ Una plataforma minimalista y potente diseñada para escritores que buscan un ent
    cp .env.example .env.local
    ```
 
+## 📝 Notas de Versión
+
+> [!IMPORTANT]
+> **Modo Local/Offline Retirado Temporalmente:** El sistema de guardado local y detección automática offline ha sido desactivado temporalmente para resolver problemas de rendimiento, inconsistencia de datos y conflictos complejos entre dispositivos. El equipo está rediseñando el motor de sincronización para ofrecer una experiencia más robusta en el futuro. Por ahora, se requiere una conexión activa a internet para garantizar que tus cambios se guarden correctamente en la nube.
+
 4. **Correr en local:**
    ```bash
    npm run dev

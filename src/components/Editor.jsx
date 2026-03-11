@@ -12,7 +12,6 @@ import { useData } from '../context/DataContext'
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Focus from '@tiptap/extension-focus'
 import createSuggestion from './MentionSuggestionConfig'
-import SyncConflictModal from './SyncConflictModal'
 import FinalizeModal from './FinalizeModal'
 
 const CharacterMention = Mark.create({
@@ -113,7 +112,7 @@ const Editor = () => {
     const { 
         chapters, activeChapter, saveChapterContent, characters, updateChapter, 
         activeView, selectChapter, setActiveView, setPromptStudioPreload,
-        syncConflict, resolveSyncConflict, finalizeChapterCleanup, isOnline 
+        finalizeChapterCleanup
     } = useData();
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
@@ -663,12 +662,14 @@ const Editor = () => {
     // Whenever the active chapter changes (from sidebar), we reset editor content
     useEffect(() => {
         if (editor && activeChapter) {
-            // Only update if it's vastly different (to avoid cursor jumps)
-            if (editor.getHTML() !== activeChapter.content) {
-                editor.commands.setContent(activeChapter.content || '');
+            const currentHtml = editor.getHTML();
+            // Update editor ONLY if content is different. 
+            // This now triggers on token change (external sync)
+            if (currentHtml !== activeChapter.content) {
+                editor.commands.setContent(activeChapter.content || '', false);
             }
         }
-    }, [activeChapter?.id, editor]); // We use chapter ID to detect active chapter change specifically
+    }, [activeChapter?.id, activeChapter?.lastSyncToken, editor]); 
 
     // Handle Read-Only state for Focus Mode
     useEffect(() => {
@@ -1572,11 +1573,6 @@ const Editor = () => {
                 </div>
             )}
 
-            <SyncConflictModal 
-                isOpen={!!syncConflict} 
-                conflict={syncConflict} 
-                onResolve={resolveSyncConflict} 
-            />
 
             <FinalizeModal 
                 isOpen={isFinalizeModalOpen} 
