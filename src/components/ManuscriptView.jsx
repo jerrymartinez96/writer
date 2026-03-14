@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus } from 'lucide-react';
+import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2 } from 'lucide-react';
 import Modal from './Modal';
 
 const ManuscriptView = () => {
@@ -15,6 +15,9 @@ const ManuscriptView = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [createMode, setCreateMode] = useState('chapter'); // 'chapter' or 'volume'
     const [newItemTitle, setNewItemTitle] = useState('');
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingItem, setEditingItem] = useState(null);
+    const [editTitle, setEditTitle] = useState('');
 
     // Filter data
     const volumes = chapters.filter(c => c.isVolume);
@@ -203,9 +206,23 @@ const ManuscriptView = () => {
                                         <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
                                             Capítulo {chapLabels[chap.id]}
                                         </span>
-                                        <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-[10px] uppercase font-bold hidden sm:inline">Editar</span>
-                                            <ChevronRight size={12} className="shrink-0" />
+                                        <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingItem(chap);
+                                                    setEditTitle(chap.title);
+                                                    setIsEditModalOpen(true);
+                                                }}
+                                                className="p-1 hover:text-[var(--accent-main)] transition-colors"
+                                                title="Renombrar capítulo"
+                                            >
+                                                <Edit2 size={12} />
+                                            </button>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-[10px] uppercase font-bold hidden sm:inline">Editar</span>
+                                                <ChevronRight size={12} className="shrink-0" />
+                                            </div>
                                         </div>
                                     </div>
                                     <h3 className="font-bold text-base leading-snug text-[var(--text-main)] line-clamp-2" title={chap.title}>{chap.title}</h3>
@@ -258,9 +275,23 @@ const ManuscriptView = () => {
                                                 <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
                                                     Volumen {volLabels[vol.id]}
                                                 </span>
-                                                <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <span className="text-[10px] uppercase font-bold hidden sm:inline">Explorar</span>
-                                                    <ChevronRight size={12} className="shrink-0" />
+                                                <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setEditingItem(vol);
+                                                            setEditTitle(vol.title);
+                                                            setIsEditModalOpen(true);
+                                                        }}
+                                                        className="p-1 hover:text-indigo-500 transition-colors"
+                                                        title="Renombrar volumen"
+                                                    >
+                                                        <Edit2 size={12} />
+                                                    </button>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-[10px] uppercase font-bold hidden sm:inline">Explorar</span>
+                                                        <ChevronRight size={12} className="shrink-0" />
+                                                    </div>
                                                 </div>
                                             </div>
                                             <h3 className="font-bold text-xl font-serif leading-snug text-[var(--text-main)] line-clamp-2 mb-auto" title={vol.title}>{vol.title}</h3>
@@ -295,9 +326,23 @@ const ManuscriptView = () => {
                                                 <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
                                                     Capítulo {standaloneLabels[chap.id]}
                                                 </span>
-                                                <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <span className="text-[10px] uppercase font-bold hidden sm:inline">Editar</span>
-                                                    <ChevronRight size={12} className="shrink-0" />
+                                                <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setEditingItem(chap);
+                                                            setEditTitle(chap.title);
+                                                            setIsEditModalOpen(true);
+                                                        }}
+                                                        className="p-1 hover:text-[var(--accent-main)] transition-colors"
+                                                        title="Renombrar capítulo"
+                                                    >
+                                                        <Edit2 size={12} />
+                                                    </button>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-[10px] uppercase font-bold hidden sm:inline">Editar</span>
+                                                        <ChevronRight size={12} className="shrink-0" />
+                                                    </div>
                                                 </div>
                                             </div>
                                             <h3 className="font-bold text-base leading-snug text-[var(--text-main)] line-clamp-2" title={chap.title}>{chap.title}</h3>
@@ -321,6 +366,47 @@ const ManuscriptView = () => {
     return (
         <div className="w-full h-full relative">
             {content}
+
+            <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Renombrar ${editingItem?.isVolume ? 'Volumen' : 'Capítulo'}`}>
+                <div className="space-y-5 text-left font-sans">
+                    <div>
+                        <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Nuevo Título</label>
+                        <input
+                            type="text"
+                            autoFocus
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && editTitle.trim()) {
+                                    updateChapter(editingItem.id, { title: editTitle.trim() });
+                                    setIsEditModalOpen(false);
+                                }
+                            }}
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)]"
+                        />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
+                        <button
+                            onClick={() => setIsEditModalOpen(false)}
+                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (editTitle.trim()) {
+                                    updateChapter(editingItem.id, { title: editTitle.trim() });
+                                    setIsEditModalOpen(false);
+                                }
+                            }}
+                            disabled={!editTitle.trim() || editTitle.trim() === editingItem?.title}
+                            className="px-5 py-2.5 bg-[var(--accent-main)] text-white rounded-xl font-bold hover:bg-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                        >
+                            Guardar Cambios
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Agregar al Manuscrito">
                 <div className="space-y-5 text-left font-sans">

@@ -2,7 +2,6 @@ import { jsPDF } from "jspdf";
 import { convert } from "html-to-text";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, PageBreak } from "docx";
 import { saveAs } from "file-saver";
-import epubGenerator from "epub-gen-memory";
 
 class ExportService {
     /**
@@ -287,45 +286,6 @@ class ExportService {
         saveAs(buffer, `${book.title.replace(/\s+/g, '_')}_Manuscrito.docx`);
     }
 
-    /**
-     * Exporta el libro en formato EPUB
-     */
-    static async exportAsEPUB(book, chapters, includeMasterDoc, characters = [], worldItems = []) {
-        const sortedChapters = [...chapters].sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
-        
-        const contents = sortedChapters.map((chapter) => ({
-            title: chapter.title,
-            data: chapter.content || "<p></p>",
-        }));
-
-        if (includeMasterDoc) {
-            let masterHtml = "<h1>Biblia del Proyecto</h1>";
-            if (characters.length > 0) {
-                masterHtml += "<h2>Personajes</h2>";
-                characters.forEach(c => masterHtml += `<p><strong>${c.name}</strong>: ${c.description || ''}</p>`);
-            }
-            if (worldItems.length > 0) {
-                masterHtml += "<h2>Mundo</h2>";
-                worldItems.forEach(i => masterHtml += `<p><strong>${i.name}</strong>: ${i.description || ''}</p>`);
-            }
-            contents.push({ title: "Apéndice: Biblia", data: masterHtml });
-        }
-
-        const epubData = {
-            title: book.title,
-            author: book.author || "Escritor",
-            description: book.description || "",
-            contents: contents,
-        };
-
-        try {
-            const blob = await epubGenerator(epubData);
-            saveAs(blob, `${book.title.replace(/\s+/g, '_')}_Digital.epub`);
-        } catch (error) {
-            console.error("EPUB export failed:", error);
-            throw error;
-        }
-    }
 }
 
 export default ExportService;

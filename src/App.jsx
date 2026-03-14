@@ -236,11 +236,13 @@ function AppContent() {
           </div>
 
           <div className="flex items-center gap-3 sm:gap-6 shrink-0">
-            <div className="hidden sm:flex flex-col items-end mr-2">
-              <span className="text-[9px] uppercase tracking-widest text-[var(--text-muted)] font-black opacity-40">Auto-Guardado</span>
-              <span className="text-[10px] text-emerald-500 font-bold uppercase flex items-center gap-1.5 bg-emerald-500/5 px-2 py-0.5 rounded-full border border-emerald-500/10">
-                <Check size={12} strokeWidth={3} />
-                Guardado {timeSinceSave}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-full shadow-sm hover:border-emerald-500/30 transition-all group" title="Tu trabajo se guarda automáticamente">
+              <div className="relative flex items-center justify-center">
+                <Check size={14} className="text-emerald-500 relative z-10" strokeWidth={3} />
+                <div className="absolute inset-0 bg-emerald-500/20 blur-sm rounded-full animate-pulse group-hover:bg-emerald-500/30 transition-all"></div>
+              </div>
+              <span className="text-[11px] font-medium text-[var(--text-main)] transition-colors">
+                <span className="text-[var(--text-muted)] opacity-60 font-normal">Guardado</span> {timeSinceSave}
               </span>
             </div>
 

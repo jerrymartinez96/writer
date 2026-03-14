@@ -1,4 +1,4 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { useState, useEffect, useMemo } from 'react'
 import Modal from './Modal'
@@ -12,33 +12,91 @@ const SortableChapterItem = ({ chapter, isActive, label, statusColor, onSelect, 
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? 0.5 : 1,
+        opacity: isDragging ? 0.3 : 1,
         zIndex: isDragging ? 50 : 'auto',
     };
 
     return (
-        <div ref={setNodeRef} style={style} className={`group relative ${isNested ? 'flex items-center' : 'animate-in fade-in duration-300'}`}>
-            {isNested && <div className="absolute -left-2 top-4 w-2 border-t border-indigo-500/30"></div>}
+        <div ref={setNodeRef} style={style} className={`group relative transition-all ${isDragging ? 'scale-105 shadow-xl ring-2 ring-[var(--accent-main)] rounded-lg z-50' : ''} ${isNested ? 'flex items-center' : 'animate-in fade-in duration-300'}`}>
             <button
                 onClick={onSelect}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg text-left transition-all ${isActive
-                    ? `bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm ${isNested ? 'ml-1' : ''}`
-                    : `hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors ${isNested ? 'ml-1' : ''}`
-                    }`}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 my-0.5 rounded-lg text-left transition-all ${isActive
+                    ? `bg-[var(--accent-soft)] text-[var(--accent-main)] shadow-sm border border-[var(--accent-main)]/10`
+                    : `hover:bg-[var(--accent-soft)]/50 text-[var(--text-main)] border border-transparent`
+                    } ${isNested ? 'ml-1' : ''}`}
             >
-                <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-0.5 -ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity shrink-0 touch-none" title="Arrastrar para reordenar">
+                <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1 -ml-1.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 transition-opacity shrink-0 touch-none text-[var(--text-muted)]">
                     <GripVertical size={12} />
                 </div>
-                <FileText size={isNested ? 14 : 16} className={isActive ? "text-[var(--accent-main)] shrink-0" : "text-[var(--text-muted)] shrink-0"} />
-                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor}`} title={`Estado: ${chapter.status || 'Idea'}`}></div>
-                <span className="truncate pr-6">{label}{chapter.title}</span>
+                
+                <div className="flex flex-col flex-1 truncate">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-[8px] font-black uppercase tracking-[0.1em] text-[var(--text-muted)] opacity-60 leading-none">
+                            {label.replace(': ', '')}
+                        </span>
+                        <div className={`w-1 h-1 rounded-full shrink-0 ${statusColor}`} title={`Estado: ${chapter.status || 'Idea'}`}></div>
+                    </div>
+                    <span className={`text-[13px] tracking-tight truncate ${isActive ? 'font-black' : 'font-medium'}`}>
+                        {chapter.title}
+                    </span>
+                </div>
             </button>
+            
             <button
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                className={`absolute ${isNested ? 'right-1' : 'right-2'} top-1.5 p-1 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-50 ${isNested ? 'bg-[var(--bg-editor)]' : ''}`}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-lg hover:bg-red-50"
             >
-                <Trash2 size={14} />
+                <Trash2 size={12} />
             </button>
+        </div>
+    );
+};
+
+const SortableVolumeItem = ({ vol, isExpanded, onToggle, isActiveContainer, children, label, onDelete }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: vol.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div ref={setNodeRef} style={style} className={`mb-1 last:mb-0 transition-all ${isDragging ? 'z-50' : ''}`}>
+            <div className={`group sticky top-0 py-1.5 px-2 flex items-center gap-2 bg-[var(--bg-app)]/90 backdrop-blur-md z-10 rounded-xl border border-transparent transition-all ${isActiveContainer ? 'bg-indigo-500/5 border-indigo-500/10' : 'hover:bg-[var(--accent-soft)]/20 hover:border-[var(--border-main)]'}`}>
+                <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1 -ml-1 opacity-0 group-hover:opacity-30 hover:!opacity-100 transition-opacity text-[var(--text-muted)]" title="Mover Volumen">
+                    <GripVertical size={14} />
+                </div>
+
+                <button
+                    onClick={onToggle}
+                    className="flex-1 flex items-center gap-2 overflow-hidden text-left"
+                >
+                    <ChevronRight size={14} className={`text-indigo-500/60 transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''} shrink-0`} />
+                    
+                    <div className="flex flex-col truncate">
+                        <span className="text-[8px] font-black uppercase tracking-[0.1em] text-indigo-500/60 mb-0">
+                            {label.replace(': ', '')}
+                        </span>
+                        <span className="text-[13px] font-black text-[var(--text-main)] truncate leading-tight transition-colors">
+                            {vol.title}
+                        </span>
+                    </div>
+                </button>
+
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                    className="p-1.5 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50 rounded-lg"
+                >
+                    <Trash2 size={12} />
+                </button>
+            </div>
+            
+            {isExpanded && (
+                <div className="ml-3 pl-2 border-l border-[var(--border-main)] space-y-0.5 mt-1 pb-1">
+                    {children}
+                </div>
+            )}
         </div>
     );
 };
@@ -113,6 +171,10 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     );
 
     // Sorted chapters helpers
+    const currentVolumes = useMemo(() => 
+        chapters.filter(c => c.isVolume).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)),
+    [chapters]);
+
     const standaloneChapters = useMemo(() =>
         chapters.filter(c => !c.parentId && !c.isVolume)
             .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)),
@@ -125,13 +187,34 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         [chapters]
     );
 
-    const handleDragEnd = (event, parentId) => {
+    const handleDragEnd = (event, type) => {
         const { active, over } = event;
         if (!over || active.id === over.id) return;
 
-        const items = parentId
-            ? chapters.filter(c => c.parentId === parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
-            : standaloneChapters;
+        let items;
+        let parentId = null;
+
+        if (type === 'volume') {
+            items = currentVolumes;
+        } else if (type === 'chapter') {
+            // Find parentId from active item
+            const activeItem = chapters.find(c => c.id === active.id);
+            parentId = activeItem?.parentId || null;
+            items = parentId 
+                ? chapters.filter(c => c.parentId === parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
+                : standaloneChapters;
+        } else {
+            // If dragging between different groups (parentId), for now we only support within same group
+            // but we determine target group by the 'over' item's parentId
+            const overItem = chapters.find(c => c.id === over.id);
+            parentId = overItem?.parentId || null;
+            const activeItem = chapters.find(c => c.id === active.id);
+            if (activeItem?.parentId !== parentId) return; // Cross-parent dragging is more complex
+            
+            items = parentId 
+                ? chapters.filter(c => c.parentId === parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
+                : standaloneChapters;
+        }
 
         const oldIndex = items.findIndex(c => c.id === active.id);
         const newIndex = items.findIndex(c => c.id === over.id);
@@ -308,31 +391,23 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 </div>
 
                                 <div className="space-y-3">
-                                    {/* Render Volumes & Their Chapters */}
-                                    {chapters.filter(c => c.isVolume).map(vol => {
-                                        const isCollapsed = !expandedVolumes[vol.id];
-                                        return (
-                                            <div key={vol.id} className="mb-2 animate-in fade-in zoom-in-95 duration-300">
-                                                <div className="group relative mb-1">
-                                                    <div
-                                                        onClick={() => toggleVolume(vol.id)}
-                                                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg text-left text-[var(--accent-main)] font-black bg-indigo-500/10 border border-indigo-500/20 shadow-sm cursor-pointer hover:bg-indigo-500/20 transition-colors"
+                                    {/* Render Volumes with DnD reordering */}
+                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(e, 'volume')}>
+                                        <SortableContext items={currentVolumes.map(v => v.id)} strategy={verticalListSortingStrategy}>
+                                            {currentVolumes.map(vol => {
+                                                const volChaptersList = volumeChapters(vol.id);
+                                                return (
+                                                    <SortableVolumeItem
+                                                        key={vol.id}
+                                                        vol={vol}
+                                                        isExpanded={expandedVolumes[vol.id]}
+                                                        onToggle={() => toggleVolume(vol.id)}
+                                                        label={itemLabels[vol.id]}
+                                                        onDelete={() => { setChapterToDelete(vol.id); setIsDeleteModalOpen(true); }}
                                                     >
-                                                        <ChevronRight size={14} className={`transition-transform shrink-0 ${isCollapsed ? 'rotate-0' : 'rotate-90'}`} />
-                                                        <span className="truncate pr-6 font-serif tracking-tight">{itemLabels[vol.id]}{vol.title}</span>
-                                                    </div>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setChapterToDelete(vol.id); setIsDeleteModalOpen(true); }}
-                                                        className="absolute right-2 top-2 p-1 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-50 bg-[var(--bg-app)]/80 backdrop-blur-sm"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
-                                                {!isCollapsed && (
-                                                    <div className="pl-2 mt-1 space-y-1 border-l border-indigo-500/30 ml-4 relative animate-in slide-in-from-top-2 duration-200">
-                                                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(e, vol.id)}>
-                                                            <SortableContext items={volumeChapters(vol.id).map(c => c.id)} strategy={verticalListSortingStrategy}>
-                                                                {volumeChapters(vol.id).map(chapter => (
+                                                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(e, 'chapter')}>
+                                                            <SortableContext items={volChaptersList.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                                                                {volChaptersList.map((chapter) => (
                                                                     <SortableChapterItem
                                                                         key={chapter.id}
                                                                         chapter={chapter}
@@ -346,19 +421,19 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                                                 ))}
                                                             </SortableContext>
                                                         </DndContext>
-                                                        {chapters.filter(c => c.parentId === vol.id).length === 0 && (
+                                                        {volChaptersList.length === 0 && (
                                                             <div className="text-[10px] text-indigo-500/60 font-bold uppercase tracking-widest px-4 py-2 opacity-50 ml-1">
                                                                 Volumen vacío
                                                             </div>
                                                         )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )
-                                    })}
+                                                    </SortableVolumeItem>
+                                                )
+                                            })}
+                                        </SortableContext>
+                                    </DndContext>
 
                                     {/* Render Floating Chapters with DnD */}
-                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(e, null)}>
+                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(e, 'chapter')}>
                                         <SortableContext items={standaloneChapters.map(c => c.id)} strategy={verticalListSortingStrategy}>
                                             {standaloneChapters.map((chapter) => (
                                                 <SortableChapterItem
@@ -506,17 +581,26 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
 
                     {createMode === 'chapter' && chapters.filter(c => c.isVolume).length > 0 && (
                         <div>
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Perteneciente al Volumen (Opcional)</label>
-                            <select
-                                value={selectedVolumeId}
-                                onChange={(e) => setSelectedVolumeId(e.target.value)}
-                                className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)] max-w-full appearance-none"
-                            >
-                                <option value="">-- Ninguno (Capítulo Suelto) --</option>
+                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-3">Perteneciente al Volumen (Opcional)</label>
+                            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2 scrollbar-hide">
+                                <button
+                                    onClick={() => setSelectedVolumeId('')}
+                                    className={`p-3 rounded-xl border text-xs font-bold transition-all text-left flex flex-col gap-1 ${!selectedVolumeId ? 'bg-indigo-500 border-indigo-500 text-white shadow-md' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50'}`}
+                                >
+                                    <span className="opacity-70 uppercase tracking-tighter">Suelto</span>
+                                    <span className="truncate">Ninguno</span>
+                                </button>
                                 {chapters.filter(c => c.isVolume).map(v => (
-                                    <option key={v.id} value={v.id}>{itemLabels[v.id]}{v.title}</option>
+                                    <button
+                                        key={v.id}
+                                        onClick={() => setSelectedVolumeId(v.id)}
+                                        className={`p-3 rounded-xl border text-xs font-bold transition-all text-left flex flex-col gap-1 ${selectedVolumeId === v.id ? 'bg-indigo-500 border-indigo-500 text-white shadow-md' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-indigo-500/50'}`}
+                                    >
+                                        <span className={`opacity-70 uppercase tracking-tighter ${selectedVolumeId === v.id ? 'text-white/80' : 'text-indigo-500'}`}>{itemLabels[v.id]?.replace(': ', '') || 'Volumen'}</span>
+                                        <span className="truncate">{v.title}</span>
+                                    </button>
                                 ))}
-                            </select>
+                            </div>
                         </div>
                     )}
 

@@ -1,5 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check } from 'lucide-react'
+import { BubbleMenu } from '@tiptap/react/menus'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, BookMarked, Languages, Plus, FileAudio, MoreHorizontal, Sliders } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -12,6 +13,9 @@ import { useData } from '../context/DataContext'
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Focus from '@tiptap/extension-focus'
 import createSuggestion from './MentionSuggestionConfig'
+import PremiumNarrator from './PremiumNarrator';
+import NarratorSelector from './NarratorSelector';
+import PremiumPlayer from './PremiumPlayer';
 import FinalizeModal from './FinalizeModal'
 
 const CharacterMention = Mark.create({
@@ -108,11 +112,15 @@ const GhostMention = Mark.create({
     },
 })
 
+
+
+
 const Editor = () => {
-    const { 
-        chapters, activeChapter, saveChapterContent, characters, updateChapter, 
+    const {
+        chapters, activeChapter, saveChapterContent, characters, updateChapter,
         activeView, selectChapter, setActiveView, setPromptStudioPreload,
-        finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot
+        finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot,
+        activeBook, profile
     } = useData();
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
@@ -129,6 +137,9 @@ const Editor = () => {
     const [highlightedCharId, setHighlightedCharId] = useState(null);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isReadingSettingsModalOpen, setIsReadingSettingsModalOpen] = useState(false);
+    const [isDesktopMoreOpen, setIsDesktopMoreOpen] = useState(false);
+    const [isCopyDropdownOpen, setIsCopyDropdownOpen] = useState(false);
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const [isCardModalOpen, setIsCardModalOpen] = useState(false);
     const [selectedCharacterId, setSelectedCharacterId] = useState(null);
@@ -145,6 +156,11 @@ const Editor = () => {
     const [editNoteText, setEditNoteText] = useState('');
     const [isChapterInfoModalOpen, setIsChapterInfoModalOpen] = useState(false);
     const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
+    const [isFormattingModalOpen, setIsFormattingModalOpen] = useState(false);
+    
+    // Phase 4: Selection & Metrics
+    const [selectionMetrics, setSelectionMetrics] = useState({ words: 0, chars: 0, show: false });
+    const [totalWordCount, setTotalWordCount] = useState(0);
 
     // Refs to avoid stale closures in editor callbacks
     const charactersRef = useRef(characters);
@@ -163,14 +179,9 @@ const Editor = () => {
         saveChapterContentRef.current = saveChapterContent;
     }, [saveChapterContent]);
 
-    // Text-to-Speech state
-    const [isTTSActive, setIsTTSActive] = useState(false);
-    const [isTTSPaused, setIsTTSPaused] = useState(false);
-    const [ttsSpeed, setTTSSpeed] = useState(1);
-    const [ttsCurrentParagraph, setTTSCurrentParagraph] = useState(-1);
-    const ttsUtteranceRef = useRef(null);
-    const ttsParagraphsRef = useRef([]);
 
+    
+    // Configuración TTS
     const orderedChapters = useMemo(() => {
         if (!chapters) return [];
         const sorted = [];
@@ -213,6 +224,11 @@ const Editor = () => {
         }
 
         return { volumeLabel, chapterLabel };
+    }, [activeChapter, chapters]);
+
+    const parentVolume = useMemo(() => {
+        if (!activeChapter || !chapters) return null;
+        return chapters.find(c => c.id === activeChapter.parentId && c.isVolume);
     }, [activeChapter, chapters]);
 
     const handleConvertGhostMention = (charId, text, pos) => {
@@ -461,7 +477,7 @@ const Editor = () => {
 
     const handleStatusChange = (newStatus) => {
         if (!activeChapter) return;
-        
+
         if (newStatus === 'Finalizado') {
             setIsFinalizeModalOpen(true);
         } else {
@@ -479,11 +495,11 @@ const Editor = () => {
 
     const confirmFinalize = async (shouldCleanup) => {
         if (!activeChapter) return;
-        
+
         try {
             // 1. Update status in cloud
             await updateChapter(activeChapter.id, { status: 'Finalizado' });
-            
+
             // 2. Perform cleanup if selected
             if (shouldCleanup) {
                 await finalizeChapterCleanup(activeChapter.id);
@@ -491,7 +507,7 @@ const Editor = () => {
             } else {
                 toast.success("Capítulo marcado como finalizado.");
             }
-            
+
             // 3. Visual Effects
             confetti({
                 particleCount: 200,
@@ -593,9 +609,33 @@ const Editor = () => {
                 return false;
             }
         },
+        onSelectionUpdate: ({ editor }) => {
+            const { from, to, empty } = editor.state.selection;
+            const isReadOnlyStatus = activeChapterRef.current?.status === 'Completado' || activeChapterRef.current?.status === 'Finalizado';
+            const isReadOnlyMode = isReadOnlyStatus || isFocusMode;
+
+            if (empty || from === to || isReadOnlyMode) {
+                setSelectionMetrics({ words: 0, chars: 0, show: false });
+                return;
+            }
+
+            const text = editor.state.doc.textBetween(from, to, ' ');
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            const chars = text.length;
+
+            if (words > 0) {
+                setSelectionMetrics({ words, chars, show: true });
+            } else {
+                setSelectionMetrics({ words: 0, chars: 0, show: false });
+            }
+        },
         onUpdate: ({ editor }) => {
             const html = editor.getHTML();
             saveChapterContentRef.current(html);
+
+            // Update total word count
+            const text = editor.getText();
+            setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
 
             // Passive Detection Logic (ghost mentions)
             if (window.ghostDetectTimeout) clearTimeout(window.ghostDetectTimeout);
@@ -662,115 +702,72 @@ const Editor = () => {
     useEffect(() => {
         if (editor && activeChapter) {
             const currentHtml = editor.getHTML();
-            // Update editor ONLY if content is different. 
-            // This now triggers on token change (external sync)
             if (currentHtml !== activeChapter.content) {
                 editor.commands.setContent(activeChapter.content || '', false);
+                
+                // Also update word count after setting content
+                const text = editor.getText();
+                setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
             }
         }
-    }, [activeChapter?.id, activeChapter?.lastSyncToken, editor]); 
+    }, [activeChapter?.id, activeChapter?.lastSyncToken, editor]);
 
-    // Handle Editable state (Focus Mode + Real-time Lock)
+    // Handle Editable state (Focus Mode + Real-time Lock + Finalized Status)
     useEffect(() => {
         if (editor) {
-            const isEditable = !isFocusMode && !chapterLock.isLocked;
+            const isReadOnlyStatus = activeChapter?.status === 'Completado' || activeChapter?.status === 'Finalizado';
+            const isEditable = !isFocusMode && !chapterLock.isLocked && !isReadOnlyStatus;
             editor.setEditable(isEditable);
         }
-    }, [isFocusMode, chapterLock.isLocked, editor]);
+    }, [isFocusMode, chapterLock.isLocked, activeChapter?.status, editor]);
 
-    // ===== Text-to-Speech Handlers =====
-    const handleStopTTS = useCallback(() => {
-        if (window.speechSynthesis) {
-            window.speechSynthesis.cancel();
-        }
-        // Remove all highlights
-        if (ttsParagraphsRef.current) {
-            ttsParagraphsRef.current.forEach(p => p.element.classList.remove('tts-reading-highlight'));
-        }
-        ttsParagraphsRef.current = [];
-        setIsTTSActive(false);
-        setIsTTSPaused(false);
-        setTTSCurrentParagraph(-1);
-    }, []);
+    const isEditorLocked = useMemo(() => {
+        const isReadOnlyStatus = activeChapter?.status === 'Completado' || activeChapter?.status === 'Finalizado';
+        return isFocusMode || chapterLock.isLocked || isReadOnlyStatus;
+    }, [isFocusMode, chapterLock.isLocked, activeChapter?.status]);
 
-    const readParagraph = useCallback((index) => {
-        const paragraphs = ttsParagraphsRef.current;
-        if (index >= paragraphs.length) {
-            handleStopTTS();
-            return;
-        }
 
-        // Remove previous highlights
-        paragraphs.forEach(p => p.element.classList.remove('tts-reading-highlight'));
-
-        // Highlight current paragraph
-        setTTSCurrentParagraph(index);
-        paragraphs[index].element.classList.add('tts-reading-highlight');
-        paragraphs[index].element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        const utterance = new SpeechSynthesisUtterance(paragraphs[index].text);
-        utterance.lang = 'es-MX';
-        utterance.rate = ttsSpeed;
-        utterance.onend = () => {
-            readParagraph(index + 1);
-        };
-        utterance.onerror = () => {
-            handleStopTTS();
-        };
-        ttsUtteranceRef.current = utterance;
-        window.speechSynthesis.speak(utterance);
-    }, [ttsSpeed, handleStopTTS]); // Added handleStopTTS to dependencies
-
-    const handleStartTTS = useCallback(() => {
-        if (!editor || !window.speechSynthesis) {
-            toast.warning('Tu navegador no soporta Text-to-Speech.');
-            return;
-        }
-        window.speechSynthesis.cancel();
-
-        // Extract paragraphs from editor DOM
-        if (!editor || !editor.view?.dom) return;
-        const editorDom = editor.view.dom;
-        const blocks = editorDom.querySelectorAll('p, h1, h2, h3');
-        const paragraphs = Array.from(blocks)
-            .map(el => ({ text: el.textContent.trim(), element: el }))
-            .filter(p => p.text.length > 0);
-
-        if (paragraphs.length === 0) {
-            toast.info('No hay texto para leer.');
-            return;
-        }
-
-        ttsParagraphsRef.current = paragraphs;
-        setIsTTSActive(true);
-        setIsTTSPaused(false);
-        readParagraph(0);
-    }, [editor, readParagraph]); // Added readParagraph to dependencies
-
-    const handlePauseTTS = () => {
-        if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
-            setIsTTSPaused(true);
-        }
-    };
-
-    const handleResumeTTS = () => {
-        if (window.speechSynthesis) {
-            window.speechSynthesis.resume();
-            setIsTTSPaused(false);
-        }
-    };
-
-    // Cleanup TTS on unmount or chapter change
-    useEffect(() => {
-        return () => {
-            if (window.speechSynthesis) {
-                window.speechSynthesis.cancel();
-            }
-        };
-    }, [activeChapter?.id]);
 
     // Removal of old click handler useEffect as it's now handled by editorProps.handleClick
+
+    const [isPremiumNarratorOpen, setIsPremiumNarratorOpen] = useState(false);
+    const [isNarratorSelectorOpen, setIsNarratorSelectorOpen] = useState(false);
+    const [isPremiumPlayerOpen, setIsPremiumPlayerOpen] = useState(false);
+    const [playingChunk, setPlayingChunk] = useState(null);
+
+    // Resaltado en Editor (Narración Sincronizada)
+    useEffect(() => {
+        if (!editor || editor.isDestroyed || !playingChunk) {
+            document.querySelectorAll('.playing-chunk-highlight').forEach(el => el.classList.remove('playing-chunk-highlight'));
+            return;
+        }
+
+        const clean = (t) => t.replace(/\s+/g, ' ').trim();
+        const textToFind = clean(playingChunk.textoActual);
+        if (!textToFind) return;
+
+        const timeoutId = setTimeout(() => {
+            if (!editor.view?.dom) return;
+            const paragraphs = editor.view.dom.querySelectorAll('p, h1, h2, h3, li');
+            
+            // Limpiar todos antes de marcar el nuevo
+            document.querySelectorAll('.playing-chunk-highlight').forEach(el => el.classList.remove('playing-chunk-highlight'));
+
+            let found = false;
+            paragraphs.forEach(p => {
+                const pText = clean(p.textContent);
+                if (pText.includes(textToFind) || textToFind.includes(pText)) {
+                    p.classList.add('playing-chunk-highlight');
+                    if (!found) {
+                        p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        found = true;
+                    }
+                }
+            });
+        }, 150);
+
+        return () => clearTimeout(timeoutId);
+    }, [playingChunk, editor]);
 
     // Update typography classes dynamically when size changes
     useEffect(() => {
@@ -796,7 +793,7 @@ const Editor = () => {
                         <Lock size={16} />
                         <span>Este capítulo está siendo editado desde otro dispositivo.</span>
                     </div>
-                    <button 
+                    <button
                         onClick={() => claimLock()}
                         className="text-xs bg-amber-500 text-white px-3 py-1 rounded-full font-bold hover:bg-amber-600 transition-colors shadow-sm flex items-center gap-1"
                     >
@@ -805,7 +802,7 @@ const Editor = () => {
                     </button>
                 </div>
             )}
-            
+
             {!chapterLock.isLocked && chapterLock.activeEditorId && (
                 <div className="bg-indigo-500/10 border-b border-indigo-500/20 px-6 py-1 flex items-center gap-2 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
                     <Check size={10} />
@@ -814,337 +811,351 @@ const Editor = () => {
             )}
 
             {/* Editor Toolbar */}
-            {true && (
-                <>
-                    <div className="border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
-                        {/* Row 1: Main Controls */}
-                        {!isFocusMode ? (
-                            <div className="flex items-center p-1.5 px-2 sm:p-2 sm:px-3 md:px-6 gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide">
-                                {/* Left: Formatting */}
-                                <div className="flex items-center gap-0.5 shrink-0">
-                                    <button
-                                        onClick={() => {
-                                            if (!editor || !characters) return;
-                                            const sortedCharacters = characters
-                                                .filter(c => !c.isCategory && c.name && c.name.trim() !== '');
-                                            if (sortedCharacters.length === 0) {
-                                                toast.info("No hay personajes creados para detectar.");
-                                                return;
-                                            }
-                                            setIsDetectionModeModalOpen(true);
-                                        }}
-                                        className="p-1.5 sm:p-2 rounded-lg transition-all duration-200 text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm flex items-center gap-1"
-                                        title="Analizar texto y detectar personajes"
-                                    >
-                                        <ScanSearch size={16} />
-                                    </button>
+            {!isFocusMode ? (
+                <div className="border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0 px-3 py-2 md:px-6">
+                    {/* Mobile Only: Simplified row based on user image */}
+                    <div className="flex md:hidden items-center justify-between gap-3">
+                        <button
+                            onClick={() => setIsChapterInfoModalOpen(true)}
+                            className="w-10 h-10 flex items-center justify-center rounded-full border border-[var(--border-main)] text-[var(--accent-main)] bg-[var(--bg-app)]"
+                        >
+                            <Info size={18} />
+                        </button>
 
-                                    <div className="w-px h-5 bg-[var(--border-main)] mx-1 shrink-0"></div>
-
-                                    <button
-                                        onClick={() => editor?.chain().focus().toggleBold().run()}
-                                        className={`p-1.5 sm:p-2 rounded-lg transition-all duration-200 ${editor?.isActive('bold') ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}
-                                        title="Negrita"
-                                    >
-                                        <span className="font-bold text-sm">B</span>
-                                    </button>
-                                    <button
-                                        onClick={() => editor?.chain().focus().toggleItalic().run()}
-                                        className={`p-1.5 sm:p-2 rounded-lg transition-all duration-200 ${editor?.isActive('italic') ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}
-                                        title="Cursiva"
-                                    >
-                                        <span className="italic font-serif text-sm">I</span>
-                                    </button>
-
-                                    <div className="w-px h-5 bg-[var(--border-main)] mx-0.5 shrink-0"></div>
-
-                                    {[1, 2, 3].map(level => (
-                                        <button
-                                            key={level}
-                                            onClick={() => editor?.chain().focus().toggleHeading({ level }).run()}
-                                            className={`p-1.5 px-2 rounded-lg transition-all duration-200 text-xs font-black ${editor?.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}
-                                            title={`Título ${level}`}
-                                        >
-                                            H{level}
-                                        </button>
-                                    ))}
-                                </div>
-
-                                {/* Center: Note + Copy operations */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                        onClick={handleAddNote}
-                                        className="hidden md:flex p-1.5 sm:p-2 rounded-lg transition-all duration-200 text-amber-600 bg-amber-500/10 hover:bg-amber-500 hover:text-white shadow-sm items-center gap-1 border border-amber-500/20"
-                                        title="Añadir nota al texto seleccionado"
-                                    >
-                                        <MessageSquarePlus size={16} />
-                                        <span className="hidden md:inline text-xs font-bold font-sans">Nota</span>
-                                    </button>
-
-                                    <div className="w-px h-5 bg-[var(--border-main)] mx-0.5 shrink-0"></div>
-                                    <div className="flex items-center bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-lg overflow-hidden shrink-0 shadow-sm">
-                                        <select
-                                            value={copyMode}
-                                            onChange={(e) => setCopyMode(e.target.value)}
-                                            className="bg-transparent text-[10px] font-bold text-[var(--text-muted)] focus:outline-none cursor-pointer border-r border-[var(--border-main)] px-1.5 py-1 uppercase tracking-wider h-full"
-                                        >
-                                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="text">Texto</option>
-                                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="title">Título</option>
-                                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="all">Todo</option>
-                                        </select>
-                                        <button
-                                            onClick={handleCopyToClipboard}
-                                            className={`px-2 py-1.5 transition-all duration-200 text-xs font-bold flex items-center gap-1 ${copied ? 'bg-green-500 text-white' : 'text-[var(--text-muted)] bg-[var(--bg-app)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-main)]'}`}
-                                            title="Copiar selección al portapapeles"
-                                        >
-                                            <Copy size={14} />
-                                        </button>
-                                    </div>
-                                    <button
-                                        onClick={handleReplaceFromClipboard}
-                                        className="p-1.5 rounded-lg transition-all duration-200 text-xs font-bold flex items-center gap-1 text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm border border-[var(--border-main)]"
-                                        title="Reemplazar todo el contenido con texto del portapapeles"
-                                    >
-                                        <ClipboardPaste size={15} />
-                                    </button>
-                                </div>
-
-                                <div className="flex-1"></div>
-
-                                {/* Right: History (all screens) + Status (desktop only) + Focus toggle */}
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                    {activeChapter && (
-                                        <button
-                                            onClick={() => setIsHistoryModalOpen(true)}
-                                            className="p-1.5 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-full transition-all duration-200 text-[var(--accent-main)] bg-[var(--accent-soft)]/50 hover:bg-[var(--accent-main)] hover:text-white shadow-sm flex items-center gap-1.5 border border-[var(--border-main)]"
-                                            title="Historial y Backups"
-                                        >
-                                            <History size={14} />
-                                            <span className="hidden sm:inline text-xs font-bold uppercase tracking-widest">Historial</span>
-                                        </button>
-                                    )}
-                                    {activeChapter && (
-                                        <div className="hidden md:flex items-center gap-2 px-2.5 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
-                                            <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.6)]' :
-                                                activeChapter.status === 'Completado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                                                    activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
-                                                        activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
-                                                            'bg-gray-400/50'
-                                                 }`}></div>
-                                            <select
-                                                className="bg-transparent text-[var(--text-main)] text-[11px] font-bold focus:outline-none cursor-pointer appearance-none pr-4 uppercase tracking-wider"
-                                                value={activeChapter.status || 'Idea'}
-                                                onChange={(e) => handleStatusChange(e.target.value)}
-                                            >
-                                                <option value="Idea">Idea</option>
-                                                <option value="Borrador">Borrador</option>
-                                                <option value="Revisión">Revisión</option>
-                                                <option value="Completado">Completado</option>
-                                                <option value="Finalizado">Finalizado</option>
-                                            </select>
-                                        </div>
-                                    )}
-
-                                    <button
-                                        onClick={isTTSActive ? handleStopTTS : handleStartTTS}
-                                        className={`hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 shadow-sm mr-1 ${isTTSActive ? 'bg-green-500 text-white border-green-500 hover:bg-red-500 hover:border-red-500' : 'bg-transparent text-[var(--accent-main)] border-transparent hover:bg-[var(--accent-soft)] hover:border-[var(--accent-main)]'}`}
-                                        title={isTTSActive ? 'Detener Lectura en Voz Alta' : 'Leer Capítulo en Voz Alta'}
-                                    >
-                                        <Volume2 size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => setIsChapterInfoModalOpen(true)}
-                                        className="hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
-                                        title="Información del Capítulo"
-                                    >
-                                        <Info size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => setIsFocusMode(true)}
-                                        className="hidden md:flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
-                                        title="Modo Lectura"
-                                    >
-                                        <BookOpen size={16} />
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex items-center justify-between p-2 px-3 md:px-6 w-full animate-in fade-in duration-300">
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                    <button
-                                        onClick={() => setIsChapterInfoModalOpen(true)}
-                                        className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--bg-editor)] text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white hover:border-[var(--accent-main)] shadow-sm"
-                                        title="Información del Capítulo"
-                                    >
-                                        <Info size={12} />
-                                    </button>
-                                    <button
-                                        onClick={() => setIsReadingSettingsModalOpen(true)}
-                                        className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white hover:border-[var(--accent-main)] shadow-sm"
-                                        title="Configuración de Lectura"
-                                    >
-                                        <Settings size={16} />
-                                    </button>
-
-                                </div>
-
-                                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                                    {prevChapter && (
-                                        <button
-                                            onClick={() => selectChapter(prevChapter)}
-                                            className="px-2 py-1.5 sm:px-4 sm:py-2 text-[var(--accent-main)] bg-[var(--accent-soft)]/50 hover:bg-[var(--accent-main)] hover:text-white rounded-lg transition-all duration-200 shadow-sm flex items-center gap-1 border border-[var(--border-main)]"
-                                            title="Capítulo Anterior"
-                                        >
-                                            <ChevronLeft size={16} />
-                                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest">Anterior</span>
-                                        </button>
-                                    )}
-                                    {nextChapter && (
-                                        <button
-                                            onClick={() => selectChapter(nextChapter)}
-                                            className="px-2 py-1.5 sm:px-4 sm:py-2 text-[var(--accent-main)] bg-[var(--accent-soft)]/50 hover:bg-[var(--accent-main)] hover:text-white rounded-lg transition-all duration-200 shadow-sm flex items-center gap-1 border border-[var(--border-main)]"
-                                            title="Siguiente Capítulo"
-                                        >
-                                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest">Siguiente</span>
-                                            <ChevronRight size={16} />
-                                        </button>
-                                    )}
-                                </div>
-
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                    <button
-                                        onClick={() => setIsFocusMode(false)}
-                                        className="flex items-center gap-1.5 p-1.5 px-3 sm:px-4 sm:py-2 rounded-lg border transition-all shrink-0 bg-[var(--bg-editor)] text-red-500 border-red-500/30 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-sm"
-                                        title="Salir del Modo Lectura"
-                                    >
-                                        <X size={16} />
-                                        <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest">Salir</span>
-                                    </button>
-                                </div>
+                        {activeChapter && (
+                            <div className="flex-1 flex items-center gap-2 px-3 h-10 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)]">
+                                <div className={`w-2 h-2 rounded-full shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.4)] ${
+                                    activeChapter.status === 'Finalizado' ? 'bg-indigo-500' :
+                                    activeChapter.status === 'Completado' ? 'bg-emerald-500' :
+                                    activeChapter.status === 'Revisión' ? 'bg-amber-500' :
+                                    'bg-blue-500'
+                                }`}></div>
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)] truncate">
+                                    {activeChapter.status || 'Idea'}
+                                </span>
                             </div>
                         )}
+
+                        <button
+                            onClick={handleAddNote}
+                            className="w-10 h-10 flex items-center justify-center rounded-xl border border-amber-500/30 text-amber-600 bg-amber-500/5"
+                        >
+                            <MessageSquarePlus size={18} />
+                        </button>
+
+                        <button
+                            onClick={() => setIsFocusMode(true)}
+                            className="w-10 h-10 flex items-center justify-center rounded-xl border border-[var(--border-main)] text-[var(--accent-main)] bg-[var(--bg-app)]"
+                        >
+                            <BookOpen size={18} />
+                        </button>
+
+                        <button
+                            onClick={() => setIsMobileMenuOpen(true)}
+                            className="w-10 h-10 flex items-center justify-center rounded-xl border border-[var(--accent-main)]/30 text-[var(--accent-main)] bg-[var(--accent-soft)]"
+                        >
+                            <MoreHorizontal size={20} />
+                        </button>
                     </div>
 
-                    {/* Row 2 (Mobile only): Status + Focus */}
-                    {!isFocusMode && (
-                        <div className="flex md:hidden items-center justify-center gap-2 p-1.5 px-3 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/50">
-                            {activeChapter && (
-                                <>
-                                    <button
-                                        onClick={() => setIsChapterInfoModalOpen(true)}
-                                        className="p-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] text-[var(--accent-main)] hover:bg-[var(--accent-soft)] transition-all shadow-sm"
-                                        title="Información del Capítulo"
-                                    >
-                                        <Info size={16} />
-                                    </button>
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] cursor-pointer">
-                                        <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.6)]' :
-                                            activeChapter.status === 'Completado' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                                                activeChapter.status === 'Revisión' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' :
-                                                    activeChapter.status === 'Borrador' ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]' :
-                                                        'bg-gray-400/50'
-                                            }`}></div>
-                                        <select
-                                            className="bg-transparent text-[10px] font-bold text-[var(--text-main)] focus:outline-none cursor-pointer appearance-none pr-3 uppercase tracking-wider"
-                                            value={activeChapter.status || 'Idea'}
-                                            onChange={(e) => handleStatusChange(e.target.value)}
-                                        >
-                                            <option value="Idea">Idea</option>
-                                            <option value="Borrador">Borrador</option>
-                                            <option value="Revisión">Revisión</option>
-                                            <option value="Completado">Completado</option>
-                                            <option value="Finalizado">Finalizado</option>
-                                        </select>
-                                    </div>
-                                </>
-                            )}
-
+                    {/* Desktop Toolbar (Sophisticated) */}
+                    {/* Desktop Toolbar (Sophisticated) */}
+                    <div className="hidden md:flex items-center justify-between gap-4 w-full h-14">
+                        {/* Left Group */}
+                        <div className="flex items-center gap-2">
                             <button
-                                onClick={handleAddNote}
-                                className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500 hover:text-white shadow-sm mr-1"
-                                title="Añadir nota al texto seleccionado"
+                                onClick={() => setIsFormattingModalOpen(true)}
+                                className="h-11 px-4 rounded-xl text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white transition-all shadow-sm flex items-center gap-2 border border-[var(--border-main)]"
+                                title="Formato y Estilos"
                             >
-                                <MessageSquarePlus size={14} />
+                                <Pencil size={18} />
+                                <span className="text-base font-black leading-none pb-0.5">A</span>
                             </button>
+
                             <button
                                 onClick={() => setIsFocusMode(true)}
-                                className="flex items-center justify-center p-2 rounded-lg border transition-all shrink-0 bg-[var(--accent-soft)]/50 text-[var(--accent-main)] border-[var(--border-main)] hover:bg-[var(--accent-main)] hover:text-white shadow-sm"
+                                className="w-11 h-11 rounded-xl text-[var(--text-muted)] border border-[var(--border-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] transition-all shadow-sm flex items-center justify-center"
+                                title="Modo Lectura / Foco"
                             >
-                                <BookOpen size={14} />
+                                <BookOpen size={20} />
+                            </button>
+
+                            <button
+                                onClick={() => setIsChapterInfoModalOpen(true)}
+                                className="w-11 h-11 rounded-xl text-[var(--text-muted)] border border-[var(--border-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] transition-all shadow-sm flex items-center justify-center"
+                                title="Información del Capítulo"
+                            >
+                                <Info size={20} />
                             </button>
                         </div>
-                    )}
-                </>
-            )}
-            {/* End of Editor Toolbar conditional wrapper */}
 
+                        {/* Center Group */}
+                        <div className="flex items-center gap-2">
+                            <div className="flex items-center bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl p-1 shadow-sm relative">
+                                <button
+                                    onClick={() => setIsCopyDropdownOpen(!isCopyDropdownOpen)}
+                                    className="px-3 py-1.5 text-[10px] font-black text-[var(--text-main)] uppercase tracking-widest flex items-center gap-2 hover:bg-[var(--accent-soft)] rounded-lg transition-all"
+                                >
+                                    <span>{copyMode === 'text' ? 'Texto' : copyMode === 'title' ? 'Título' : 'Todo'}</span>
+                                    <ChevronRight size={12} className={`transition-transform duration-300 ${isCopyDropdownOpen ? 'rotate-90' : ''}`} />
+                                </button>
 
+                                {isCopyDropdownOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsCopyDropdownOpen(false)}></div>
+                                        <div className="absolute top-full left-0 mt-2 w-32 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-top-1 duration-150">
+                                            <div className="p-1 space-y-0.5">
+                                                {[
+                                                    { id: 'text', label: 'Texto' },
+                                                    { id: 'title', label: 'Título' },
+                                                    { id: 'all', label: 'Todo' }
+                                                ].map(mode => (
+                                                    <button
+                                                        key={mode.id}
+                                                        onClick={() => { setCopyMode(mode.id); setIsCopyDropdownOpen(false); }}
+                                                        className={`w-full text-left px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${copyMode === mode.id ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}
+                                                    >
+                                                        {mode.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
 
-            {/* TTS Floating Control Bar */}
-            {isTTSActive && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 px-5 py-3 rounded-2xl bg-[var(--bg-app)]/95 backdrop-blur-xl border border-green-500/30 shadow-2xl shadow-green-500/10 animate-in slide-in-from-bottom-4 fade-in duration-300">
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-green-500">Leyendo</span>
+                                <div className="w-px h-4 bg-[var(--border-main)] mx-1"></div>
+                                <button
+                                    onClick={handleCopyToClipboard}
+                                    className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all ${copied ? 'bg-green-500 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-main)]'}`}
+                                    title="Copiar"
+                                >
+                                    <Copy size={18} />
+                                </button>
+                            </div>
+                            
+                            <button
+                                onClick={handleReplaceFromClipboard}
+                                className="h-11 px-4 rounded-xl text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white transition-all shadow-sm border border-[var(--border-main)] flex items-center gap-2"
+                                title="Sustituir con Portapapeles"
+                            >
+                                <ClipboardPaste size={18} />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Reemplazar</span>
+                            </button>
+                        </div>
+
+                        {/* Right Group */}
+                        <div className="flex items-center gap-3">
+                            {activeChapter && (
+                                <div className="flex items-center gap-2 px-5 h-11 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-sm">
+                                    <div className={`w-2.5 h-2.5 rounded-full ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]'}`}></div>
+                                    <select
+                                        className="bg-transparent text-[var(--text-main)] text-[10px] font-black focus:outline-none cursor-pointer appearance-none pr-2 uppercase tracking-widest"
+                                        value={activeChapter.status || 'Idea'}
+                                        onChange={(e) => handleStatusChange(e.target.value)}
+                                    >
+                                        <option value="Idea">Idea</option>
+                                        <option value="Borrador">Borrador</option>
+                                        <option value="Revisión">Revisión</option>
+                                        <option value="Completado">Completado</option>
+                                        <option value="Finalizado">Finalizado</option>
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Options Dropdown */}
+                            <div className="relative">
+                                <button 
+                                    onClick={() => setIsDesktopMoreOpen(!isDesktopMoreOpen)}
+                                    className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all duration-300 ${isDesktopMoreOpen ? 'bg-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-muted)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] shadow-sm'}`}
+                                >
+                                    <MoreHorizontal size={22} />
+                                </button>
+
+                                {isDesktopMoreOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsDesktopMoreOpen(false)}></div>
+                                        <div className="absolute right-0 mt-3 w-64 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200">
+                                            <div className="p-1.5 space-y-1">
+                                                <button onClick={() => { setIsDetectionModeModalOpen(true); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition-all">
+                                                        <ScanSearch size={16} />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[11px] font-black uppercase tracking-widest">IA Scan</span>
+                                                        <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Analizar Personajes</span>
+                                                    </div>
+                                                </button>
+
+                                                <button onClick={() => { setIsHistoryModalOpen(true); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left">
+                                                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all">
+                                                        <History size={16} />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[11px] font-black uppercase tracking-widest">Historial</span>
+                                                        <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Versiones y Backup</span>
+                                                    </div>
+                                                </button>
+
+                                                <button onClick={() => { setIsReadingSettingsModalOpen(true); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left">
+                                                    <div className="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-600 flex items-center justify-center group-hover:bg-orange-500 group-hover:text-white transition-all">
+                                                        <Settings size={18} />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[11px] font-black uppercase tracking-widest">Vista</span>
+                                                        <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Fuentes y Diseño</span>
+                                                    </div>
+                                                </button>
+
+                                                 {(profile?.googleApiKey1 || profile?.googleApiKey2) && (
+                                                    <button 
+                                                        onClick={() => { setIsNarratorSelectorOpen(true); setIsDesktopMoreOpen(false); }}
+                                                        disabled={activeChapter?.status !== 'Finalizado'}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group text-left ${activeChapter?.status === 'Finalizado' ? 'hover:bg-indigo-50' : 'opacity-40 grayscale cursor-not-allowed'}`}
+                                                    >
+                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${activeChapter?.status === 'Finalizado' ? 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white' : 'bg-gray-100 text-gray-400'} transition-all`}>
+                                                            <FileAudio size={16} />
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[11px] font-black uppercase tracking-widest">Narrador</span>
+                                                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Generar Audio Premium</span>
+                                                        </div>
+                                                    </button>
+                                                )}
+
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
                     </div>
-
-                    <div className="w-px h-6 bg-[var(--border-main)]"></div>
-
-                    {/* Play/Pause */}
-                    <button
-                        onClick={isTTSPaused ? handleResumeTTS : handlePauseTTS}
-                        className="p-2 rounded-lg bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white transition-all border border-green-500/20"
-                        title={isTTSPaused ? 'Reanudar' : 'Pausar'}
-                    >
-                        {isTTSPaused ? <Play size={16} /> : <Pause size={16} />}
-                    </button>
-
-                    {/* Stop */}
-                    <button
-                        onClick={handleStopTTS}
-                        className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-all border border-red-500/20"
-                        title="Detener"
-                    >
-                        <Square size={14} />
-                    </button>
-
-                    <div className="w-px h-6 bg-[var(--border-main)]"></div>
-
-                    {/* Speed */}
-                    <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">Vel:</span>
-                        <select
-                            value={ttsSpeed}
-                            onChange={(e) => setTTSSpeed(parseFloat(e.target.value))}
-                            className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-lg px-2 py-1 text-xs font-bold text-[var(--text-main)] focus:outline-none cursor-pointer"
-                        >
-                            <option value={0.5}>0.5x</option>
-                            <option value={0.75}>0.75x</option>
-                            <option value={1}>1x</option>
-                            <option value={1.25}>1.25x</option>
-                            <option value={1.5}>1.5x</option>
-                            <option value={2}>2x</option>
-                        </select>
+                </div>
+            ) : (
+                <div className="flex items-center justify-between p-2 px-3 md:px-6 w-full bg-[var(--bg-app)] border-b border-[var(--border-main)]">
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsReadingSettingsModalOpen(true)} className="p-2 rounded-lg border border-[var(--border-main)] text-[var(--text-muted)]"><Settings size={16} /></button>
                     </div>
-
-                    {/* Paragraph counter */}
-                    <span className="text-[10px] font-bold text-[var(--text-muted)] tabular-nums">
-                        {ttsCurrentParagraph + 1}/{ttsParagraphsRef.current.length}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        {prevChapter && <button onClick={() => selectChapter(prevChapter)} className="p-2 text-[var(--accent-main)]"><ChevronLeft size={20} /></button>}
+                        {nextChapter && <button onClick={() => selectChapter(nextChapter)} className="p-2 text-[var(--accent-main)]"><ChevronRight size={20} /></button>}
+                    </div>
+                    <button onClick={() => setIsFocusMode(false)} className="px-4 py-2 rounded-lg border border-red-500/30 text-red-500 font-bold uppercase text-[10px]">Salir</button>
                 </div>
             )}
 
-            {/* Editor Content Area */}
-            <div className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'}`}>
+            {/* Premium Buffering Overlay */}
+
+            <div className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'} ${isEditorLocked ? 'editor-locked-mode' : ''}`}>
                 <div className={`min-h-full transition-all duration-500 mx-auto ${isFocusMode && readingWidth === 'full' ? 'w-full px-2' :
                     isFocusMode && readingWidth === 'xl' ? 'max-w-7xl' :
                         isFocusMode && readingWidth === 'lg' ? 'max-w-5xl' :
                             isFocusMode && readingWidth === 'sm' ? 'max-w-xl' :
                                 'max-w-3xl'
                     }`}>
-                    {editor && <EditorContent editor={editor} className="min-h-full cursor-text" onClick={() => editor.commands.focus()} />}
+                    {editor && (
+                        <BubbleMenu 
+                            editor={editor} 
+                            pluginKey="bubbleMenuSelection"
+                            shouldShow={({ state, from, to }) => {
+                                const isReadOnlyStatus = activeChapterRef.current?.status === 'Completado' || activeChapterRef.current?.status === 'Finalizado';
+                                const isReadOnlyMode = isReadOnlyStatus || isFocusMode;
+                                return from !== to && !state.selection.empty && !isReadOnlyMode;
+                            }}
+                            className="flex items-center gap-1 bg-[var(--bg-app)]/80 backdrop-blur-xl border border-white/20 p-1.5 rounded-2xl shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200 z-[9999]"
+                        >
+                            <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
+                                <button
+                                    onClick={() => editor.chain().focus().toggleBold().run()}
+                                    className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('bold') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                    title="Negrita"
+                                >
+                                    <span className="font-bold text-sm">B</span>
+                                </button>
+                                <button
+                                    onClick={() => editor.chain().focus().toggleItalic().run()}
+                                    className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('italic') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                    title="Cursiva"
+                                >
+                                    <span className="italic font-serif text-sm">I</span>
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
+                                {[1, 2, 3].map(level => (
+                                    <button
+                                        key={level}
+                                        onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-xl text-[10px] font-black transition-all ${editor.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                        title={`Título ${level}`}
+                                    >
+                                        H{level}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <button
+                                onClick={() => {
+                                    const { from, to } = editor.state.selection;
+                                    const text = editor.state.doc.textBetween(from, to, ' ');
+                                    navigator.clipboard.writeText(text);
+                                    toast.success('¡Copiado!');
+                                }}
+                                className="w-9 h-9 flex items-center justify-center rounded-xl text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all ml-0.5"
+                                title="Copiar Selección"
+                            >
+                                <Copy size={16} />
+                            </button>
+                        </BubbleMenu>
+                    )}
+                    {editor && <EditorContent editor={editor} className={`min-h-full cursor-text ${isEditorLocked ? 'pointer-events-none select-none' : ''}`} onClick={() => !isEditorLocked && editor.commands.focus()} />}
                 </div>
             </div>
+
+            {/* Phase 4: Selection Toast */}
+            {selectionMetrics.show && (
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <div className="bg-[var(--bg-app)]/90 backdrop-blur-2xl border border-indigo-500/30 rounded-2xl p-2 px-4 shadow-2xl flex items-center gap-6 ring-1 ring-indigo-500/20">
+                        <div className="flex items-center gap-4 border-r border-[var(--border-main)] pr-6">
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest leading-none mb-1">Selección</span>
+                                <div className="flex items-center gap-3">
+                                    <span className="text-sm font-black text-[var(--text-main)]">{selectionMetrics.words} <span className="text-[10px] opacity-40 font-bold uppercase ml-0.5">Palabras</span></span>
+                                    <div className="w-1 h-1 rounded-full bg-[var(--border-main)]"></div>
+                                    <span className="text-sm font-black text-[var(--text-main)]">{selectionMetrics.chars} <span className="text-[10px] opacity-40 font-bold uppercase ml-0.5">Letras</span></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                const { from, to } = editor.state.selection;
+                                const text = editor.state.doc.textBetween(from, to, ' ');
+                                setPromptStudioPreload({
+                                    tab: 'refine',
+                                    chapterId: activeChapter.id,
+                                    instructions: `FRAGMENTO SELECCIONADO PARA REFINAR:\n"${text}"`
+                                });
+                                setActiveView('promptStudio');
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-600/20 active:scale-95 group"
+                        >
+                            <Sparkles size={14} className="group-hover:rotate-12 transition-transform" />
+                            Refinar IA
+                        </button>
+
+                        <button 
+                            onClick={() => {
+                                editor.chain().focus().setTextSelection({ from: editor.state.selection.to, to: editor.state.selection.to }).run();
+                                setSelectionMetrics({ ...selectionMetrics, show: false });
+                            }}
+                            className="p-2 text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
 
             {/* Modal de confirmación de detección de personajes */}
             <Modal isOpen={isDetectionModalOpen} onClose={() => { setIsDetectionModalOpen(false); setHighlightedCharId(null); }} title="Personajes Detectados">
@@ -1369,61 +1380,163 @@ const Editor = () => {
                 editor={editor}
             />
 
-            {/* Settings Reading Modal */}
-            <Modal isOpen={isReadingSettingsModalOpen} onClose={() => setIsReadingSettingsModalOpen(false)} title="Configuración de Lectura">
-                <div className="space-y-6">
+            {/* Formatting Hub Modal */}
+            <Modal isOpen={isFormattingModalOpen} onClose={() => setIsFormattingModalOpen(false)} title="Opciones de Formato">
+                <div className="space-y-8 py-2">
+                    {/* Headings & Text Styles */}
                     <div>
-                        <label className="block text-xs font-black uppercase text-[var(--text-muted)] tracking-widest mb-2">Tipografía</label>
-                        <select
-                            value={readingFont}
-                            onChange={(e) => setReadingFont(e.target.value)}
-                            className="w-full bg-[var(--bg-editor)] text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer border border-[var(--border-main)] rounded-lg px-3 py-2"
-                        >
-                            <option value="font-serif">Serif (Ideal para impresión)</option>
-                            <option value="font-sans">Sans (Moderna)</option>
-                            <option value="font-[Arial,sans-serif]">Arial</option>
-                            <option value="font-['Roboto',sans-serif]">Roboto</option>
-                        </select>
+                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Estilos de Título</label>
+                        <div className="grid grid-cols-3 gap-3">
+                            {[1, 2, 3].map(level => (
+                                <button
+                                    key={level}
+                                    onClick={() => {
+                                        editor?.chain().focus().toggleHeading({ level }).run();
+                                        setIsFormattingModalOpen(false);
+                                    }}
+                                    className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 ${editor?.isActive('heading', { level }) ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                >
+                                    <span className="text-xl font-black">H{level}</span>
+                                    <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Nivel {level}</span>
+                                </button>
+                            ))}
+                            <button
+                                onClick={() => {
+                                    editor?.chain().focus().setParagraph().run();
+                                    setIsFormattingModalOpen(false);
+                                }}
+                                className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 col-span-3 ${editor?.isActive('paragraph') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                            >
+                                <span className="text-sm font-bold">Párrafo Estándar</span>
+                                <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Texto normal del manuscrito</span>
+                            </button>
+                        </div>
                     </div>
 
+                    {/* Basic Formatting */}
                     <div>
-                        <label className="block text-xs font-black uppercase text-[var(--text-muted)] tracking-widest mb-2">Tamaño de Texto</label>
-                        <select
-                            value={readingTextSize}
-                            onChange={(e) => setReadingTextSize(e.target.value)}
-                            className="w-full bg-[var(--bg-editor)] text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer border border-[var(--border-main)] rounded-lg px-3 py-2"
-                        >
-                            <option value="sm">Chica</option>
-                            <option value="base">Normal</option>
-                            <option value="lg">Grande</option>
-                            <option value="xl">Gigante</option>
-                        </select>
+                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Estilos de Énfasis</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                onClick={() => editor?.chain().focus().toggleBold().run()}
+                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('bold') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                            >
+                                <span className="text-xl font-black">B</span>
+                                <span className="text-xs font-black uppercase tracking-widest">Negrita</span>
+                            </button>
+                            <button
+                                onClick={() => editor?.chain().focus().toggleItalic().run()}
+                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('italic') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                            >
+                                <span className="text-xl italic font-serif">I</span>
+                                <span className="text-xs font-black uppercase tracking-widest">Cursiva</span>
+                            </button>
+                        </div>
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-black uppercase text-[var(--text-muted)] tracking-widest mb-2">Ancho de Lectura</label>
-                        <select
-                            value={readingWidth}
-                            onChange={(e) => setReadingWidth(e.target.value)}
-                            className="w-full bg-[var(--bg-editor)] text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer border border-[var(--border-main)] rounded-lg px-3 py-2"
+                    {/* Cleanup */}
+                    <div className="pt-4 border-t border-[var(--border-main)]">
+                        <button
+                            onClick={() => {
+                                editor?.chain().focus().unsetAllMarks().run();
+                                editor?.chain().focus().clearNodes().run();
+                                setIsFormattingModalOpen(false);
+                                toast.info("Formato limpiado.");
+                            }}
+                            className="w-full py-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-red-500/20 hover:border-red-500"
                         >
-                            <option value="sm">Angosto</option>
-                            <option value="md">Ideal</option>
-                            <option value="lg">Ancho</option>
-                            <option value="xl">Súper Ancho</option>
-                            <option value="full">Pantalla Completa</option>
-                        </select>
+                            <Trash2 size={16} />
+                            Limpiar Todo el Formato
+                        </button>
                     </div>
                 </div>
-                <div className="mt-8 flex justify-end">
+            </Modal>
+
+            {/* Settings Reading Modal */}
+            <Modal isOpen={isReadingSettingsModalOpen} onClose={() => setIsReadingSettingsModalOpen(false)} title="Configuración de Lectura">
+                <div className="space-y-8 py-2">
+                    {/* Typography Mosaic */}
+                    <div>
+                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Tipografía</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { id: 'font-serif', label: 'Serif', detail: 'Clásica y Elegante' },
+                                { id: 'font-sans', label: 'Sans', detail: 'Moderna y Limpia' },
+                                { id: 'font-[Arial,sans-serif]', label: 'Arial', detail: 'Estilo Estándar' },
+                                { id: "font-['Roboto',sans-serif]", label: 'Roboto', detail: 'Google Style' }
+                            ].map(font => (
+                                <button
+                                    key={font.id}
+                                    onClick={() => setReadingFont(font.id)}
+                                    className={`p-4 rounded-2xl border transition-all text-left flex flex-col gap-1 ${readingFont === font.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                >
+                                    <span className={`text-lg font-bold ${font.id}`}>Aa</span>
+                                    <span className="text-xs font-black uppercase tracking-widest">{font.label}</span>
+                                    <span className={`text-[9px] opacity-60 ${readingFont === font.id ? 'text-white' : 'text-[var(--text-muted)]'}`}>{font.detail}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Text Size Mosaic */}
+                    <div>
+                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Tamaño de Texto</label>
+                        <div className="grid grid-cols-4 gap-2">
+                            {[
+                                { id: 'sm', label: 'Chica', size: 'text-xs' },
+                                { id: 'base', label: 'Normal', size: 'text-sm' },
+                                { id: 'lg', label: 'Grande', size: 'text-base' },
+                                { id: 'xl', label: 'Gigante', size: 'text-lg' }
+                            ].map(size => (
+                                <button
+                                    key={size.id}
+                                    onClick={() => setReadingTextSize(size.id)}
+                                    className={`p-3 rounded-xl border transition-all flex flex-col items-center justify-center gap-2 ${readingTextSize === size.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                >
+                                    <span className={`font-serif font-black ${size.size}`}>A</span>
+                                    <span className="text-[9px] font-black uppercase tracking-tighter">{size.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Width Mosaic */}
+                    <div>
+                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Ancho de Lectura</label>
+                        <div className="grid grid-cols-5 gap-2">
+                            {[
+                                { id: 'sm', label: 'Min' },
+                                { id: 'md', label: 'Ideal' },
+                                { id: 'lg', label: 'Ancho' },
+                                { id: 'xl', label: 'Extra' },
+                                { id: 'full', label: 'Max' }
+                            ].map(width => (
+                                <button
+                                    key={width.id}
+                                    onClick={() => setReadingWidth(width.id)}
+                                    className={`p-2 py-4 rounded-xl border transition-all flex flex-col items-center justify-center gap-2 ${readingWidth === width.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                >
+                                    <div className="flex items-center gap-0.5 opacity-40">
+                                        <div className="w-0.5 h-3 bg-current rounded-full"></div>
+                                        <div className={`h-3 bg-current rounded-sm ${width.id === 'sm' ? 'w-2' : width.id === 'md' ? 'w-4' : width.id === 'lg' ? 'w-6' : width.id === 'xl' ? 'w-8' : 'w-10'}`}></div>
+                                        <div className="w-0.5 h-3 bg-current rounded-full"></div>
+                                    </div>
+                                    <span className="text-[9px] font-black uppercase tracking-tighter">{width.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                <div className="mt-8 pt-6 border-t border-[var(--border-main)]">
                     <button
                         onClick={() => setIsReadingSettingsModalOpen(false)}
-                        className="px-6 py-2.5 bg-[var(--accent-main)] hover:bg-[#4f46e5] text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 text-sm w-full sm:w-auto"
+                        className="w-full py-4 bg-[var(--accent-main)] hover:bg-[#4f46e5] text-white font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl shadow-indigo-500/20 active:scale-95 text-xs"
                     >
-                        Cerrar
+                        Confirmar Cambios
                     </button>
                 </div>
             </Modal>
+
 
             {/* Note Creation Modal */}
             <Modal isOpen={isNoteModalOpen} onClose={() => { setIsNoteModalOpen(false); setNoteText(''); setNoteSelectionRange(null); }} title="📝 Añadir Nota al Texto">
@@ -1598,13 +1711,148 @@ const Editor = () => {
             )}
 
 
-            <FinalizeModal 
-                isOpen={isFinalizeModalOpen} 
-                onClose={() => setIsFinalizeModalOpen(false)} 
-                onConfirm={confirmFinalize} 
-            />
-        </div >
-    )
-}
 
-export default Editor
+
+            <FinalizeModal
+                isOpen={isFinalizeModalOpen}
+                onClose={() => setIsFinalizeModalOpen(false)}
+                onConfirm={confirmFinalize}
+            />
+            <PremiumNarrator 
+                isOpen={isPremiumNarratorOpen} 
+                onClose={() => setIsPremiumNarratorOpen(false)} 
+                chapter={activeChapter}
+                bookId={activeBook?.id}
+            />
+
+            {/* Mobile Actions Modal */}
+            <Modal isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} title="Herramientas del Editor">
+                <div className="space-y-6 pt-2 pb-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={() => { setIsFormattingModalOpen(true); setIsMobileMenuOpen(false); }}
+                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                        >
+                            <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] text-[var(--accent-main)] flex items-center justify-center mb-1">
+                                <Pencil size={24} />
+                            </div>
+                            <span className="text-xs font-black uppercase tracking-widest">Formato</span>
+                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Títulos y Estilos</span>
+                        </button>
+
+                        <button
+                            onClick={() => { setIsDetectionModeModalOpen(true); setIsMobileMenuOpen(false); }}
+                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                        >
+                            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center mb-1">
+                                <ScanSearch size={24} />
+                            </div>
+                            <span className="text-xs font-black uppercase tracking-widest">IA Scan</span>
+                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Detectar Personajes</span>
+                        </button>
+
+                        <button
+                            onClick={() => { setIsHistoryModalOpen(true); setIsMobileMenuOpen(false); }}
+                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                        >
+                            <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mb-1">
+                                <History size={24} />
+                            </div>
+                            <span className="text-xs font-black uppercase tracking-widest">Historial</span>
+                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Versiones Anteriores</span>
+                        </button>
+
+                        <button
+                            onClick={() => { setIsReadingSettingsModalOpen(true); setIsMobileMenuOpen(false); }}
+                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                        >
+                            <div className="w-12 h-12 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center mb-1">
+                                <Sliders size={24} />
+                            </div>
+                            <span className="text-xs font-black uppercase tracking-widest">Ajustes</span>
+                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Tipografía y Diseño</span>
+                        </button>
+                    </div>
+
+                    <div className="bg-blue-500/5 rounded-2xl p-4 border border-blue-500/10">
+                        <label className="block text-[9px] font-black uppercase text-blue-500 tracking-widest mb-3 text-center">Modo de Copia</label>
+                        <div className="flex gap-2 justify-center mb-3">
+                            {[
+                                { id: 'title', label: 'Título' },
+                                { id: 'text', label: 'Texto' },
+                                { id: 'all', label: 'Todo' }
+                            ].map(mode => (
+                                <button
+                                    key={mode.id}
+                                    onClick={() => setCopyMode(mode.id)}
+                                    className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase transition-all ${
+                                        copyMode === mode.id 
+                                        ? 'bg-blue-500 text-white shadow-lg' 
+                                        : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)]'
+                                    }`}
+                                >
+                                    {mode.label}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => { handleCopyToClipboard(); setIsMobileMenuOpen(false); }}
+                            className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                        >
+                            <Copy size={16} />
+                            <span>Copiar {copyMode === 'title' ? 'Título' : copyMode === 'text' ? 'Contenido' : 'Título + Contenido'}</span>
+                        </button>
+                    </div>
+
+                    <div className="bg-[var(--accent-soft)]/30 rounded-2xl p-4 border border-[var(--accent-main)]/10">
+                        <label className="block text-[9px] font-black uppercase text-[var(--accent-main)] tracking-widest mb-3 text-center">Estado de Edición</label>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                            {['Idea', 'Borrador', 'Revisión', 'Completado', 'Finalizado'].map(status => (
+                                <button
+                                    key={status}
+                                    onClick={() => { handleStatusChange(status); setIsMobileMenuOpen(false); }}
+                                    className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase transition-all ${
+                                        activeChapter?.status === status 
+                                        ? 'bg-[var(--accent-main)] text-white shadow-lg scale-105' 
+                                        : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)]'
+                                    }`}
+                                >
+                                    {status}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
+            <NarratorSelector 
+                isOpen={isNarratorSelectorOpen}
+                onClose={() => setIsNarratorSelectorOpen(false)}
+                chapter={activeChapter}
+                bookId={activeBook?.id}
+                onOpenGenerator={() => {
+                    setIsNarratorSelectorOpen(false);
+                    setIsPremiumNarratorOpen(true);
+                }}
+                onOpenPlayer={() => {
+                    setIsNarratorSelectorOpen(false);
+                    setIsPremiumPlayerOpen(true);
+                }}
+            />
+            <PremiumPlayer 
+                isOpen={isPremiumPlayerOpen}
+                onClose={() => {
+                    setIsPremiumPlayerOpen(false);
+                    setPlayingChunk(null);
+                }}
+                chapter={activeChapter}
+                bookId={activeBook?.id}
+                onChunkChange={(chunk) => {
+                    setPlayingChunk(chunk);
+                }}
+            />
+        </div>
+    );
+};
+
+export default Editor;
