@@ -8,7 +8,6 @@ import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2
 
 // Lazy loaded views
 const Editor = lazy(() => import('./components/Editor'))
-const CharactersView = lazy(() => import('./components/CharactersView'))
 const WorldView = lazy(() => import('./components/WorldView'))
 const SettingsView = lazy(() => import('./components/SettingsView'))
 const PromptStudioView = lazy(() => import('./components/PromptStudioView'))
@@ -176,8 +175,6 @@ function AppContent() {
 
   const renderActiveView = () => {
     switch (activeView) {
-      case 'characters':
-        return <CharactersView />;
       case 'world':
         return <WorldView />;
       case 'settings':
@@ -224,7 +221,7 @@ function AppContent() {
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
                   ? (activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'characters' ? 'Módulo de Personajes' : activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'promptStudio' ? 'Prompt Studio' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'promptStudio' ? 'Prompt Studio' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}

@@ -43,7 +43,7 @@ const CommandPalette = ({ isOpen, onClose }) => {
         const commands = [
             { id: 'cmd-new-chap', type: 'command', title: 'Crear nuevo capítulo', icon: Plus, action: () => { createChapter({ title: 'Nuevo Capítulo' }); setActiveView('editor'); } },
             { id: 'cmd-world', type: 'command', title: 'Ir al Master Doc', icon: Globe, action: () => setActiveView('world') },
-            { id: 'cmd-chars', type: 'command', title: 'Ver Personajes', icon: Users, action: () => setActiveView('characters') },
+            { id: 'cmd-chars', type: 'command', title: 'Ver Personajes', icon: Users, action: () => setActiveView('world') },
             { id: 'cmd-prompt', type: 'command', title: 'Exportador a IA', icon: Sparkles, action: () => setActiveView('promptStudio') },
             { id: 'cmd-settings', type: 'command', title: 'Ajustes del libro', icon: Settings, action: () => setActiveView('settings') },
             { id: 'cmd-trash', type: 'command', title: 'Ver Papelera', icon: Trash2, action: () => setActiveView('trash') },
@@ -137,7 +137,7 @@ const CommandPalette = ({ isOpen, onClose }) => {
         } else if (result.type === 'chapter') {
             selectChapter(result.data)
         } else if (result.type === 'character') {
-            setActiveView('characters')
+            setActiveView('world')
         } else if (result.type === 'world') {
             setActiveView('world')
         }

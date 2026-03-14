@@ -77,7 +77,7 @@ const PremiumNarrator = ({ isOpen, onClose, chapter, bookId }) => {
         const listToPaths = chunksList || chunks;
         if (!listToPaths || listToPaths.length === 0) return;
 
-        console.log(`[PremiumNarrator] Escaneando archivos...`);
+
         const status = {};
         for (const chunk of listToPaths) {
             if (chunk.audioId) {
