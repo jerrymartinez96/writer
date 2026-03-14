@@ -148,7 +148,15 @@ export const DataProvider = ({ children }) => {
                 setLoading(true);
                 const fetchedBooks = await getBooks(user.uid);
                 setBooks(fetchedBooks);
-                // Removed auto-select so user lands on LibraryView
+                
+                // RESTORE PERSISTENCE: Check if there's a saved book to auto-select
+                const savedBookId = localStorage.getItem('lastBookId');
+                if (savedBookId) {
+                    const savedBook = fetchedBooks.find(b => b.id === savedBookId);
+                    if (savedBook) {
+                        handleSelectBook(savedBook);
+                    }
+                }
             } catch (error) {
                 console.error("Failed to load books from Firestore", error);
             } finally {
@@ -194,6 +202,12 @@ export const DataProvider = ({ children }) => {
     const handleSelectBook = async (book) => {
         await flushAllSaves();
         setActiveBook(book);
+        
+        if (book) {
+            localStorage.setItem('lastBookId', book.id);
+        } else {
+            localStorage.removeItem('lastBookId');
+        }
         
         if (!book) {
             setChapters([]);
