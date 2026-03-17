@@ -1,12 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
-import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square } from 'lucide-react';
+import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, ArrowLeftRight, X } from 'lucide-react';
 import ExportService from '../services/ExportService';
+import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
 
 const SettingsView = () => {
-    const { activeBook, updateBook, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
+    const { activeBook, updateBook, updateBookData: handleUpdateBookData, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
     const toast = useToast();
     const [title, setTitle] = useState(activeBook?.title || '');
     const [description, setDescription] = useState(activeBook?.description || '');
@@ -14,6 +15,38 @@ const SettingsView = () => {
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef(null);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    
+    // AI States
+    const [openRouterKey, setOpenRouterKey] = useState(activeBook?.aiSettings?.openRouterKey || '');
+    const [selectedModel, setSelectedModel] = useState(activeBook?.aiSettings?.selectedAiModel || 'google/gemini-2.0-flash-exp:free');
+    const [googleApiKey, setGoogleApiKey] = useState(activeBook?.aiSettings?.googleApiKey || '');
+    const [showApiKey, setShowApiKey] = useState(false);
+    const [isModelsModalOpen, setIsModelsModalOpen] = useState(false);
+    const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
+    const [isSavingAI, setIsSavingAI] = useState(false);
+    const [availableModels, setAvailableModels] = useState(AIService.MODELS);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const [modalProviderTab, setModalProviderTab] = useState('google');
+    const hasLoadedProfile = useRef(false);
+
+    // Sync state with activeBook and fetch models
+    useEffect(() => {
+        if (activeBook?.aiSettings && !hasLoadedProfile.current) {
+            setOpenRouterKey(activeBook.aiSettings.openRouterKey || '');
+            setGoogleApiKey(activeBook.aiSettings.googleApiKey || '');
+            setSelectedModel(activeBook.aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free');
+            hasLoadedProfile.current = true;
+        }
+        
+        const fetchModels = async () => {
+            setIsLoadingModels(true);
+            const models = await AIService.getFreeModels();
+            setAvailableModels(models);
+            setIsLoadingModels(false);
+        };
+        
+        fetchModels();
+    }, [profile]);
     
     
     // Export States
@@ -78,9 +111,33 @@ const SettingsView = () => {
     };
 
     const handleSave = (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         updateBook({ title, description, coverUrl });
-        toast.success("¡Ajustes del libro guardados!");
+        toast.success("¡Identidad de la obra actualizada!");
+        setIsIdentityModalOpen(false);
+    };
+
+    const handleSaveAISettings = async () => {
+        setIsSavingAI(true);
+        try {
+            const aiSettings = { 
+                openRouterKey, 
+                googleApiKey,
+                selectedAiModel: selectedModel 
+            };
+            
+            // Save to active book (per-book)
+            await handleUpdateBookData({ aiSettings });
+            
+            // Also keep as global fallback if desired, but user asked for per-book
+            // updateProfile(aiSettings); 
+            
+            toast.success("¡Configuración de IA guardada para este libro!");
+        } catch (error) {
+            toast.error("Error al guardar ajustes de IA.");
+        } finally {
+            setIsSavingAI(false);
+        }
     };
 
 
@@ -98,120 +155,124 @@ const SettingsView = () => {
                 </p>
             </header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
-                {/* Left Side: Book Identity */}
-                <div className="lg:col-span-4">
-                    <div className="sticky top-8 space-y-8">
-                        <div>
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] opacity-50 mb-4 block ml-1">
-                                Portada del Libro
-                            </label>
-                            
-                            <div className="relative group perspective-1000">
-                                <div className="aspect-[2/3] w-full relative rounded-r-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.3)] bg-[var(--bg-app)] border border-[var(--border-main)] transition-all duration-700 transform-gpu group-hover:rotate-y-12 group-hover:shadow-indigo-500/30">
-                                    <div className="absolute top-0 bottom-0 left-0 w-10 bg-gradient-to-r from-black/30 to-transparent z-10 pointer-events-none"></div>
-                                    <div className="absolute top-0 bottom-0 left-1 w-[1px] bg-white/10 z-10"></div>
-                                    {coverUrl ? (
-                                        <img src={coverUrl} alt="Preview" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-[var(--accent-soft)]/50 to-transparent">
-                                            <ImageIcon size={40} className="text-indigo-500/30 mb-4" />
-                                            <p className="text-[10px] font-black text-indigo-500/40 uppercase tracking-widest">Esperando Imagen</p>
-                                        </div>
-                                    )}
-
-                                    {isUploading && (
-                                        <div className="absolute inset-0 bg-black/60 backdrop-blur-md z-20 flex flex-col items-center justify-center text-white">
-                                            <Loader2 className="animate-spin mb-3 text-indigo-400" size={32} />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">Procesando...</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="absolute -bottom-4 -right-4 flex gap-2">
-                                    <button 
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={isUploading}
-                                        className="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl hover:scale-110 active:scale-95 transition-all group/btn"
-                                        title="Subir archivo"
-                                    >
-                                        <Upload size={20} className="group-hover/btn:rotate-12 transition-transform" />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="mt-10 space-y-4">
-                                <div className="relative group">
-                                    <input 
-                                        type="url"
-                                        placeholder="URL de la imagen..."
-                                        value={coverUrl}
-                                        onChange={(e) => setCoverUrl(e.target.value)}
-                                        className="w-full bg-[var(--bg-app)]/50 border border-[var(--border-main)] rounded-2xl pl-10 pr-4 py-3.5 text-[11px] font-serif focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-[var(--bg-app)] transition-all"
-                                    />
-                                    <Globe size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-50" />
-                                </div>
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef}
-                                    className="hidden" 
-                                    accept="image/*"
-                                    onChange={handleFileUpload}
-                                />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+                {/* Project Identity Card */}
+                <div className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-[32px] p-8 shadow-sm group relative overflow-hidden flex flex-col">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-3xl rounded-full"></div>
+                    
+                    <div className="flex gap-6 items-start mb-8 relative z-10">
+                        <div className="w-24 aspect-[2/3] rounded-lg overflow-hidden shadow-lg border border-white/10 shrink-0 bg-[var(--bg-app)]">
+                            {coverUrl ? <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[var(--accent-main)] opacity-20"><ImageIcon size={32} /></div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-2xl font-serif font-black text-[var(--text-main)] truncate mb-1">{title || "Sin Título"}</h2>
+                            <p className="text-xs text-[var(--text-muted)] font-medium line-clamp-3 leading-relaxed mb-4">
+                                {description || "Comienza a definir la esencia de tu historia editando los detalles del proyecto."}
+                            </p>
+                            <div className="flex items-center gap-3">
+                                <span className="px-2 py-1 rounded-md bg-[var(--accent-soft)] text-[var(--accent-main)] text-[9px] font-black uppercase tracking-wider">{chapters.length} Capítulos</span>
+                                <span className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-500 text-[9px] font-black uppercase tracking-wider">Activo</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="mt-auto flex gap-3 relative z-10">
+                        <button 
+                            onClick={() => setIsIdentityModalOpen(true)}
+                            className="flex-1 px-6 py-4 bg-[var(--text-main)] text-[var(--bg-app)] dark:bg-white dark:text-black rounded-2xl font-black text-xs hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            <Book size={16} /> Editar Identidad
+                        </button>
                     </div>
                 </div>
 
-                <form onSubmit={handleSave} className="lg:col-span-8 space-y-10">
-                    <div className="space-y-6 bg-[var(--bg-editor)] border border-[var(--border-main)] p-8 md:p-10 rounded-[32px] shadow-sm">
-                        <div className="space-y-4">
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 block ml-1">
-                                Título del Proyecto
-                            </label>
-                            <input
-                                type="text"
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl px-6 py-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all text-xl font-serif font-black"
-                                placeholder="Escribe el nombre de tu obra..."
-                            />
+                {/* AI Configuration Section - Independent */}
+                <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 p-8 rounded-[32px] shadow-sm relative overflow-hidden group">
+                    <div className="absolute -top-20 -right-20 w-48 h-48 bg-indigo-500/10 blur-[80px] rounded-full group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
+                    
+                    <div className="relative z-10 h-full flex flex-col">
+                        <div className="flex-1">
+                            <h3 className="text-xl font-serif font-black text-[var(--text-main)] mb-2 flex items-center gap-3">
+                                <Zap size={24} className="text-indigo-500" />
+                                Inteligencia (Este Libro)
+                            </h3>
+                            <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed">
+                                Configura las llaves de API específicas para este proyecto. Estos datos no afectarán a otros libros.
+                            </p>
+                        </div>
+     
+
+                        <div className="space-y-4 mb-8">
+                            <div className="flex items-center justify-between p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl">
+                                <div className="overflow-hidden">
+                                    <p className="text-[9px] font-black tracking-widest text-indigo-500 uppercase mb-1">Modelo Activo</p>
+                                    <p className="text-xs font-bold text-[var(--text-main)] truncate">
+                                        {availableModels.find(m => m.id === selectedModel)?.name || "Gemini 2.0 Flash"}
+                                    </p>
+                                </div>
+                                <button 
+                                    onClick={() => setIsModelsModalOpen(true)}
+                                    className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all shadow-sm"
+                                >
+                                    <ArrowLeftRight size={16} />
+                                </button>
+                            </div>
+                            
+                            <div className="p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl flex items-center justify-between">
+                                <div className="flex-1 min-w-0 mr-4">
+                                    <p className="text-[9px] font-black tracking-widest text-indigo-500 uppercase mb-1">Cero Costo API</p>
+                                    <p className="text-xs font-mono text-[var(--text-muted)] truncate italic">
+                                        {openRouterKey ? "••••••••••••••••" : "No configurada"}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => setShowApiKey(!showApiKey)}
+                                        className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-muted)]"
+                                    >
+                                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {showApiKey && (
+                                <div className="animate-in slide-in-from-top-2 duration-300 space-y-4">
+                                    <div>
+                                        <p className="text-[9px] font-black tracking-widest text-[var(--accent-main)] uppercase mb-1">OpenRouter Key</p>
+                                        <input
+                                            type="text"
+                                            value={openRouterKey}
+                                            onChange={(e) => setOpenRouterKey(e.target.value)}
+                                            className="w-full bg-[var(--bg-app)] border border-indigo-500/30 rounded-xl px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                                            placeholder="sk-or-v1-..."
+                                        />
+                                    </div>
+                                    <div>
+                                        <p className="text-[9px] font-black tracking-widest text-emerald-500 uppercase mb-1">Google AI Studio Key</p>
+                                        <input
+                                            type="text"
+                                            value={googleApiKey}
+                                            onChange={(e) => setGoogleApiKey(e.target.value)}
+                                            className="w-full bg-[var(--bg-app)] border border-emerald-500/30 rounded-xl px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                                            placeholder="AIzaSy..."
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="space-y-4">
-                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 block ml-1">
-                                Sinopsis Narrativa
-                            </label>
-                            <textarea
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                rows={8}
-                                className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl px-6 py-5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all text-base leading-relaxed scrollbar-hide font-medium"
-                                placeholder="Escribe un resumen que capture la esencia de tu historia..."
-                            />
-                        </div>
-
-                        <div className="pt-6 flex flex-col sm:flex-row items-center gap-4">
+                        <div className="mt-auto">
                             <button
-                                type="submit"
-                                disabled={isUploading}
-                                className="w-full sm:flex-1 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
+                                onClick={handleSaveAISettings}
+                                disabled={isSavingAI}
+                                className="w-full px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-3 disabled:opacity-50"
                             >
-                                <Save size={20} />
-                                Guardar Información
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setIsConfirmOpen(true)}
-                                className="w-full sm:w-auto px-8 py-4 text-red-500 hover:bg-red-500/5 rounded-2xl transition-all border border-red-500/20 font-black text-sm flex items-center justify-center gap-2"
-                            >
-                                <Trash2 size={20} />
-                                Eliminar Obra
+                                {isSavingAI ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                Guardar Inteligencia
                             </button>
                         </div>
                     </div>
-                </form>
+                </div>
             </div>
 
             {/* Export Section */}
@@ -359,6 +420,173 @@ const SettingsView = () => {
                 confirmText="Sí, borrar libro"
                 type="danger"
             />
+
+            {/* Project Identity Modal */}
+            {isIdentityModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsIdentityModalOpen(false)}></div>
+                    <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-6 border-b border-[var(--border-main)]">
+                            <div>
+                                <h3 className="text-xl font-bold text-[var(--text-main)] font-serif italic">Identidad del Proyecto</h3>
+                                <p className="text-xs text-[var(--text-muted)] mt-1">Define la estética y esencia de tu obra.</p>
+                            </div>
+                            <button onClick={() => setIsIdentityModalOpen(false)} className="p-2 rounded-xl hover:bg-[var(--bg-editor)] text-[var(--text-muted)] transition-colors"><X size={20} /></button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-8 scrollbar-hide grid grid-cols-1 md:grid-cols-12 gap-8">
+                            {/* Cover Edit */}
+                            <div className="md:col-span-4 space-y-6">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500 block">Portada de la Obra</label>
+                                <div className="relative group aspect-[2/3] rounded-xl overflow-hidden shadow-2xl bg-[var(--bg-editor)] border border-[var(--border-main)]">
+                                    {coverUrl ? <img src={coverUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="w-full h-full flex flex-col items-center justify-center opacity-30 text-indigo-500"><ImageIcon size={48} className="mb-2" /><span className="text-[10px] font-black uppercase">Sin Imagen</span></div>}
+                                    {isUploading && <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center"><Loader2 size={24} className="animate-spin text-white" /></div>}
+                                    <button 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="absolute inset-x-0 bottom-0 py-4 bg-black/70 text-white text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        Subir Archivo
+                                    </button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="relative">
+                                        <input 
+                                            type="url"
+                                            placeholder="Pegar URL de imagen..."
+                                            value={coverUrl}
+                                            onChange={(e) => setCoverUrl(e.target.value)}
+                                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl pl-9 pr-4 py-3 text-[11px] font-serif focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                                        />
+                                        <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                                    </div>
+                                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
+                                </div>
+                            </div>
+
+                            {/* Text Metadata */}
+                            <div className="md:col-span-8 space-y-6">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500 block">Título de la Obra</label>
+                                    <input
+                                        type="text"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500/20 outline-none text-xl font-serif font-black"
+                                        placeholder="Escribe el nombre de tu obra..."
+                                    />
+                                </div>
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500 block">Sinopsis Narrativa</label>
+                                    <textarea
+                                        value={description}
+                                        onChange={(e) => setDescription(e.target.value)}
+                                        rows={10}
+                                        className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-6 py-5 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm leading-relaxed scrollbar-hide font-medium"
+                                        placeholder="Escribe un resumen que capture la esencia de tu historia..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-6 bg-[var(--bg-editor)] border-t border-[var(--border-main)] flex justify-between items-center">
+                            <button
+                                onClick={() => {
+                                    if (window.confirm("¿Seguro que quieres eliminar la obra definitivamente?")) {
+                                        deleteBook(activeBook.id);
+                                    }
+                                }}
+                                className="px-6 py-3 text-red-500 hover:bg-red-500/10 rounded-xl font-black text-xs transition-all flex items-center gap-2"
+                            >
+                                <Trash2 size={16} /> Eliminar Libro
+                            </button>
+                            <div className="flex gap-4">
+                                <button onClick={() => setIsIdentityModalOpen(false)} className="px-6 py-3 text-[var(--text-muted)] font-black text-xs hover:text-[var(--text-main)]">Cancelar</button>
+                                <button onClick={handleSave} className="px-10 py-3 bg-[var(--accent-main)] text-white font-black rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all">Sellar Cambios</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Models Modal */}
+            {isModelsModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsModelsModalOpen(false)}></div>
+                    <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-6 border-b border-[var(--border-main)]">
+                            <div>
+                                <h3 className="text-xl font-bold text-[var(--text-main)] font-serif italic">Catálogo de Modelos Gratuitos</h3>
+                                <p className="text-xs text-[var(--text-muted)] mt-1">Sincronizados en tiempo real desde OpenRouter.</p>
+                            </div>
+                            <button onClick={() => setIsModelsModalOpen(false)} className="p-2 rounded-xl hover:bg-[var(--bg-editor)] text-[var(--text-muted)] transition-colors"><X size={20} /></button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-6 md:p-8 scrollbar-hide bg-[var(--bg-editor)]/30">
+                            {/* Tabs Switcher */}
+                            <div className="flex gap-2 p-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl mb-8">
+                                <button 
+                                    onClick={() => setModalProviderTab('google')}
+                                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalProviderTab === 'google' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]'}`}
+                                >
+                                    Google AI Studio
+                                </button>
+                                <button 
+                                    onClick={() => setModalProviderTab('openrouter')}
+                                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalProviderTab === 'openrouter' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]'}`}
+                                >
+                                    OpenRouter (Gratis)
+                                </button>
+                            </div>
+
+                            {isLoadingModels ? (
+                                <div className="py-20 flex flex-col items-center justify-center text-[var(--text-muted)]">
+                                    <Loader2 size={32} className="animate-spin mb-4 text-indigo-500" />
+                                    <span className="text-xs uppercase font-black tracking-widest">Obteniendo lista oficial...</span>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {availableModels
+                                        .filter(m => modalProviderTab === 'google' ? m.provider === 'Google' : m.provider === 'OpenRouter')
+                                        .map(model => (
+                                        <button
+                                            key={model.id}
+                                            onClick={() => {
+                                                setSelectedModel(model.id);
+                                                setIsModelsModalOpen(false);
+                                            }}
+                                            className={`flex items-start gap-4 p-5 rounded-2xl border transition-all text-left group ${selectedModel === model.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50'}`}
+                                        >
+                                            <div className="flex-1 overflow-hidden">
+                                                <div className={`text-sm font-black truncate mb-1 ${selectedModel === model.id ? 'text-white' : 'text-[var(--text-main)]'}`}>{model.name}</div>
+                                                <div className="flex items-center gap-3 mb-1">
+                                                    <div className={`text-[10px] uppercase font-bold tracking-[0.2em] ${selectedModel === model.id ? 'text-white/60' : 'text-[var(--text-muted)]'}`}>
+                                                        {model.provider}
+                                                    </div>
+                                                    {model.context_length && (
+                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${selectedModel === model.id ? 'bg-white/20 text-white' : 'bg-indigo-500/10 text-indigo-500'}`}>
+                                                            {Math.round(model.context_length / 1000)}k
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {selectedModel === model.id ? (
+                                                <CheckSquare size={18} className="text-white shrink-0" />
+                                            ) : (
+                                                <Square size={18} className="text-[var(--text-muted)] opacity-30 group-hover:opacity-100 transition-opacity shrink-0" />
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-6 bg-[var(--bg-editor)] border-t border-[var(--border-main)] flex justify-between items-center">
+                            <p className="text-[10px] font-bold text-[var(--text-muted)] italic">* Solo se muestran modelos con costo 0.</p>
+                            <button onClick={() => setIsModelsModalOpen(false)} className="px-8 py-3 bg-[var(--accent-main)] text-white font-bold rounded-xl transition-all hover:scale-105 active:scale-95 shadow-lg">Cerrar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

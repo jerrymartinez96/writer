@@ -10,7 +10,7 @@ import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2
 const Editor = lazy(() => import('./components/Editor'))
 const WorldView = lazy(() => import('./components/WorldView'))
 const SettingsView = lazy(() => import('./components/SettingsView'))
-const PromptStudioView = lazy(() => import('./components/PromptStudioView'))
+const IAStudioView = lazy(() => import('./components/IAStudioView'))
 const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
 const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
@@ -179,8 +179,8 @@ function AppContent() {
         return <WorldView />;
       case 'settings':
         return <SettingsView />;
-      case 'promptStudio':
-        return <PromptStudioView />;
+      case 'iaStudio':
+        return <IAStudioView />;
       case 'trash':
         return <TrashView />;
       case 'manuscript':
@@ -221,7 +221,7 @@ function AppContent() {
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
                   ? (activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'promptStudio' ? 'Prompt Studio' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'iaStudio' ? 'IA Studio' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}

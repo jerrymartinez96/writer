@@ -522,7 +522,7 @@ const Editor = () => {
         }
     };
 
-    const handleSendToPromptStudio = () => {
+    const handleSendToIAStudio = () => {
         if (!viewingNote || !activeChapter) return;
         const instructions = `FRAGMENTO DEL TEXTO A REFINAR:\n"${viewingNote.highlightedText}"\n\nNOTA DEL AUTOR:\n${viewingNote.noteText}`;
         setPromptStudioPreload({
@@ -530,7 +530,7 @@ const Editor = () => {
             chapterId: activeChapter.id,
             instructions
         });
-        setActiveView('promptStudio');
+        setActiveView('iaStudio');
         setIsViewNoteModalOpen(false);
         setViewingNote(null);
     };
@@ -1135,7 +1135,7 @@ const Editor = () => {
                                     chapterId: activeChapter.id,
                                     instructions: `FRAGMENTO SELECCIONADO PARA REFINAR:\n"${text}"`
                                 });
-                                setActiveView('promptStudio');
+                                setActiveView('iaStudio');
                             }}
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-600/20 active:scale-95 group"
                         >
@@ -1618,16 +1618,16 @@ const Editor = () => {
                             <div className="flex flex-col gap-3 pt-2">
                                 {/* Bridge to Prompt Studio — the KEY feature */}
                                 <button
-                                    onClick={handleSendToPromptStudio}
+                                    onClick={handleSendToIAStudio}
                                     className="w-full group relative px-5 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 flex items-center justify-center gap-2 overflow-hidden"
                                 >
                                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                                     <span className="relative z-10 flex items-center gap-2">
                                         <Sparkles size={18} />
-                                        ✨ Refinar con IA en Prompt Studio
+                                        ✨ Refinar con IA en IA Studio
                                     </span>
                                 </button>
-                                <p className="text-[10px] text-[var(--text-muted)] text-center uppercase tracking-widest">Enviará el fragmento y la nota al modo Refinado del Prompt Studio</p>
+                                <p className="text-[10px] text-[var(--text-muted)] text-center uppercase tracking-widest">Enviará el fragmento y la nota al modo Refinado del IA Studio</p>
 
                                 <div className="flex gap-2 pt-1">
                                     <button

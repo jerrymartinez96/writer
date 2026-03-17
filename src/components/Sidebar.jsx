@@ -336,14 +336,14 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                     </button>
 
                     <button
-                        onClick={() => handleSelectMobile(() => setActiveView('promptStudio'))}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'promptStudio' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
-                        title="Exportador a IA"
+                        onClick={() => handleSelectMobile(() => setActiveView('iaStudio'))}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'iaStudio' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        title="IA Studio"
                     >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'promptStudio' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-purple-500/10 text-purple-500'}`}>
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'iaStudio' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-purple-500/10 text-purple-500'}`}>
                             <Sparkles size={isSidebarCollapsed ? 18 : 14} />
                         </div>
-                        {!isSidebarCollapsed && <span>Exportador a IA</span>}
+                        {!isSidebarCollapsed && <span>IA Studio</span>}
                     </button>
 
                     <button
