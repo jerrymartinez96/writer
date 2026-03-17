@@ -309,6 +309,56 @@ class ExportService {
         saveAs(buffer, `${book.title.replace(/\s+/g, '_')}_Manuscrito.docx`);
     }
 
+    /**
+     * Genera el texto plano de la Biblia para copiar al portapapeles
+     */
+    static getMasterDocText(book, characters = [], worldItems = []) {
+        let content = `BIBLIA DEL PROYECTO: ${book.title.toUpperCase()}\n`;
+        content += `================================================\n\n`;
+
+        if (characters.length > 0) {
+            content += `--- PERSONAJES ---\n\n`;
+            characters.forEach(char => {
+                content += `- ${char.name}${char.role ? ` (${char.role})` : ''}:\n  ${char.description || 'Sin descripción'}\n\n`;
+            });
+        }
+
+        if (worldItems.length > 0) {
+            content += `--- UNIVERSO Y NOTAS ---\n`;
+            
+            const renderItemsRecursive = (parentId, depth = 0) => {
+                const children = worldItems.filter(i => i.parentId === parentId);
+                if (children.length === 0) return '';
+                
+                const indent = '  '.repeat(depth);
+                let text = '';
+                
+                children.forEach(item => {
+                    text += `${indent}${depth === 0 ? '■ ' : '└─ '}${item.title}${item.isCategory ? ' [CARPETA]' : ''}${item.content ? `\n${indent}   ${item.content.replace(/\n/g, '\n' + indent + '   ')}` : ''}\n\n`;
+                    text += renderItemsRecursive(item.id, depth + 1);
+                });
+                return text;
+            };
+
+            const structureText = renderItemsRecursive('system_estructura');
+            if (structureText) content += `\n[ESTRUCTURA]\n${structureText}`;
+            
+            const notesText = renderItemsRecursive('system_notas');
+            if (notesText) content += `\n[NOTAS ADICIONALES]\n${notesText}`;
+            
+            const dynamicItems = worldItems.filter(i => !i.parentId && i.id !== 'system_estructura' && i.id !== 'system_notas');
+            if (dynamicItems.length > 0) {
+                content += `\n[OTRAS SECCIONES]\n`;
+                dynamicItems.forEach(item => {
+                    content += `■ ${item.title}${item.isCategory ? ' [CARPETA]' : ''}${item.content ? `\n   ${item.content.replace(/\n/g, '\n   ')}` : ''}\n\n`;
+                    content += renderItemsRecursive(item.id, 1);
+                });
+            }
+        }
+
+        return content;
+    }
+
 }
 
 export default ExportService;

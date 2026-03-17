@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
-import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, ArrowLeftRight, X } from 'lucide-react';
+import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, ArrowLeftRight, X, Copy } from 'lucide-react';
 import ExportService from '../services/ExportService';
 import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
@@ -115,6 +115,17 @@ const SettingsView = () => {
         updateBook({ title, description, coverUrl });
         toast.success("¡Identidad de la obra actualizada!");
         setIsIdentityModalOpen(false);
+    };
+
+    const handleCopyMasterDoc = () => {
+        try {
+            const text = ExportService.getMasterDocText(activeBook, characters, worldItems);
+            navigator.clipboard.writeText(text);
+            toast.success("¡Biblia copiada al portapapeles!");
+        } catch (error) {
+            console.error("Copy failed:", error);
+            toast.error("Error al copiar al portapapeles.");
+        }
     };
 
     const handleSaveAISettings = async () => {
@@ -382,14 +393,25 @@ const SettingsView = () => {
                         </div>
                     </div>
 
-                    <button
-                        onClick={handleExport}
-                        disabled={isExporting}
-                        className="w-full md:w-auto min-w-[300px] bg-[var(--text-main)] text-[var(--bg-app)] dark:bg-white dark:text-black px-12 py-5 rounded-[24px] font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-3 text-lg disabled:opacity-50"
-                    >
-                        {isExporting ? <Loader2 className="animate-spin" size={24} /> : <Download size={24} />}
-                        {isExporting ? 'Maquetando...' : `Generar ${exportFormat.toUpperCase()}`}
-                    </button>
+                    <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
+                        <button
+                            onClick={handleCopyMasterDoc}
+                            className="w-full sm:w-auto px-8 py-5 rounded-[24px] font-black bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all shadow-sm flex items-center justify-center gap-3 text-sm"
+                            title="Copia el contenido de la Biblia (Personajes y Notas) para usarlo en otros sitios"
+                        >
+                            <Copy size={18} />
+                            Copiar Biblia (Clip)
+                        </button>
+
+                        <button
+                            onClick={handleExport}
+                            disabled={isExporting}
+                            className="w-full md:w-auto min-w-[300px] bg-[var(--text-main)] text-[var(--bg-app)] dark:bg-white dark:text-black px-12 py-5 rounded-[24px] font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-3 text-lg disabled:opacity-50"
+                        >
+                            {isExporting ? <Loader2 className="animate-spin" size={24} /> : <Download size={24} />}
+                            {isExporting ? 'Maquetando...' : `Generar ${exportFormat.toUpperCase()}`}
+                        </button>
+                    </div>
                 </div>
             </div>
 
