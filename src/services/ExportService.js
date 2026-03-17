@@ -48,17 +48,37 @@ class ExportService {
             content += `================================================\n\n`;
 
             if (characters.length > 0) {
-                content += `PERSONAJES:\n`;
+                content += `--- PERSONAJES ---\n\n`;
                 characters.forEach(char => {
-                    content += `- ${char.name}: ${char.role || ''}\n  ${char.description || ''}\n\n`;
+                    content += `- ${char.name}${char.role ? ` (${char.role})` : ''}:\n  ${char.description || 'Sin descripción'}\n\n`;
                 });
             }
 
             if (worldItems.length > 0) {
-                content += `UNIVERSO/LOCACIONES:\n`;
-                worldItems.forEach(item => {
-                    content += `- ${item.name} (${item.type || ''}): ${item.description || ''}\n\n`;
-                });
+                content += `--- UNIVERSO Y NOTAS ---\n`;
+                
+                const renderItemsRecursive = (parentId, depth = 0) => {
+                    const children = worldItems.filter(i => i.parentId === parentId);
+                    if (children.length === 0) return '';
+                    
+                    const indent = '  '.repeat(depth);
+                    let text = '';
+                    
+                    children.forEach(item => {
+                        text += `${indent}${depth === 0 ? '■ ' : '└─ '}${item.title}${item.isCategory ? ' [CARPETA]' : ''}${item.content ? `\n${indent}   ${item.content.replace(/\n/g, '\n' + indent + '   ')}` : ''}\n\n`;
+                        text += renderItemsRecursive(item.id, depth + 1);
+                    });
+                    return text;
+                };
+
+                const structureText = renderItemsRecursive('system_estructura');
+                if (structureText) content += `\n[ESTRUCTURA]\n${structureText}`;
+                
+                const notesText = renderItemsRecursive('system_notas');
+                if (notesText) content += `\n[NOTAS ADICIONALES]\n${notesText}`;
+                
+                const dynamicText = renderItemsRecursive(null);
+                if (dynamicText) content += `\n[SECCIONES DINÁMICAS]\n${dynamicText}`;
             }
         }
 
@@ -149,7 +169,7 @@ class ExportService {
                 characters.forEach(char => {
                     if (y > 750) { doc.addPage(); y = 60; }
                     doc.setFont("times", "bold");
-                    doc.text(char.name, margin, y);
+                    doc.text(char.name + (char.role ? ` (${char.role})` : ''), margin, y);
                     y += 15;
                     doc.setFont("times", "normal");
                     const charDesc = doc.splitTextToSize(char.description || 'Sin descripción', contentWidth);
@@ -163,20 +183,21 @@ class ExportService {
                 y += 20;
                 doc.setFont("times", "bold");
                 doc.setFontSize(18);
-                doc.text("Universo y Locaciones", margin, y);
+                doc.text("Universo, Estructura y Notas", margin, y);
                 y += 30;
                 doc.setFontSize(12);
                 doc.setFont("times", "normal");
 
+                // Exportar worldItems de forma plana pero corregida
                 worldItems.forEach(item => {
                     if (y > 750) { doc.addPage(); y = 60; }
                     doc.setFont("times", "bold");
-                    doc.text(`${item.name} (${item.type || 'General'})`, margin, y);
+                    doc.text(`${item.title}${item.isCategory ? ' [CARPETA]' : ''}`, margin, y);
                     y += 15;
                     doc.setFont("times", "normal");
-                    const itemDesc = doc.splitTextToSize(item.description || 'Sin descripción', contentWidth);
-                    doc.text(itemDesc, margin, y);
-                    y += (itemDesc.length * 14) + 15;
+                    const itemContent = doc.splitTextToSize(item.content || (item.isCategory ? 'Carpeta de contenido' : 'Sin contenido'), contentWidth);
+                    doc.text(itemContent, margin, y);
+                    y += (itemContent.length * 14) + 15;
                 });
             }
         }
@@ -259,22 +280,24 @@ class ExportService {
             }));
 
             if (characters.length > 0) {
-                contentChildren.push(new Paragraph({ text: "Personajes", heading: HeadingLevel.HEADING_2 }));
+                contentChildren.push(new Paragraph({ text: "Personajes", heading: HeadingLevel.HEADING_2, spacing: { before: 400 } }));
                 characters.forEach(char => {
                     contentChildren.push(new Paragraph({
-                        children: [new TextRun({ text: char.name, bold: true })],
+                        children: [new TextRun({ text: char.name + (char.role ? ` (${char.role})` : ''), bold: true })],
+                        spacing: { before: 200 }
                     }));
                     contentChildren.push(new Paragraph({ text: char.description || "Sin descripción" }));
                 });
             }
 
             if (worldItems.length > 0) {
-                contentChildren.push(new Paragraph({ text: "Universo", heading: HeadingLevel.HEADING_2 }));
+                contentChildren.push(new Paragraph({ text: "Universo, Estructura y Notas", heading: HeadingLevel.HEADING_2, spacing: { before: 400 } }));
                 worldItems.forEach(item => {
                     contentChildren.push(new Paragraph({
-                        children: [new TextRun({ text: `${item.name} (${item.type || 'General'})`, bold: true })],
+                        children: [new TextRun({ text: `${item.title}${item.isCategory ? ' [CARPETA]' : ''}`, bold: true })],
+                        spacing: { before: 200 }
                     }));
-                    contentChildren.push(new Paragraph({ text: item.description || "Sin descripción" }));
+                    contentChildren.push(new Paragraph({ text: item.content || (item.isCategory ? "Carpeta" : "Sin contenido") }));
                 });
             }
         }

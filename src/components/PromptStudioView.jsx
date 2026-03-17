@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
-import { Sparkles, Copy, CheckCircle2, ChevronDown, CheckSquare, Square, Edit3, ShieldCheck } from 'lucide-react';
+import { Sparkles, Copy, CheckCircle2, ChevronDown, CheckSquare, Square, Edit3, ShieldCheck, Database } from 'lucide-react';
 
 const AI_ROLES = [
     {
@@ -141,6 +141,7 @@ const PromptStudioView = () => {
         if (activeTab === 'generation') prompt = generatePrompt();
         else if (activeTab === 'review') prompt = generateReviewPrompt();
         else if (activeTab === 'refine') prompt = generateRefinePrompt();
+        else if (activeTab === 'master_refine') prompt = generateMasterRefinePrompt();
 
         navigator.clipboard.writeText(prompt);
         setCopied(true);
@@ -221,6 +222,7 @@ const PromptStudioView = () => {
         if (activeTab === 'generation') total = generatePrompt().length;
         else if (activeTab === 'review') total = generateReviewPrompt().length;
         else if (activeTab === 'refine') total = generateRefinePrompt().length;
+        else if (activeTab === 'master_refine') total = generateMasterRefinePrompt().length;
         setPromptWeight(total);
     }, [
         activeTab, selectedChapterId, selectedRefineChapterId, selectedReviewChapterId,
@@ -328,7 +330,7 @@ ${estructuraText ? '\n--- ESTRUCTURA MAESTRA Y RESÚMENES ---\n' + estructuraTex
 
         return `${combinedPrompt}
 A continuación, te entrego la biblia de mi obra. Este será tu núcleo de verdad absoluto y nunca lo debes romper.
-Escribe por lo menos de 2000 a 3000 palabras.
+Escribe por lo menos de 2000 palabras.
 
 <master_document>
 ${fullMasterDocumentXml || 'Documento vacío.'}
@@ -576,6 +578,85 @@ Instrucciones:
 `;
     };
 
+    const generateMasterRefinePrompt = () => {
+        const filteredChars = selectedCharacters.length > 0
+            ? characters.filter(c => selectedCharacters.includes(c.id))
+            : characters;
+
+        const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `
+Nombre: ${c.name}
+Rol: ${c.role || 'No especificado'}
+Descripción: ${(c.description || '').replace(/<[^>]*>?/gm, '')}
+        `).join('\n') : "Sin personajes definidos.";
+
+        const generalNotesItems = worldItems.filter(i => i.parentId === 'system_notas');
+        const generalNotesText = (includeNotasGenerales && generalNotesItems.length > 0) ? generalNotesItems.map(i => `
+-- [Nota: ${i.title}] --
+${i.content}
+        `).join('\n') : "";
+
+        const getSectionContent = (parentId) => {
+            const children = worldItems.filter(i => i.parentId === parentId);
+            return children.map(c => `
+- ${c.title}: ${c.content || ''}
+${getSectionContent(c.id)}
+            `).join('\n').trim();
+        };
+
+        const getEstructuraSectionContent = (parentId) => {
+            const children = worldItems.filter(i => i.parentId === parentId);
+            return children.map(c => `
+- [CAPÍTULO ${estLabels[c.id] || ''}] ${c.title}: ${c.content || ''}
+${getEstructuraSectionContent(c.id)}
+            `).join('\n').trim();
+        };
+
+        const estructuraItems = worldItems.filter(i => i.parentId === 'system_estructura');
+        const estructuraText = (includeEstructura && estructuraItems.length > 0) ? estructuraItems.map(c => `
+- [${c.isCategory ? 'VOLUMEN' : 'CAPÍTULO'} ${estLabels[c.id] || ''}] ${c.title}: ${c.content || ''}
+${c.isCategory ? getEstructuraSectionContent(c.id) : ''}
+        `).join('\n') : "";
+
+        const includedDynamicSections = rootMasterDocSections.filter(sec => includedSections[sec.id]);
+        const worldXml = includedDynamicSections.length > 0 ? includedDynamicSections.map(sec => {
+            let sectionText = `--- ${sec.title} ---\n${sec.content || ''}\n`;
+            if (sec.isCategory) {
+                sectionText += getSectionContent(sec.id);
+            }
+            return sectionText;
+        }).join('\n\n') : "Sin secciones dinámicas del Master Doc.";
+
+        const fullMasterDocumentXml = `
+${worldXml}
+${generalNotesText ? '\n--- NOTAS ADICIONALES DEL MUNDO ---\n' + generalNotesText : ''}
+${estructuraText ? '\n--- ESTRUCTURA MAESTRA Y RESÚMENES ---\n' + estructuraText : ''}
+        `.trim();
+
+        const notesXml = (includeAutorNotes && promptNotes.trim()) ? promptNotes.trim() : "Sin instrucciones de refinamiento.";
+
+        const selectedRolesData = AI_ROLES.filter(r => aiRoles.includes(r.id));
+        const combinedPrompt = selectedRolesData.length > 0
+            ? selectedRolesData.map(r => r.prompt).join(' ')
+            : AI_ROLES[0].prompt;
+
+        return `${combinedPrompt}
+Tu objetivo es ayudarme a refinar, mejorar o expandir mi documentación maestra (el Master Doc o biblia del proyecto). He recopilado toda la información actual de mi mundo a continuación.
+
+<master_document_actual>
+${fullMasterDocumentXml || 'Documento vacío.'}
+
+--- PERSONAJES ---
+${charactersXml}
+</master_document_actual>
+
+<instrucciones_de_refinamiento_maestro>
+${notesXml}
+</instrucciones_de_refinamiento_maestro>
+
+Por favor, actúa según tu personalidad y aplica las instrucciones indicadas para mejorar mi Master Doc. Puedes sugerir nuevos elementos, corregir contradicciones, expandir lore o simplemente pulir la redacción según lo solicitado.
+`;
+    };
+
     return (
         <div className="w-full h-full flex flex-col bg-[var(--bg-editor)] overflow-hidden">
             {/* Header */}
@@ -591,7 +672,7 @@ Instrucciones:
                             className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === 'generation' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}
                         >
                             <Sparkles size={16} className="inline mr-2" />
-                            Crear Capítulos
+                            Escribir
                         </button>
                         <button
                             onClick={() => setActiveTab('refine')}
@@ -599,6 +680,13 @@ Instrucciones:
                         >
                             <Edit3 size={16} className="inline mr-2" />
                             Refinar Capítulo
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('master_refine')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === 'master_refine' ? 'bg-emerald-500 text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-emerald-500/10 hover:text-emerald-500'}`}
+                        >
+                            <Database size={16} className="inline mr-2" />
+                            Refinar Master Doc
                         </button>
                         <button
                             onClick={() => setActiveTab('review')}
@@ -940,7 +1028,7 @@ Instrucciones:
                                         <textarea
                                             value={promptNotes}
                                             onChange={(e) => setPromptNotes(e.target.value)}
-                                            placeholder={activeTab === 'generation' ? "Escribe aquí las sinopsis, directrices o reglas que quieras exportar exclusivamente en este prompt específico..." : activeTab === 'refine' ? "Indica qué quieres modificar del episodio (ej: 'Haz que el diálogo parezca más tenso', 'Añade más descripciones del entorno', etc.)." : "Ej: 'Concéntrate más que nada en la relación de Juan y María', o 'Revisa si mis escenarios tienen sentido'..."}
+                                            placeholder={activeTab === 'generation' ? "Escribe aquí las sinopsis, directrices o reglas que quieras exportar exclusivamente en este prompt específico..." : activeTab === 'refine' ? "Indica qué quieres modificar del episodio (ej: 'Haz que el diálogo parezca más tenso', 'Añade más descripciones del entorno', etc.)." : activeTab === 'master_refine' ? "Ej: 'Ayúdame a crear 5 nuevas locaciones basadas en este mundo', 'Revisa si hay contradicciones en mi lore', 'Mejora la redacción de todas estas tarjetas'..." : "Ej: 'Concéntrate más que nada en la relación de Juan y María', o 'Revisa si mis escenarios tienen sentido'..."}
                                             className={`w-full h-40 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] text-[var(--text-main)] resize-none transition-opacity font-[Arial,sans-serif] ${!includeAutorNotes ? 'opacity-50' : ''}`}
                                         ></textarea>
                                         <div className="flex items-center justify-between mt-3">
@@ -993,18 +1081,27 @@ Instrucciones:
                                         </div>
                                     </div>
                                 )}
+                                {activeTab === 'master_refine' && (
+                                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex items-start gap-4 animate-in fade-in zoom-in-95 duration-300">
+                                        <Database className="text-emerald-500 shrink-0 mt-0.5" size={20} />
+                                        <div>
+                                            <h3 className="text-emerald-600 dark:text-emerald-400 font-bold text-sm mb-1">Modo Refinar Master Doc</h3>
+                                            <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80 font-[Arial,sans-serif]">Este modo recopila <strong>toda tu Biblia (Master Doc)</strong> y personajes seleccionados para que puedas pedirle a la IA que cree nuevos elementos, corrija lore o mejore la redacción de tu documentación.</p>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Export Action */}
                                 <div className={`flex flex-col items-center justify-center mt-10 p-6 bg-gradient-to-br from-[var(--bg-app)] to-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-3xl shadow-sm transition-all duration-500 ${activeTab === 'review' ? 'shadow-orange-500/10 border-orange-500/20' : activeTab === 'refine' ? 'shadow-blue-500/10 border-blue-500/20' : ''}`}>
                                     <button
                                         onClick={handleCopy}
                                         disabled={activeTab === 'refine' && selectedRefineChapterId && chapters?.find(c => c.id === selectedRefineChapterId)?.status === 'Finalizado'}
-                                        className={`group relative w-full md:w-auto px-10 py-5 transition-all duration-300 text-white text-lg font-bold rounded-2xl flex items-center justify-center gap-3 overflow-hidden disabled:opacity-40 disabled:cursor-not-allowed ${copied ? 'bg-green-500 hover:bg-green-600' : (activeTab === 'review' ? 'bg-orange-500 hover:bg-orange-600' : activeTab === 'refine' ? 'bg-blue-500 hover:bg-blue-600' : 'bg-[var(--accent-main)] hover:bg-indigo-600')}`}
+                                        className={`group relative w-full md:w-auto px-10 py-5 transition-all duration-300 text-white text-lg font-bold rounded-2xl flex items-center justify-center gap-3 overflow-hidden disabled:opacity-40 disabled:cursor-not-allowed ${copied ? 'bg-green-500 hover:bg-green-600' : (activeTab === 'review' ? 'bg-orange-500 hover:bg-orange-600' : activeTab === 'refine' ? 'bg-blue-500 hover:bg-blue-600' : activeTab === 'master_refine' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-[var(--accent-main)] hover:bg-indigo-600')}`}
                                     >
                                         <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                                         <span className="relative z-10 flex items-center gap-2">
-                                            {copied ? <CheckCircle2 size={24} /> : (activeTab === 'review' ? <CheckCircle2 size={24} /> : activeTab === 'refine' ? <Edit3 size={24} /> : <Sparkles size={24} />)}
-                                            {copied ? "¡Prompt copiado al portapapeles!" : (activeTab === 'review' ? "Copiar Prompt de Revisión" : activeTab === 'refine' ? "Copiar Prompt de Refinado" : "Copiar Prompt Optimizado")}
+                                            {copied ? <CheckCircle2 size={24} /> : (activeTab === 'review' ? <CheckCircle2 size={24} /> : activeTab === 'refine' ? <Edit3 size={24} /> : activeTab === 'master_refine' ? <Database size={24} /> : <Sparkles size={24} />)}
+                                            {copied ? "¡Prompt copiado al portapapeles!" : (activeTab === 'review' ? "Copiar Prompt de Revisión" : activeTab === 'refine' ? "Copiar Prompt de Refinado" : activeTab === 'master_refine' ? "Copiar Biblia + Instrucciones" : "Copiar Prompt Optimizado")}
                                         </span>
                                     </button>
                                     <p className="text-xs text-[var(--text-muted)]/60 mt-4 uppercase tracking-widest font-bold">Pégalo en Gemini y observa la magia</p>
@@ -1253,7 +1350,7 @@ Instrucciones:
                                     const parentIdField = (activeTab === 'refine' || activeTab === 'review') ? 'parentId' : 'parentId';
 
                                     const volumes = sourceChapters.filter(w => (activeTab === 'refine' || activeTab === 'review') ? w.isVolume : (w.parentId === 'system_estructura' && w.isCategory));
-                                    
+
                                     return volumes.map(vol => {
                                         const children = sourceChapters.filter(w => w.parentId === vol.id && ((activeTab === 'refine' || activeTab === 'review') ? !w.isVolume : true));
                                         if (children.length === 0) return null;
@@ -1267,17 +1364,17 @@ Instrucciones:
                                                     </h4>
                                                     <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[var(--border-main)]"></div>
                                                 </div>
-                                                
+
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                                     {children.map(c => {
-                                                        const isSelected = activeTab === 'generation' 
-                                                            ? selectedChapterId === c.id 
-                                                            : activeTab === 'refine' 
-                                                                ? selectedRefineChapterId === c.id 
-                                                                : reviewSelectionType === 'single' 
-                                                                    ? selectedReviewChapterId === c.id 
-                                                                    : reviewSelectionType === 'start' 
-                                                                        ? reviewStartId === c.id 
+                                                        const isSelected = activeTab === 'generation'
+                                                            ? selectedChapterId === c.id
+                                                            : activeTab === 'refine'
+                                                                ? selectedRefineChapterId === c.id
+                                                                : reviewSelectionType === 'single'
+                                                                    ? selectedReviewChapterId === c.id
+                                                                    : reviewSelectionType === 'start'
+                                                                        ? reviewStartId === c.id
                                                                         : reviewEndId === c.id;
 
                                                         const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
@@ -1336,7 +1433,7 @@ Instrucciones:
                                 {(() => {
                                     const sourceChapters = (activeTab === 'refine' || activeTab === 'review') ? chapters : worldItems;
                                     const sourceLabels = (activeTab === 'refine' || activeTab === 'review') ? chapLabels : estLabels;
-                                    
+
                                     const standalone = sourceChapters.filter(w => (activeTab === 'refine' || activeTab === 'review') ? (!w.parentId && !w.isVolume) : (w.parentId === 'system_estructura' && !w.isCategory));
                                     if (standalone.length === 0) return null;
 
@@ -1349,19 +1446,19 @@ Instrucciones:
                                             </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                                 {standalone.map(c => {
-                                                    const isSelected = activeTab === 'generation' 
-                                                        ? selectedChapterId === c.id 
-                                                        : activeTab === 'refine' 
-                                                            ? selectedRefineChapterId === c.id 
-                                                            : reviewSelectionType === 'single' 
-                                                                ? selectedReviewChapterId === c.id 
-                                                                : reviewSelectionType === 'start' 
-                                                                    ? reviewStartId === c.id 
+                                                    const isSelected = activeTab === 'generation'
+                                                        ? selectedChapterId === c.id
+                                                        : activeTab === 'refine'
+                                                            ? selectedRefineChapterId === c.id
+                                                            : reviewSelectionType === 'single'
+                                                                ? selectedReviewChapterId === c.id
+                                                                : reviewSelectionType === 'start'
+                                                                    ? reviewStartId === c.id
                                                                     : reviewEndId === c.id;
 
                                                     const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
                                                     const isDisabled = activeTab === 'refine' && isFinalized;
-                                                    
+
                                                     const accentColor = activeTab === 'refine' ? 'blue-500' : activeTab === 'review' ? 'orange-500' : '[var(--accent-main)]';
                                                     const softBg = activeTab === 'refine' ? 'bg-blue-500/10' : activeTab === 'review' ? 'bg-orange-500/10' : 'bg-[var(--accent-soft)]';
 
