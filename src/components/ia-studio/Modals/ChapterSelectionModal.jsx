@@ -48,7 +48,7 @@ const ChapterSelectionModal = ({
                             <div className="flex justify-center">
                                 <button
                                     onClick={() => {
-                                        if (activeTab === 'generation') setSelectedChapterId('');
+                                        if (activeTab === 'generation' || activeTab === 'writing') setSelectedChapterId('');
                                         else {
                                             setSelectedReviewChapterId('');
                                             setReviewStartId('');
@@ -56,7 +56,7 @@ const ChapterSelectionModal = ({
                                         }
                                         onClose();
                                     }}
-                                    className={`group relative overflow-hidden px-10 py-6 rounded-3xl border-2 transition-all flex items-center gap-6 ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? `bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20 scale-105` : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50 text-[var(--text-main)] hover:-translate-y-1'}`}
+                                    className={`group relative overflow-hidden px-10 py-6 rounded-3xl border-2 transition-all flex items-center gap-6 ${((activeTab === 'generation' || activeTab === 'writing') ? !selectedChapterId : !selectedReviewChapterId) ? `bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20 scale-105` : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50 text-[var(--text-main)] hover:-translate-y-1'}`}
                                 >
                                     <div className={`p-4 rounded-2xl transition-all ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'bg-white/20' : 'bg-indigo-500/10'}`}>
                                         <Sparkles size={28} className={(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'text-white' : 'text-indigo-500'} />
@@ -95,15 +95,15 @@ const ChapterSelectionModal = ({
 
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                                             {children.map(c => {
-                                                const isSelected = activeTab === 'generation'
-                                                    ? selectedChapterId === c.id
+                                                const isSelected = (activeTab === 'generation' || activeTab === 'writing')
+                                                    ? String(selectedChapterId) === String(c.id)
                                                     : activeTab === 'refine'
-                                                        ? selectedRefineChapterId === c.id
+                                                        ? String(selectedRefineChapterId) === String(c.id)
                                                         : reviewSelectionType === 'single'
-                                                            ? selectedReviewChapterId === c.id
+                                                            ? String(selectedReviewChapterId) === String(c.id)
                                                             : reviewSelectionType === 'start'
-                                                                ? reviewStartId === c.id
-                                                                : reviewEndId === c.id;
+                                                                ? String(reviewStartId) === String(c.id)
+                                                                : String(reviewEndId) === String(c.id);
 
                                                 const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
                                                 const isDisabled = activeTab === 'refine' && isFinalized;
@@ -117,7 +117,7 @@ const ChapterSelectionModal = ({
                                                         onClick={() => {
                                                             if (mainTab === 'live') {
                                                                 setLiveSelectedChapterId(c.id);
-                                                            } else if (activeTab === 'generation') {
+                                                            } else if (activeTab === 'generation' || activeTab === 'writing') {
                                                                 setSelectedChapterId(c.id);
                                                             } else if (activeTab === 'refine') {
                                                                 setSelectedRefineChapterId(c.id);
@@ -178,15 +178,15 @@ const ChapterSelectionModal = ({
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                                         {standalone.map(c => {
-                                            const isSelected = activeTab === 'generation'
-                                                ? selectedChapterId === c.id
+                                            const isSelected = (activeTab === 'generation' || activeTab === 'writing')
+                                                ? String(selectedChapterId) === String(c.id)
                                                 : activeTab === 'refine'
-                                                    ? selectedRefineChapterId === c.id
+                                                    ? String(selectedRefineChapterId) === String(c.id)
                                                     : reviewSelectionType === 'single'
-                                                        ? selectedReviewChapterId === c.id
+                                                        ? String(selectedReviewChapterId) === String(c.id)
                                                         : reviewSelectionType === 'start'
-                                                            ? reviewStartId === c.id
-                                                            : reviewEndId === c.id;
+                                                            ? String(reviewStartId) === String(c.id)
+                                                            : String(reviewEndId) === String(c.id);
 
                                             const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
                                             const isDisabled = activeTab === 'refine' && isFinalized;
@@ -200,7 +200,7 @@ const ChapterSelectionModal = ({
                                                     onClick={() => {
                                                         if (mainTab === 'live') {
                                                             setLiveSelectedChapterId(c.id);
-                                                        } else if (activeTab === 'generation') {
+                                                        } else if (activeTab === 'generation' || activeTab === 'writing') {
                                                             setSelectedChapterId(c.id);
                                                         } else if (activeTab === 'refine') {
                                                             setSelectedRefineChapterId(c.id);
