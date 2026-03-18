@@ -136,22 +136,23 @@ const IALiveMode = ({
     }, [promptWeight, effectiveAISettings.selectedAiModel, availableModels]);
 
     const generateBibliaContextForLive = () => {
-        // Full characters list without limits
-        const charactersXml = characters.map(c => `Nombre: ${c.name}\nRol: ${c.role || ''}\nDescripción: ${c.description}`).join('\n---\n');
+        const charactersXml = (includeCharacters && characters.length > 0) 
+            ? characters.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') 
+            : "No se han proporcionado fichas de personajes.";
         
-        // Use the comprehensive world context but maybe trim if too long? 
-        // For now let's trust the weight status.
         const worldXml = generateComprehensiveWorldContext(worldItems, {}, { 
             includeEstructura: true, 
             includeNotasGenerales: true 
         });
 
         return `
-PERSONAJES:
-${charactersXml}
-
-BIBLIA DEL PROYECTO (LORE Y ESTRUCTURA):
+<master_document>
 ${worldXml}
+</master_document>
+
+<personajes_relevantes>
+${charactersXml}
+</personajes_relevantes>
         `.trim();
     };
 
@@ -182,26 +183,23 @@ ${worldXml}
             const bibliaContext = generateBibliaContextForLive();
             const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
 
-            const prompt = `
-${systemPersona}
+            const prompt = `${systemPersona}
 
-Tu objetivo es refinar el texto que te proporciono siguiendo las instrucciones del autor. 
-Devuelve el texto REFINADO de forma íntegra. No respondas con nada que no sea el texto, salvo que seas un 'Mentor' y necesites dar una breve nota motivadora al final.
+# REFINAR TEXTO: ${targetChapter.title}
 
-<contexto_biblia>
+Tu objetivo es refinar el texto proporcionado, elevando su calidad literaria, ritmo y profundidad, siguiendo estrictamente las instrucciones del autor.
+
 ${bibliaContext}
-</contexto_biblia>
 
 <instrucciones_especificas>
-${liveInstructions || 'Mejora la calidad literaria del texto manteniendo el tono original.'}
+${liveInstructions || 'Mejora la calidad literaria del texto manteniendo el tono original y la coherencia con el Lore.'}
 </instrucciones_especificas>
 
-<texto_original>
+<texto_original_para_refinar>
 ${cleanText(targetChapter.content)}
-</texto_original>
+</texto_original_para_refinar>
 
-Por favor, responde directamente con el texto refinado.
-            `;
+Por favor, devuelve el texto REFINADO de forma íntegra. No respondas con nada que no sea el texto literario final.`;
 
             const response = await AIService.sendMessage(prompt, effectiveAISettings.openRouterKey, { 
                 model: effectiveAISettings.selectedAiModel,
@@ -241,31 +239,25 @@ Por favor, responde directamente con el texto refinado.
         setIsAnalyzing(true);
         try {
             const bibliaContext = generateBibliaContextForLive();
-            const prompt = `
-Actúa como un Detective de Continuidad y Editor de Coherencia Literaria. 
-Tu tarea es analizar el texto del capítulo proporcionado comparándolo con la "Biblia del Proyecto" (Master Doc) en busca de contradicciones, huecos de trama o errores de continuidad.
+            const prompt = `Actúa como un Detective de Continuidad y Editor de Coherencia Literaria profesional. 
+Tu tarea es analizar el texto del capítulo proporcionado comparándolo con la "Biblia del Proyecto" (Master Doc) en busca de contradicciones, huecos de trama, errores de continuidad o inconsistencias de personajes.
 
-<contexto_biblia>
+# ANÁLISIS DE COHERENCIA: ${targetChapter.title}
+
 ${bibliaContext}
-</contexto_biblia>
 
-<capitulo_a_analizar_titulo>
-${targetChapter.title}
-</capitulo_a_analizar_titulo>
-
-<texto_del_capitulo>
+<texto_del_capitulo_a_analizar>
 ${cleanText(targetChapter.content)}
-</texto_del_capitulo>
+</texto_del_capitulo_a_analizar>
 
 Por favor, realiza un análisis exhaustivo centrándote en:
 1. **Contradicciones con el Lore:** Lugares, reglas del mundo o eventos pasados que no coincidan.
 2. **Coherencia de Personajes:** Acciones o diálogos que contradigan la personalidad o historia establecida.
 3. **Continuidad Física:** Errores de tiempo, clima o posición de objetos/personajes en la escena.
-4. **Resatado de "Huecos":** Información que el lector podría encontrar confusa por falta de contexto.
+4. **Huecos de Narrativa:** Información confusa por falta de contexto o lógica.
 
 Formato de respuesta:
-Usa Markdown. Divide en secciones claras. Si no encuentras errores, felicita al autor por su impecable continuidad.
-            `;
+Usa Markdown con títulos claros y bullet points. Si no encuentras errores, felicita al autor por su impecable trabajo de continuidad.`;
 
             const response = await AIService.sendMessage(prompt, effectiveAISettings.openRouterKey, { 
                 model: effectiveAISettings.selectedAiModel,
@@ -303,29 +295,27 @@ Usa Markdown. Divide en secciones claras. Si no encuentras errores, felicita al 
 
         setIsExtracting(true);
         try {
-            const prompt = `
-Actúa como un Bibliotecario de Mundos y Analista de Narrativa. 
-Tu tarea es leer el capítulo proporcionado e identificar personajes, lugares u objetos importantes que MEREZCAN tener una ficha en el Master Doc (Biblia) y que no parezcan ser genéricos.
+            const prompt = `Actúa como un Bibliotecario de Mundos y Analista de Narrativa. 
+Tu tarea es leer el capítulo proporcionado e identificar personajes, lugares u objetos importantes que MEREZCAN tener una ficha en el Master Doc (Biblia) y que aporten valor al world-building.
 
-<capitulo_titulo>
-${targetChapter.title}
-</capitulo_titulo>
+# EXTRACCIÓN DE ENTIDADES: ${targetChapter.title}
 
 <texto_del_capitulo>
 ${cleanText(targetChapter.content)}
 </texto_del_capitulo>
 
-Reglas:
-1. Extrae solo entidades nuevas o que tengan una descripción relevante en este capítulo.
-2. Para cada entidad indica: Nombre, Tipo (Personaje, Lugar, Objeto) y una breve descripción basada SOLO en lo que dice el texto.
-3. Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura:
+Reglas de Extracción:
+1. Identifica entidades (Personajes, Lugares, Objetos) que aparezcan o sean mencionados con relevancia.
+2. Extrae descripciones detalladas basadas SOLO en el texto proporcionado.
+3. Ignorar elementos genéricos o sin importancia narrativa.
+
+RESPUESTA ÚNICAMENTE EN JSON:
 {
   "entities": [
-    { "name": "Nombre", "type": "Personaje/Lugar/Objeto", "description": "Resumen breve..." }
+    { "name": "Nombre", "type": "Personaje/Lugar/Objeto", "description": "Resumen detallado del elemento..." }
   ]
 }
-No añadas explicaciones fuera del JSON.
-            `;
+No incluyas explicaciones adicionales fuera del JSON.`;
 
             const response = await AIService.sendMessage(prompt, effectiveAISettings.openRouterKey, { 
                 model: effectiveAISettings.selectedAiModel, 
@@ -417,42 +407,42 @@ No añadas explicaciones fuera del JSON.
         setIsImporting(true);
         try {
             const masterDocJSON = generateMasterDocJSON();
-            const prompt = `
-Actúa como un Arquitecto de Información y Curador de Lore.
-Tu tarea es analizar el texto bruto proporcionado y proponer cambios (crear, actualizar o eliminar) en el "Master Doc" (Biblia) actual. 
-Debes respetar la jerarquía (Categoría > Elementos).
+            const prompt = `Actúa como un Arquitecto de Información y Curador de Lore profesional.
+Tu tarea es analizar el texto bruto proporcionado y proponer cambios precisos (crear, actualizar o eliminar) en el "Master Doc" (Biblia) actual para integrar la nueva información.
+
+# ANÁLISIS DE IMPORTACIÓN INTELIGENTE
 
 <master_doc_actual_jerarquico>
 ${masterDocJSON}
 </master_doc_actual_jerarquico>
 
-<texto_bruto_a_procesar>
+<texto_bruto_a_procesar_e_integrar>
 ${importText}
-</texto_bruto_a_procesar>
+</texto_bruto_a_procesar_e_integrar>
 
-Instrucciones:
-1. Compara el texto bruto con el Master Doc.
-2. Identifica si la información se refiere a un Personaje o a un Elemento del Mundo dentro de una categoría.
-3. Si el elemento ya existe, usa "action": "update" e incluye su ID. Si es nuevo, "action": "create".
-4. Si falta una categoría necesaria para agrupar los nuevos elementos, propón crearla.
-5. Responde ÚNICAMENTE con un JSON válido con esta estructura:
+Instrucciones de Procesamiento:
+1. Compara minuciosamente el texto bruto con la estructura actual.
+2. Identifica entidades que ya existen para actualizarlas o nuevas para crearlas.
+3. Respeta la jerarquía de categorías. Si falta una categoría esencial, propón crearla.
+4. Responde ÚNICAMENTE con el siguiente objeto JSON:
+
 {
   "world_changes": [
     {
-      "categoryName": "Nombre de Carpeta",
+      "categoryName": "Nombre de Carpeta/Categoría",
       "categoryId": "ID_si_existe",
       "categoryAction": "create|update|none",
       "items": [
-        { "id": "...", "title": "...", "content": "Contenido completo", "action": "create|update|delete" }
+        { "id": "ID_si_existe", "title": "...", "content": "Contenido completo integrado", "action": "create|update|delete" }
       ]
     }
   ],
   "character_changes": [
-    { "id": "...", "name": "...", "content": "Descripción, rol, etc.", "action": "create|update|delete" }
+    { "id": "ID_si_existe", "name": "...", "content": "Descripción, rol y detalles", "action": "create|update|delete" }
   ]
 }
-No añadas texto extra.
-            `;
+
+No incluyas texto explicativo, solo el JSON.`;
 
             const response = await AIService.sendMessage(prompt, effectiveAISettings.openRouterKey, { 
                 model: effectiveAISettings.selectedAiModel, 
@@ -569,43 +559,55 @@ No añadas texto extra.
             const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
             const targetChapter = worldItems.find(c => c.id === liveSelectedChapterId) || chapters.find(c => c.id === liveSelectedChapterId);
 
-            let chapterContext = "";
+            let chapterHeading = "";
+            let chapterInstruction = "";
+
             if (generationMode === 'create') {
-                chapterContext = targetChapter ? `Volumen/Ubicación: ${targetChapter.title}. Escribe el contenido narrativo completo enfocado a este capítulo basándote en la biblia del proyecto.` : "Inicia una nueva escena o capítulo de la historia.";
+                if (targetChapter) {
+                    let volumeContext = "";
+                    if (targetChapter.parentId && targetChapter.parentId !== 'system_estructura') {
+                        const vol = worldItems.find(c => c.id === targetChapter.parentId);
+                        if (vol) volumeContext = ` [Perteneciente a: ${estLabels[vol.id] || ''}${vol.title}]`;
+                    }
+                    chapterHeading = `ESCRIBIR CAPÍTULO: ${estLabels[targetChapter.id] || ''}${targetChapter.title}${volumeContext}`;
+                    chapterInstruction = `Tu tarea fundamental es escribir el contenido narrativo completo de este capítulo. Utiliza la información proporcionada en el <master_document> (Estructura, Biblia y Notas) para asegurar que cada detalle, personaje y punto de trama encaje perfectamente con la visión del autor.`;
+                } else {
+                    chapterHeading = "CREAR NUEVA ESCENA O CAPÍTULO";
+                    chapterInstruction = "Inicia una nueva escena o capítulo de la historia de forma creativa, manteniendo la coherencia con el mundo establecido.";
+                }
             } else {
-                chapterContext = `Toma el siguiente contenido y EXPÁNDELO. Mantén la trama y coherencia, pero añade profundidad y detalle.\n\nContenido: ${targetChapter?.content || ''}`;
+                // Expansion mode
+                chapterHeading = `EXPANDIR CAPÍTULO: ${targetChapter?.title || 'Capítulo Seleccionado'}`;
+                chapterInstruction = `Toma el contenido actual y EXPÁNDELO significativamente. No te limites a resumir; añade profundidad psicológica, descripciones sensoriales vívidas, diálogs enriquecidos y expande las acciones. El objetivo es elevar la prosa y la extensión manteniendo la esencia original.\n\nContenido original para expandir:\n${targetChapter?.content || 'Selecciona un capítulo con contenido para expandir.'}`;
             }
 
             const lengthTxt = generationLength === 'short' ? '800 a 1000 palabras' : generationLength === 'medium' ? '1000 a 1500 palabras' : '1500 a 2000 palabras';
+            const lengthPrompt = `LONGITUD OBJETIVO: Aproximadamente ${lengthTxt}.`;
 
             const filteredChars = selectedCharacters.length > 0 ? characters.filter(c => selectedCharacters.includes(c.id)) : characters;
-            const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n') : "Sin personajes seleccionados.";
+            const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') : "Sin personajes específicos.";
 
-            const prompt = `
-${systemPersona}
+            const prompt = `${systemPersona}
 
-${chapterContext}
+# ${chapterHeading}
+${lengthPrompt}
 
-Longitud objetivo: Aproximadamente ${lengthTxt}.
+${chapterInstruction}
 
-<biblia_del_proyecto>
+<master_document>
 ${masterDocContext}
-</biblia_del_proyecto>
+</master_document>
 
-<personajes_principales_en_escena>
+<personajes_relevantes>
 ${charactersXml}
-</personajes_principales_en_escena>
+</personajes_relevantes>
 
-<objetivos_de_escena>
-${sceneGoals}
-</objetivos_de_escena>
+<instrucciones_adicionales>
+Objetivos de la escena: ${sceneGoals || 'Desarrollar la trama según la lógica del Master Doc.'}
+Notas del autor: ${promptNotes || 'Sin notas adicionales.'}
+</instrucciones_adicionales>
 
-<notas_adicionales>
-${promptNotes}
-</notas_adicionales>
-
-Por favor, escribe el texto narrativo completo ahora. No respondas con nada que no sea la historia.
-            `;
+Escribe el texto narrativo completo ahora. No respondas con nada que no sea la historia.`;
 
             const response = await AIService.sendMessage(prompt, openRouterKey, { 
                 model: selectedAiModel,

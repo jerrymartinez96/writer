@@ -199,36 +199,59 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
     };
 
     const generatePrompt = () => {
-        const targetChapter = worldItems.find(c => c.id === selectedChapterId);
-        let chapterContext = "";
+        const targetChapter = worldItems.find(c => c.id === selectedChapterId) || chapters.find(c => c.id === selectedChapterId);
+        let chapterHeading = "";
+        let chapterInstruction = "";
 
         if (generationMode === 'create') {
             if (targetChapter) {
                 let volumeContext = "";
                 if (targetChapter.parentId && targetChapter.parentId !== 'system_estructura') {
                     const vol = worldItems.find(c => c.id === targetChapter.parentId);
-                    if (vol) volumeContext = ` (Parte de: ${estLabels[vol.id] || ''}${vol.title})`;
+                    if (vol) volumeContext = ` [Perteneciente a: ${estLabels[vol.id] || ''}${vol.title}]`;
                 }
-                chapterContext = `Volumen/Ubicación: ${estLabels[targetChapter.id] || ''}${targetChapter.title}${volumeContext}. Escribe el contenido narrativo completo enfocado a este capítulo basándote en la información que está en el documento maestro (master_document).`;
+                chapterHeading = `ESCRIBIR CAPÍTULO: ${estLabels[targetChapter.id] || ''}${targetChapter.title}${volumeContext}`;
+                chapterInstruction = `Tu tarea fundamental es escribir el contenido narrativo completo de este capítulo. Utiliza la información proporcionada en el <master_document> (Estructura, Biblia y Notas) para asegurar que cada detalle, personaje y punto de trama encaje perfectamente con la visión del autor.`;
             } else {
-                chapterContext = "Inicia una nueva escena o capítulo de la historia.";
+                chapterHeading = "CREAR NUEVA ESCENA O CAPÍTULO";
+                chapterInstruction = "Inicia una nueva escena o capítulo de la historia de forma creativa, manteniendo la coherencia con el mundo establecido.";
             }
         } else {
             // Expansion mode
-            const existingChapter = chapters.find(c => c.id === selectedChapterId) || worldItems.find(c => c.id === selectedChapterId);
-            chapterContext = `Toma el siguiente contenido y EXPÁNDELO. Mantén la misma trama y coherencia, pero añade mucha más profundidad, descripciones sensoriales, diálogos enriquecidos y desarrollo de personajes. No resumas, extiende la narración.\n\nContenido a expandir: ${existingChapter?.content || 'Selecciona un capítulo con contenido para expandir.'}`;
+            chapterHeading = `EXPANDIR CAPÍTULO: ${targetChapter?.title || 'Capítulo Seleccionado'}`;
+            chapterInstruction = `Toma el contenido actual y EXPÁNDELO significativamente. No te limites a resumir; añade profundidad psicológica, descripciones sensoriales vívidas, diálogs enriquecidos y expande las acciones. El objetivo es elevar la prosa y la extensión manteniendo la esencia original.\n\nContenido original para expandir:\n${targetChapter?.content || 'Selecciona un capítulo con contenido para expandir.'}`;
         }
 
         const lengthTxt = generationLength === 'short' ? '800 a 1000 palabras' : generationLength === 'medium' ? '1000 a 1500 palabras' : '1500 a 2000 palabras';
-        const lengthPrompt = `\nLongitud objetivo: Aproximadamente ${lengthTxt}.`;
+        const lengthPrompt = `LONGITUD OBJETIVO: Aproximadamente ${lengthTxt}.`;
 
         const filteredChars = selectedCharacters.length > 0 ? characters.filter(c => selectedCharacters.includes(c.id)) : characters;
-        const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n') : "Sin personajes.";
+        const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') : "Sin personajes específicos.";
 
         const masterDocText = generateFullMasterDocContext();
         const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
 
-        return `${systemPersona}\n${lengthPrompt}\n<master_document>\n${masterDocText}\n</master_document>\n<personajes>\n${charactersXml}\n</personajes>\n<contexto>\n${chapterContext}\nObjetivos: ${sceneGoals}\nNotas: ${promptNotes}\n</contexto>`;
+        return `${systemPersona}
+
+# ${chapterHeading}
+${lengthPrompt}
+
+${chapterInstruction}
+
+<master_document>
+${masterDocText}
+</master_document>
+
+<personajes_relevantes>
+${charactersXml}
+</personajes_relevantes>
+
+<instrucciones_adicionales>
+Objetivos de la escena: ${sceneGoals || 'Desarrollar la trama según la lógica del Master Doc.'}
+Notas del autor: ${promptNotes || 'Sin notas adicionales.'}
+</instrucciones_adicionales>
+
+Escribe la narración completa a continuación:`;
     };
 
     const generateReviewPrompt = () => {
