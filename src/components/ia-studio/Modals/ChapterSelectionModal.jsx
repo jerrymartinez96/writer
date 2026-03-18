@@ -1,4 +1,4 @@
-import { ChevronDown, Sparkles, Edit3, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Sparkles, Edit3, CheckCircle2, ShieldCheck, Layers } from 'lucide-react';
 
 const ChapterSelectionModal = ({ 
     isOpen, 
