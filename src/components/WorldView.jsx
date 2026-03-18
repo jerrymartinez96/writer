@@ -22,6 +22,10 @@ const WorldView = () => {
     const [path, setPath] = useState([{ id: 'root', title: 'Master Doc Central', type: 'root' }]);
     const currentStep = path[path.length - 1];
 
+    const [localContent, setLocalContent] = useState('');
+    const [isUnsaved, setIsUnsaved] = useState(false);
+    const [isMaximized, setIsMaximized] = useState(false);
+
     const pushPath = (step) => setPath([...path, step]);
     const popPath = (index) => setPath(path.slice(0, index + 1));
 
@@ -32,6 +36,27 @@ const WorldView = () => {
         window.addEventListener('resetWorldView', handleReset);
         return () => window.removeEventListener('resetWorldView', handleReset);
     }, []);
+
+    // Sync localContent when currentStep changes
+    useEffect(() => {
+        if (currentStep && (currentStep.type === 'character_detail' || currentStep.type === 'world_item_detail')) {
+            const item = currentStep.data;
+            const realItem = currentStep.type === 'character_detail'
+                ? characters.find(c => c.id === item.id)
+                : worldItems.find(w => w.id === item.id);
+            
+            if (realItem && !isUnsaved) {
+                const initialVal = (currentStep.type === 'character_detail' ? realItem.description : realItem.content) || '';
+                if (localContent !== initialVal) {
+                    setLocalContent(initialVal);
+                }
+            }
+        } else if (localContent !== '' || isUnsaved) {
+            setLocalContent('');
+            setIsUnsaved(false);
+        }
+    }, [currentStep?.id, currentStep?.type, characters, worldItems, isUnsaved]);
+
 
     // Modals
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -55,10 +80,6 @@ const WorldView = () => {
 
     const [imageSourceType, setImageSourceType] = useState('file'); // 'file' | 'url'
     const [imageUrlInput, setImageUrlInput] = useState('');
-
-    const [isMaximized, setIsMaximized] = useState(false);
-    const [localContent, setLocalContent] = useState('');
-    const [isUnsaved, setIsUnsaved] = useState(false);
 
     // Zoom dragging state
     const zoomContainerRef = React.useRef(null);
@@ -569,11 +590,6 @@ const WorldView = () => {
 
         if (!realItem) return <div>Elemento no encontrado.</div>;
 
-        // Initialize local content if not set or item changed
-        if (localContent === '' && !isUnsaved) {
-            const initialVal = isCharacter ? (realItem.description || '') : (realItem.content || '');
-            setLocalContent(initialVal);
-        }
 
         const handleManualSave = () => {
             if (isCharacter) updateCharacter(realItem.id, { description: localContent });
@@ -626,7 +642,7 @@ const WorldView = () => {
                     </div>
                 </div>
 
-                <div className={`relative group/editor border border-[var(--border-main)] rounded-2xl mb-8 shadow-sm overflow-hidden bg-[var(--bg-app)] flex flex-col transition-all duration-300 ${isMaximized ? 'fixed inset-4 z-[150] m-0 max-h-none' : 'h-[500px]'}`}>
+                <div className={`relative group/editor border border-[var(--border-main)] rounded-2xl mb-8 shadow-sm overflow-hidden bg-[var(--bg-app)] flex flex-col transition-all duration-500 ease-in-out ${isMaximized ? 'h-[85vh] shadow-2xl ring-1 ring-[var(--accent-main)]/30 border-[var(--accent-main)]' : 'h-[500px]'}`}>
                     <textarea
                         value={localContent}
                         onChange={(e) => {
@@ -634,7 +650,7 @@ const WorldView = () => {
                             setIsUnsaved(true);
                         }}
                         placeholder={`Describe los detalles, resúmenes profundos o reglas para ${isCharacter ? realItem.name : realItem.title}...`}
-                        className={`w-full flex-1 bg-transparent p-8 text-lg focus:outline-none resize-none transition-all leading-relaxed text-[var(--text-main)] scrollbar-hide`}
+                        className={`w-full flex-1 bg-transparent p-8 text-lg focus:outline-none resize-none transition-all leading-relaxed text-[var(--text-main)] custom-scrollbar`}
                     />
                     
                     <div className="p-4 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/80 backdrop-blur-md flex items-center justify-between shrink-0">
