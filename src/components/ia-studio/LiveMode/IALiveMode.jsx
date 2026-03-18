@@ -2,22 +2,19 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
     Sparkles, Edit3, ChevronDown, CheckCircle2, MessageSquare, 
     BookOpen, UserCheck, Zap, Database, ArrowUpCircle, 
-    RefreshCw, Loader2, ArrowLeftRight, Trash2, Wand2, X, AlertCircle
+    RefreshCw, Loader2, ArrowLeftRight, Trash2, Wand2, X, AlertCircle,
+    FilePlus, Maximize2, Hash, ChevronRight, ShieldCheck
 } from 'lucide-react';
-import { cleanText, computeEstructuraLabels } from '../IAStudioUtils';
+import { cleanText, computeEstructuraLabels, generateComprehensiveWorldContext } from '../IAStudioUtils';
 import AIService from '../../../services/AIService';
 import { useToast } from '../../Toast';
 
 const IALiveMode = ({ 
     activeBook,
     updateBookData,
-    profile, 
-    updateProfile,
     chapters, 
     characters, 
     worldItems, 
-    aiRoles, 
-    AI_ROLES, 
     liveTab, 
     setLiveTab,
     createCharacter, 
@@ -28,10 +25,21 @@ const IALiveMode = ({
     deleteWorldItem,
     updateChapter, 
     setIsChapterModalOpen,
-    setIsRoleModalOpen,
     liveSelectedChapterId,
     setLiveSelectedChapterId,
-    setReviewSelectionType
+    setReviewSelectionType,
+    generationLength,
+    setGenerationLength,
+    generationMode,
+    setGenerationMode,
+    sceneGoals,
+    setSceneGoals,
+    promptNotes,
+    setPromptNotes,
+    setIsContextModalOpen,
+    masterDocContext,
+    includeCharacters = true,
+    selectedCharacters = []
 }) => {
     const toast = useToast();
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -65,35 +73,36 @@ const IALiveMode = ({
     const estLabels = computeEstructuraLabels(worldItems);
 
     const generateMasterDocJSON = () => {
+        // Helper para obtener items de forma recursiva
+        const getItemsRecursive = (parentId) => {
+            return worldItems
+                .filter(i => i.parentId === parentId)
+                .map(i => ({
+                    id: i.id,
+                    title: i.title,
+                    content: i.content,
+                    isCategory: i.isCategory,
+                    items: i.isCategory ? getItemsRecursive(i.id) : undefined
+                }));
+        };
+
         // Personajes
         const chars = characters.map(c => ({
             id: c.id,
             name: c.name,
-            description: c.description?.substring(0, 300)
+            description: c.description
         }));
 
-        // Mundo con Jerarquía
-        const worldStructure = worldItems.filter(i => i.isCategory).map(cat => ({
-            id: cat.id,
-            category: cat.title,
-            items: worldItems.filter(i => i.parentId === cat.id).map(i => ({
-                id: i.id,
-                title: i.title,
-                content: i.content?.substring(0, 300)
-            }))
-        }));
-
-        // Ítems huérfanos
-        const standalone = worldItems.filter(i => !i.isCategory && !i.parentId).map(i => ({
-            id: i.id,
-            title: i.title,
-            content: i.content?.substring(0, 300)
-        }));
+        // Mundo con Jerarquía Completa
+        const worldHierarchy = [
+            ...getItemsRecursive(null),
+            { id: 'system_estructura', title: 'Estructura y Volúmenes', isCategory: true, items: getItemsRecursive('system_estructura') },
+            { id: 'system_notas', title: 'Notas Generales', isCategory: true, items: getItemsRecursive('system_notas') }
+        ];
 
         return JSON.stringify({ 
             characters: chars, 
-            world: worldStructure, 
-            uncategorized: standalone 
+            world: worldHierarchy 
         }, null, 2);
     };
 
@@ -107,6 +116,10 @@ const IALiveMode = ({
             const chap = chapters.find(c => c.id === liveSelectedChapterId);
             total += (chap?.content || '').length;
             total += (liveInstructions || '').length;
+            total += generateBibliaContextForLive().length;
+        } else if (liveTab === 'writing') {
+            total += (promptNotes || '').length;
+            total += (sceneGoals || '').length;
             total += generateBibliaContextForLive().length;
         }
         setPromptWeight(total);
@@ -123,17 +136,21 @@ const IALiveMode = ({
     }, [promptWeight, effectiveAISettings.selectedAiModel, availableModels]);
 
     const generateBibliaContextForLive = () => {
-        const filteredChars = characters.slice(0, 10);
-        const charactersXml = filteredChars.map(c => `Nombre: ${c.name} - Rol: ${c.role || ''}`).join('\n');
+        // Full characters list without limits
+        const charactersXml = characters.map(c => `Nombre: ${c.name}\nRol: ${c.role || ''}\nDescripción: ${c.description}`).join('\n---\n');
         
-        const keyItems = worldItems.filter(i => i.parentId !== 'system_estructura' && i.parentId !== 'system_notas').slice(0, 15);
-        const worldXml = keyItems.map(i => `${i.title}: ${i.content?.substring(0, 200)}...`).join('\n');
+        // Use the comprehensive world context but maybe trim if too long? 
+        // For now let's trust the weight status.
+        const worldXml = generateComprehensiveWorldContext(worldItems, {}, { 
+            includeEstructura: true, 
+            includeNotasGenerales: true 
+        });
 
         return `
 PERSONAJES:
 ${charactersXml}
 
-LORE CLAVE:
+BIBLIA DEL PROYECTO (LORE Y ESTRUCTURA):
 ${worldXml}
         `.trim();
     };
@@ -163,11 +180,10 @@ ${worldXml}
 
         try {
             const bibliaContext = generateBibliaContextForLive();
-            const selectedRolesData = AI_ROLES.filter(r => aiRoles.includes(r.id));
-            const roleInstructions = selectedRolesData.map(r => r.prompt).join('\n\n');
+            const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
 
             const prompt = `
-${roleInstructions}
+${systemPersona}
 
 Tu objetivo es refinar el texto que te proporciono siguiendo las instrucciones del autor. 
 Devuelve el texto REFINADO de forma íntegra. No respondas con nada que no sea el texto, salvo que seas un 'Mentor' y necesites dar una breve nota motivadora al final.
@@ -203,11 +219,13 @@ Por favor, responde directamente con el texto refinado.
     };
 
     const handleCoherenceAnalysis = async () => {
-        if (!profile?.openRouterKey && !profile.selectedAiModel?.startsWith('google_direct/')) {
+        const { openRouterKey, googleApiKey, selectedAiModel } = effectiveAISettings;
+
+        if (!openRouterKey && !selectedAiModel?.startsWith('google_direct/')) {
             toast.error("Configura tu API Key en Ajustes.");
             return;
         }
-        if (profile.selectedAiModel?.startsWith('google_direct/') && !profile.googleApiKey) {
+        if (selectedAiModel?.startsWith('google_direct/') && !googleApiKey) {
             toast.error("Configura tu API Key de Google en Ajustes.");
             return;
         }
@@ -264,11 +282,13 @@ Usa Markdown. Divide en secciones claras. Si no encuentras errores, felicita al 
     };
 
     const handleExtractEntities = async () => {
-        if (!profile?.openRouterKey && !profile.selectedAiModel?.startsWith('google_direct/')) {
+        const { openRouterKey, googleApiKey, selectedAiModel } = effectiveAISettings;
+
+        if (!openRouterKey && !selectedAiModel?.startsWith('google_direct/')) {
             toast.error("Configura tu API Key en Ajustes.");
             return;
         }
-        if (profile.selectedAiModel?.startsWith('google_direct/') && !profile.googleApiKey) {
+        if (selectedAiModel?.startsWith('google_direct/') && !googleApiKey) {
             toast.error("Configura tu API Key de Google en Ajustes.");
             return;
         }
@@ -530,6 +550,81 @@ No añadas texto extra.
         }
     };
 
+    const handleLiveGenerate = async () => {
+        const { googleApiKey, selectedAiModel, openRouterKey } = effectiveAISettings;
+        
+        // Gemini only requirement for direct generation
+        if (!googleApiKey && selectedAiModel.startsWith('google_direct/')) {
+            toast.error("Configura tu API Key de Google (IA Studio) en Ajustes para usar la Generación Directa.");
+            return;
+        }
+
+        if (!liveSelectedChapterId) {
+            toast.error("Selecciona un capítulo objetivo en la Estructura.");
+            return;
+        }
+
+        setIsAnalyzing(true);
+        try {
+            const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
+            const targetChapter = worldItems.find(c => c.id === liveSelectedChapterId) || chapters.find(c => c.id === liveSelectedChapterId);
+
+            let chapterContext = "";
+            if (generationMode === 'create') {
+                chapterContext = targetChapter ? `Volumen/Ubicación: ${targetChapter.title}. Escribe el contenido narrativo completo enfocado a este capítulo basándote en la biblia del proyecto.` : "Inicia una nueva escena o capítulo de la historia.";
+            } else {
+                chapterContext = `Toma el siguiente contenido y EXPÁNDELO. Mantén la trama y coherencia, pero añade profundidad y detalle.\n\nContenido: ${targetChapter?.content || ''}`;
+            }
+
+            const lengthTxt = generationLength === 'short' ? '800 a 1000 palabras' : generationLength === 'medium' ? '1000 a 1500 palabras' : '1500 a 2000 palabras';
+
+            const filteredChars = selectedCharacters.length > 0 ? characters.filter(c => selectedCharacters.includes(c.id)) : characters;
+            const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n') : "Sin personajes seleccionados.";
+
+            const prompt = `
+${systemPersona}
+
+${chapterContext}
+
+Longitud objetivo: Aproximadamente ${lengthTxt}.
+
+<biblia_del_proyecto>
+${masterDocContext}
+</biblia_del_proyecto>
+
+<personajes_principales_en_escena>
+${charactersXml}
+</personajes_principales_en_escena>
+
+<objetivos_de_escena>
+${sceneGoals}
+</objetivos_de_escena>
+
+<notas_adicionales>
+${promptNotes}
+</notas_adicionales>
+
+Por favor, escribe el texto narrativo completo ahora. No respondas con nada que no sea la historia.
+            `;
+
+            const response = await AIService.sendMessage(prompt, openRouterKey, { 
+                model: selectedAiModel,
+                googleApiKey: googleApiKey,
+                max_tokens: 4000
+            });
+
+            setLiveOriginalText(generationMode === 'create' ? '' : cleanText(targetChapter?.content || ''));
+            setLiveResponse(response);
+            setShowLiveComparison(true);
+            toast.success("¡Capítulo generado con éxito!");
+        } catch (error) {
+            console.error("Generation Error:", error);
+            toast.error("Error al generar el capítulo.");
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
+
     const handleApplyLiveChanges = async () => {
         if (!liveSelectedChapterId || !liveResponse) return;
         try {
@@ -545,20 +640,21 @@ No añadas texto extra.
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-20">
             {/* Model & Context Status Bar */}
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-[24px]">
-                <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-indigo-500 text-white rounded-xl shadow-lg ring-4 ring-indigo-500/10">
+            <div className="flex flex-col md:flex-row items-center gap-6 p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-[32px] overflow-hidden">
+                {/* 1. Model Selection (Flexible space) */}
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 bg-indigo-500 text-white rounded-xl shadow-lg ring-4 ring-indigo-500/10 shrink-0">
                         <Zap size={16} />
                     </div>
-                    <div className="text-left">
-                        <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest leading-none mb-1">Modelo Activo (Este Libro)</h4>
+                    <div className="flex flex-col min-w-0">
+                        <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest leading-none mb-1">Modelo Activo</h4>
                         <div className="flex items-center gap-2">
                             <select 
                                 value={effectiveAISettings.selectedAiModel}
                                 onChange={(e) => updateBookData({ 
                                     aiSettings: { ...activeBook?.aiSettings, selectedAiModel: e.target.value } 
                                 })}
-                                className="bg-transparent text-sm font-black text-[var(--text-main)] font-serif italic outline-none cursor-pointer hover:text-indigo-600 transition-colors"
+                                className="max-w-[150px] lg:max-w-[250px] bg-transparent text-sm font-black text-[var(--text-main)] font-serif italic outline-none cursor-pointer hover:text-indigo-600 transition-colors truncate"
                             >
                                 {availableModels.map(model => (
                                     <option key={model.id} value={model.id} className="bg-[var(--bg-app)] text-[var(--text-main)] font-sans not-italic font-medium">
@@ -566,34 +662,176 @@ No añadas texto extra.
                                     </option>
                                 ))}
                             </select>
-                            <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 text-[9px] font-black rounded-md border border-indigo-500/20 uppercase">
-                                {effectiveAISettings.selectedAiModel?.includes('free') ? 'Gratuito' : 'Premium'}
+                            <span className="hidden sm:inline-block px-2 py-0.5 bg-indigo-500/10 text-indigo-600 text-[9px] font-black rounded-md border border-indigo-500/20 uppercase shrink-0">
+                                {effectiveAISettings.selectedAiModel?.includes('free') ? 'Gratis' : 'Premium'}
                             </span>
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-6">
-                    <div className="text-right hidden sm:block">
-                        <h4 className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest leading-none mb-1">Ventana de Contexto</h4>
-                        <div className="flex items-center gap-2 justify-end">
-                            <span className="text-xs font-bold text-[var(--text-main)]">{(weightStatus.limit / 1000).toFixed(0)}k tokens</span>
-                            <span className={`text-[10px] font-black ${weightStatus.color}`}>{weightStatus.label}</span>
+                {/* 2. Stats Section (Fixed space) */}
+                <div className="flex items-center gap-8 shrink-0">
+                    <div className="hidden sm:flex flex-col items-end gap-1">
+                        <h4 className="text-[10px] font-black text-indigo-400/60 uppercase tracking-widest leading-none">Ventana de Contexto</h4>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-[var(--text-main)] italic">{(weightStatus.limit / 1000).toFixed(0)}k</span>
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded bg-indigo-500/10 ${weightStatus.color}`}>{weightStatus.label}</span>
                         </div>
                     </div>
-                    <div className="flex flex-col items-center">
-                        <div className="w-32 h-2 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-full overflow-hidden">
+
+                    <div className="w-[140px] flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-[10px] font-black text-indigo-400/60 uppercase tracking-widest leading-none">Saturación</h4>
+                            <span className={`text-[10px] font-black ${weightStatus.percent > 80 ? 'text-red-500' : 'text-indigo-500'}`}>{Math.round(weightStatus.percent)}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-black/20 border border-[var(--border-main)] rounded-full overflow-hidden p-[0.5px]">
                             <div 
-                                className={`h-full transition-all duration-700 ${weightStatus.bg}`}
+                                className={`h-full rounded-full transition-all duration-1000 ease-out shadow-sm ${weightStatus.bg}`}
                                 style={{ width: `${weightStatus.percent}%` }}
                             ></div>
                         </div>
-                        <span className="text-[9px] font-black text-[var(--text-muted)] mt-1 uppercase">Saturación del Prompt</span>
                     </div>
                 </div>
             </div>
 
             {/* Sub-Tabs View Conditional */}
+            {liveTab === 'writing' && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in slide-in-from-top-4 duration-700">
+                    {/* LEFT SIDEBAR CONTROLS */}
+                    <div className="lg:col-span-4 space-y-6">
+                        {/* 1. MODO & CONTEXTO */}
+                        <div className="bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[32px] p-6 shadow-xl space-y-6">
+                            <div className="space-y-4">
+                                <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    <FilePlus size={14} strokeWidth={2.5} /> Modo de Escritura
+                                </h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button 
+                                        onClick={() => setGenerationMode('create')}
+                                        className={`py-4 rounded-2xl border text-[11px] font-black uppercase tracking-wider flex flex-col items-center justify-center gap-2 transition-all ${generationMode === 'create' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-indigo-500 hover:bg-indigo-500/5'}`}
+                                    >
+                                        <FilePlus size={18} />
+                                        Crear Nuevo
+                                    </button>
+                                    <button 
+                                        onClick={() => setGenerationMode('expand')}
+                                        className={`py-4 rounded-2xl border text-[11px] font-black uppercase tracking-wider flex flex-col items-center justify-center gap-2 transition-all ${generationMode === 'expand' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-indigo-500 hover:bg-indigo-500/5'}`}
+                                    >
+                                        <Maximize2 size={18} />
+                                        Expandir
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="h-px bg-gradient-to-r from-transparent via-[var(--border-main)] to-transparent"></div>
+
+                            <div className="space-y-4 text-left">
+                                <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    <Database size={14} /> Fuente de Datos
+                                </h3>
+                                <div className="space-y-2">
+                                    <button
+                                        onClick={() => {
+                                            setReviewSelectionType('single'); 
+                                            setIsChapterModalOpen(true);
+                                        }}
+                                        className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-5 py-4 hover:border-indigo-500 transition-all text-left flex items-center justify-between group shadow-sm"
+                                    >
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="text-[9px] uppercase font-black text-[var(--text-muted)] tracking-widest leading-none">Ubicación / Capítulo</span>
+                                            <span className="font-bold text-sm text-[var(--text-main)] truncate max-w-[200px]">
+                                                {liveSelectedChapterId ? (worldItems.find(c => c.id === liveSelectedChapterId)?.title || chapters.find(c => c.id === liveSelectedChapterId)?.title) : "Estructura Proyecto"}
+                                            </span>
+                                        </div>
+                                        <ChevronDown size={14} className="text-indigo-500 opacity-50 group-hover:opacity-100 transition-opacity" />
+                                    </button>
+
+                                    <button
+                                        onClick={() => setIsContextModalOpen(true)}
+                                        className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-5 py-4 hover:border-indigo-500 transition-all text-left flex items-center justify-between group shadow-sm"
+                                    >
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="text-[9px] uppercase font-black text-indigo-500 tracking-widest leading-none">Lore & Personajes</span>
+                                            <span className="font-bold text-sm text-[var(--text-main)]">Configurar Master Doc</span>
+                                        </div>
+                                        <ChevronRight size={14} className="text-indigo-500 opacity-50 group-hover:opacity-100 transition-opacity" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 2. EXTENSIÓN */}
+                        <div className="bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[32px] p-6 shadow-xl space-y-4">
+                            <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                <Hash size={14} /> Extensión del Capítulo
+                            </h3>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[
+                                    { id: 'short', label: '800-1k', desc: 'Corto' },
+                                    { id: 'medium', label: '1k-1.5k', desc: 'Medio' },
+                                    { id: 'long', label: '1.5k-2k', desc: 'Largo' }
+                                ].map(opt => (
+                                    <button 
+                                        key={opt.id}
+                                        onClick={() => setGenerationLength(opt.id)}
+                                        className={`py-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${generationLength === opt.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-emerald-500/30'}`}
+                                    >
+                                        <span className="text-[11px] font-black leading-none">{opt.label}</span>
+                                        <span className="text-[8px] uppercase font-bold opacity-60 tracking-wider leading-none">{opt.desc}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* MAIN CONTENT AREA */}
+                    <div className="lg:col-span-8 flex flex-col space-y-6">
+                        <div className="bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[32px] p-10 shadow-xl flex-1 flex flex-col relative overflow-hidden group h-full text-left">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-[120px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+                            
+                            <div className="relative space-y-8 flex-1 flex flex-col h-full">
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-black text-[var(--text-main)] uppercase tracking-[0.3em] flex items-center gap-2">
+                                        <Sparkles size={16} className="text-indigo-500" /> Dirección de Escena
+                                    </h3>
+                                    <textarea
+                                        value={sceneGoals}
+                                        onChange={(e) => setSceneGoals(e.target.value)}
+                                        placeholder="Define qué debe pasar en esta escena... (Ej: 'Iara descubre el mapa secreto bajo la alfombra del rey')"
+                                        className="w-full p-8 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-3xl text-xl font-serif leading-relaxed resize-none outline-none focus:ring-4 ring-indigo-500/10 transition-all opacity-90 hover:opacity-100 placeholder:text-[var(--text-muted)]/20"
+                                        rows="3"
+                                    ></textarea>
+                                </div>
+
+                                <div className="space-y-4 flex-1 flex flex-col">
+                                    <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                        <MessageSquare size={14} /> Instrucciones para Gemini
+                                    </h3>
+                                    <textarea
+                                        value={promptNotes}
+                                        onChange={(e) => setPromptNotes(e.target.value)}
+                                        placeholder="Estilo literario, tono, énfasis... (Ej: 'Voz poética, ritmo rápido, diálogos cortantes')"
+                                        className="w-full flex-1 p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl text-sm font-serif italic resize-none outline-none focus:ring-4 ring-indigo-500/10 transition-all shadow-inner placeholder:text-[var(--text-muted)]/40"
+                                    ></textarea>
+                                </div>
+                                
+                                <div className="pt-6">
+                                    <button
+                                        onClick={handleLiveGenerate}
+                                        disabled={isAnalyzing || !liveSelectedChapterId}
+                                        className="w-full h-24 bg-indigo-600 text-white font-black text-2xl rounded-3xl shadow-2xl shadow-indigo-600/30 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-4 relative group"
+                                    >
+                                        {isAnalyzing ? <Loader2 className="animate-spin" size={32} /> : <Wand2 size={32} />}
+                                        {isAnalyzing ? 'ORQUESTANDO CAPÍTULO...' : 'GENERAR CAPÍTULO AHORA'}
+                                        <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {liveTab === 'refine' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left: Input Selection */}
@@ -619,24 +857,6 @@ No añadas texto extra.
                             </button>
                         </div>
 
-                        <div className="bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[24px] p-6 shadow-sm text-left">
-                            <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <UserCheck size={14} /> 2. Personalidad IA
-                            </h3>
-                            <div className="flex flex-wrap gap-2 mb-4">
-                                {AI_ROLES.filter(r => aiRoles.includes(r.id)).map(role => (
-                                    <span key={role.id} className="text-[10px] font-bold bg-indigo-500/10 text-indigo-500 px-2 py-1 rounded-lg border border-indigo-500/20">
-                                        {role.name}
-                                    </span>
-                                ))}
-                            </div>
-                            <button
-                                onClick={() => setIsRoleModalOpen(true)}
-                                className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-indigo-500 hover:bg-indigo-500/5 rounded-lg transition-all border border-indigo-500/10"
-                            >
-                                Cambiar Expertos
-                            </button>
-                        </div>
                     </div>
 
                     {/* Right: Instructions & Action */}
@@ -954,11 +1174,6 @@ No añadas texto extra.
                                 <div className="font-serif text-lg leading-relaxed text-[var(--text-main)] animate-in fade-in slide-in-from-bottom-4 duration-700 whitespace-pre-wrap">
                                     {liveResponse}
                                 </div>
-                                {aiRoles.includes('mentor') && (
-                                    <div className="mt-10 p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-[24px]">
-                                        <p className="text-xs italic text-indigo-400 font-medium">Nota del Mentor: Los cambios se enfocan en mejorar el ritmo y la profundidad emocional sin perder tu voz.</p>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </div>

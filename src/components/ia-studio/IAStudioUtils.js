@@ -51,3 +51,54 @@ export const computeChapterLabels = (chapters) => {
     });
     return labels;
 };
+export const generateComprehensiveWorldContext = (worldItems, includedSections = {}, flags = {}) => {
+    if (!worldItems) return '';
+
+    const { 
+        includeEstructura = true, 
+        includeNotasGenerales = true 
+    } = flags;
+
+    const renderTree = (parentId, depth = 0) => {
+        const items = worldItems.filter(i => i.parentId === parentId);
+        if (items.length === 0) return '';
+
+        return items
+            .map(item => {
+                // If it's a root item (parentId === null), check includedSections
+                if (parentId === null && includedSections[item.id] === false) return '';
+                
+                // Special system folders handled by flags
+                if (item.id === 'system_estructura' && !includeEstructura) return '';
+                if (item.id === 'system_notas' && !includeNotasGenerales) return '';
+
+                const indent = '  '.repeat(depth);
+                const title = item.title?.toUpperCase() || 'SIN TÍTULO';
+                const content = cleanText(item.content);
+                
+                let output = `${indent}[${title}]\n`;
+                if (content) {
+                    output += `${indent}${content}\n`;
+                }
+
+                const children = renderTree(item.id, depth + 1);
+                if (children) {
+                    output += children;
+                }
+
+                return output;
+            })
+            .filter(Boolean)
+            .join('\n');
+    };
+
+    const worldContent = renderTree(null);
+    const estructuraContent = includeEstructura ? renderTree('system_estructura') : '';
+    const notasContent = includeNotasGenerales ? renderTree('system_notas') : '';
+
+    return `
+${estructuraContent ? `==== ESTRUCTURA DEL PROYECTO ====\n${estructuraContent}\n` : ''}
+${worldContent ? `==== BIBLIA DEL MUNDO ====\n${worldContent}\n` : ''}
+${notasContent ? `==== NOTAS GENERALES ====\n${notasContent}\n` : ''}
+    `.trim();
+};

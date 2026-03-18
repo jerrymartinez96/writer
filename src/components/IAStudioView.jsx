@@ -5,102 +5,17 @@ import AIService from '../services/AIService';
 import { 
     Sparkles, Copy, CheckCircle2, ChevronDown, CheckSquare, Square, 
     Edit3, ShieldCheck, Database, MessageSquare, BookOpen, 
-    UserCheck, Zap, AlertCircle, FileJson, FolderDown, Upload, Clipboard
+    UserCheck, Zap, AlertCircle, FileJson, FolderDown, Upload, Clipboard,
+    FilePlus, Maximize2, Type
 } from 'lucide-react';
 
 // New Modular Components
 import IALiveMode from './ia-studio/LiveMode/IALiveMode';
-import AIPersonalityModal from './ia-studio/Modals/AIPersonalityModal';
 import ContextConfigModal from './ia-studio/Modals/ContextConfigModal';
 import ChapterSelectionModal from './ia-studio/Modals/ChapterSelectionModal';
-import { cleanText, computeEstructuraLabels, computeChapterLabels } from './ia-studio/IAStudioUtils';
+import { cleanText, computeEstructuraLabels, computeChapterLabels, generateComprehensiveWorldContext } from './ia-studio/IAStudioUtils';
 
-const AI_ROLES = [
-    {
-        id: 'mentor',
-        name: 'Mentor Amigable',
-        desc: 'Te guía paso a paso, explicando el porqué de cada cambio de forma sencilla y motivadora.',
-        prompt: 'Actúa como un mentor literario empático que ayuda a escritores novatos. Tu objetivo es enseñar, no solo corregir. Reglas: 1) Empieza siempre destacando dos cosas que el autor hizo muy bien. 2) Señala de 1 a 3 áreas de mejora, explicando el "porqué" de forma pedagógica y sin tecnicismos. 3) Da un pequeño ejemplo de cómo mejorarlo. 4) Termina con un mensaje motivador. Tono: Cálido, alentador y constructivo.'
-    },
-    {
-        id: 'editor_estricto',
-        name: 'Editor Honesto',
-        desc: 'Directo al grano. Te dice qué no funciona y cómo arreglarlo sin rodeos ni adornos.',
-        prompt: 'Actúa como un editor profesional, estricto y directo de una gran editorial. No tienes tiempo para adornar tus críticas. Reglas: 1) Ve directo al grano. 2) Identifica sin piedad las palabras sobrantes, los clichés y las debilidades. 3) Usa viñetas (bullet points) para listar los errores. 4) Ofrece soluciones prácticas inmediatas o directrices de corte. Tono: Clínico, profesional, severo pero inmensamente útil.'
-    },
-    {
-        id: 'fan_entusiasta',
-        name: 'Lector Fan (Lector Beta)',
-        desc: 'Reacciona a tu historia con emoción, destacando lo que más le engancha.',
-        prompt: 'Actúa como el mayor fan de este género literario y un excelente Lector Beta. Tu tarea es dar la "reacción del lector". Reglas: 1) Resalta qué partes te hicieron sentir emociones (emoción, miedo, risa). 2) Señala exactamente en qué punto no podías dejar de leer (el gancho). 3) Menciona si hubo alguna parte donde te aburriste o te distrajiste levemente. Tono: Emocionado, pasional, usando exclamaciones y reaccionando como un verdadero fanático.'
-    },
-    {
-        id: 'maestro_vocabulario',
-        name: 'Maestro del Estilo',
-        desc: 'Se enfoca en que tu escritura suene más bella, eliminando repeticiones y adverbios.',
-        prompt: 'Actúa como un corrector de estilo obsesionado con la prosa bella y precisa. Reglas: 1) Aplica la regla de "Mostrar, no contar" (Show, don\'t tell). 2) Identifica y sugiere eliminar adverbios terminados en "-mente". 3) Cambia verbos débiles (ser, estar, tener, hacer) por verbos de acción fuertes. 4) Sugiere sinónimos elegantes para palabras repetidas. Proporciona una tabla o lista de "Cambia esto -> Por esto". Tono: Culto, sofisticado y meticuloso.'
-    },
-    {
-        id: 'experto_emociones',
-        name: 'Psicólogo de Personajes',
-        desc: 'Te ayuda a que los personajes sientan y transmitan emociones reales y profundas.',
-        prompt: 'Actúa como un psicólogo experto en comportamiento humano y desarrollo de personajes. Reglas: 1) Analiza si las reacciones emocionales del personaje son creíbles según su contexto. 2) Ayuda a traducir los sentimientos en respuestas físicas y lenguaje corporal, en lugar de solo nombrar la emoción (ej. en lugar de "estaba triste", sugiere "se le formó un nudo en la garganta"). 3) Evalúa el monólogo interno. Tono: Analítico, empático y profundo.'
-    },
-    {
-        id: 'arquitecto_visual',
-        name: 'Director de Arte',
-        desc: 'Ayuda a que tus descripciones se "vean" como una película en la mente usando los 5 sentidos.',
-        prompt: 'Actúa como un director de cine and director de arte. Tu misión es la inmersión visual y sensorial. Reglas: 1) Evalúa si la escena tiene un anclaje físico claro (¿sabemos dónde están los personajes?). 2) Sugiere detalles para estimular al menos 3 de los 5 sentidos (vista, oído, olfato, tacto, gusto). 3) Ayuda a usar la iluminación, el clima y el entorno para reflejar el tono de la escena (falacia patética). Tono: Evocador, visual y artístico.'
-    },
-    {
-        id: 'pulidor_dialogos',
-        name: 'Mago de los Diálogos',
-        desc: 'Hace que tus personajes hablen de forma natural, diferenciando sus voces y añadiendo subtexto.',
-        prompt: 'Actúa como un guionista experto en diálogos. Reglas: 1) Elimina los diálogos "de exposición" (donde los personajes dicen cosas que ya saben solo para informar al lector). 2) Introduce "subtexto": lo que los personajes piensan pero no dicen. 3) Diferencia las voces: asegúrate de que no todos suenen igual. 4) Sugiere eliminar acotaciones innecesarias ("dijo él", "respondió ella") si la acción ya deja claro quién habla. Tono: Dinámico, teatral y astuto.'
-    },
-    {
-        id: 'cazador_logica',
-        name: 'Detective de Continuidad',
-        desc: 'Busca huecos en la trama, cosas que no tienen sentido o contradicciones.',
-        prompt: 'Actúa como un detective de historias implacable. Tu trabajo es encontrar agujeros de guion (plot holes). Reglas: 1) Cuestiona las motivaciones de los personajes: ¿por qué hacen esto si sería más fácil hacer lo otro? 2) Busca errores de continuidad física (ej. un personaje sostiene un vaso y en el siguiente párrafo tiene las manos en los bolsillos). 3) Señala información que el lector necesita y que el autor olvidó incluir. Tono: Curioso, lógico e inquisitivo.'
-    },
-    {
-        id: 'fantasma',
-        name: 'Escritor Invisible',
-        desc: 'Toma tu texto y lo reescribe completamente con un estilo fluido de autor publicado.',
-        prompt: 'Actúa como un "escritor fantasma" (ghostwriter) veterano de bestsellers. Tu tarea no es dar consejos, sino REESCRIBIR. Reglas: 1) Toma el texto proporcionado y reescríbelo por completo. 2) Mejora el ritmo, la prosa, el vocabulario y el flujo narrativo. 3) Mantén la idea original y la voz del autor en la medida de lo posible, pero elévala a calidad de publicación profesional. Entregable: Solo el texto reescrito, sin comentarios extra.'
-    },
-    {
-        id: 'companero_lluvia',
-        name: 'Socio de Ideas',
-        desc: 'Te da sugerencias creativas, giros inesperados y opciones sobre hacia dónde ir.',
-        prompt: 'Actúa como un compañero de lluvia de ideas (brainstorming). Reglas: 1) No corrijas gramática ni estilo. 2) Haz la pregunta mágica: "¿Qué pasaría si...?". 3) Ofrece al menos 3 giros argumentales o ideas creativas basadas en el texto actual. 4) Sugiere un obstáculo nuevo para el protagonista en esta escena. Tono: Entusiasta, imaginativo y muy colaborativo.'
-    },
-    {
-        id: 'simplificador',
-        name: 'Maestro de la Claridad',
-        desc: 'Te ayuda a limpiar textos enrevesados para que sean ágiles y fáciles de entender.',
-        prompt: 'Actúa como un editor especializado en claridad y concisión. Reglas: 1) Identifica oraciones demasiado largas o laberínticas y divídelas. 2) Elimina la "paja" (palabras de relleno que no aportan significado). 3) Aclara cualquier párrafo donde la acción o la idea principal se pierda. Devuelve el texto simplificado mostrando el antes y el después. Tono: Minimalista, claro y eficiente.'
-    },
-    {
-        id: 'mago_ritmo',
-        name: 'Mago del Ritmo',
-        desc: 'Equilibra el ritmo (pacing) alternando oraciones largas, cortas, acción y pausa.',
-        prompt: 'Actúa como un experto en ritmo narrativo (pacing). Reglas: 1) Analiza la longitud de las oraciones: sugiere usar oraciones cortas para la acción/tensión, y largas para la introspección/descripción. 2) Indica si la escena avanza demasiado rápido sin dar respiro al lector, o si se estanca en detalles innecesarios. 3) Asegúrate de que haya un equilibrio correcto entre Escena (acción) y Secuela (reacción del personaje). Tono: Musical, rítmico y estructurado.'
-    },
-    {
-        id: 'arquitecto_estructura',
-        name: 'Arquitecto de Estructura',
-        desc: 'Se aleja para ver el panorama general: arcos de personajes, incidentes incitadores y clímax.',
-        prompt: 'Actúa como un analista de estructura narrativa (Story Grid / Save the Cat). Reglas: 1) Evalúa el propósito de la escena: ¿cambia la polaridad (de positivo a negativo o viceversa)? Si la escena no cambia nada, sugiere cómo hacer que avance la trama. 2) Analiza qué está en juego (stakes) para el protagonista en este fragmento. 3) Comprueba si el fragmento respeta el arco general del personaje. Tono: Analítico, macro-orientado y estratégico.'
-    },
-    {
-        id: 'constructor_mundos',
-        name: 'Creador de Mundos',
-        desc: 'Ideal para Fantasía, Sci-Fi o Histórica. Asegura que tu mundo se sienta real y coherente.',
-        prompt: 'Actúa como un experto en Worldbuilding. Reglas: 1) Analiza cómo las reglas del mundo (magia, tecnología, sociedad, política, época histórica) afectan la escena actual. 2) Señala oportunidades para tejer información del mundo (lore) de forma natural en la narración sin recurrir al "info-dumping" (vertido de información masivo). 3) Cuestiona las incongruencias en las reglas de tu universo. Tono: Erudito, detallista y fascinado por los universos ficticios.'
-    }
-];
+
 
 const IAStudioView = () => {
     const { 
@@ -114,9 +29,8 @@ const IAStudioView = () => {
 
     // Core States
     const [mainTab, setMainTab] = useState('manual'); // 'manual' or 'live'
-    const [activeTab, setActiveTab] = useState('generation'); // 'generation', 'refine', 'master_refine', 'review'
+    const [activeTab, setActiveTab] = useState('writing'); // 'writing', 'refine', 'master_refine', 'review'
     const [liveTab, setLiveTab] = useState('refine');
-    const [aiRoles, setAiRoles] = useState(['mentor']);
     const [selectedChapterId, setSelectedChapterId] = useState('');
     const [selectedRefineChapterId, setSelectedRefineChapterId] = useState('');
     const [selectedReviewChapterId, setSelectedReviewChapterId] = useState('');
@@ -129,11 +43,12 @@ const IAStudioView = () => {
     const [selectedCharacters, setSelectedCharacters] = useState([]);
     const [copied, setCopied] = useState(false);
     const [isPostCopyView, setIsPostCopyView] = useState(false);
-    const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
     const [isContextModalOpen, setIsContextModalOpen] = useState(false);
     const [isChapterModalOpen, setIsChapterModalOpen] = useState(false);
     const [importJson, setImportJson] = useState('');
     const [isImporting, setIsImporting] = useState(false);
+    const [generationLength, setGenerationLength] = useState('medium'); // 'short', 'medium', 'long'
+    const [generationMode, setGenerationMode] = useState('create'); // 'create', 'expand'
 
     // Filter states
     const [includeCharacters, setIncludeCharacters] = useState(true);
@@ -166,7 +81,10 @@ const IAStudioView = () => {
 
     useEffect(() => {
         if (promptStudioPreload) {
-            if (promptStudioPreload.tab) setActiveTab(promptStudioPreload.tab);
+            if (promptStudioPreload.tab) {
+                setActiveTab(promptStudioPreload.tab);
+                setMainTab('manual');
+            }
             if (promptStudioPreload.chapterId) setSelectedRefineChapterId(promptStudioPreload.chapterId);
             if (promptStudioPreload.instructions) setPromptNotes(promptStudioPreload.instructions);
             setIncludeAutorNotes(true);
@@ -177,7 +95,7 @@ const IAStudioView = () => {
 
     useEffect(() => {
         let total = 0;
-        if (activeTab === 'generation') total = generatePrompt().length;
+        if (activeTab === 'writing') total = generatePrompt().length;
         else if (activeTab === 'review') total = generateReviewPrompt().length;
         else if (activeTab === 'refine') total = generateRefinePrompt().length;
         else if (activeTab === 'master_refine') total = generateMasterRefinePrompt().length;
@@ -196,7 +114,7 @@ const IAStudioView = () => {
 
     const handleCopy = () => {
         let prompt = '';
-        if (activeTab === 'generation') prompt = generatePrompt();
+        if (activeTab === 'writing') prompt = generatePrompt();
         else if (activeTab === 'review') prompt = generateReviewPrompt();
         else if (activeTab === 'refine') prompt = generateRefinePrompt();
         else if (activeTab === 'master_refine') prompt = generateMasterRefinePrompt();
@@ -280,28 +198,37 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
         }
     };
 
-    // Prompt Generators
     const generatePrompt = () => {
         const targetChapter = worldItems.find(c => c.id === selectedChapterId);
-        let chapterContext = "Por favor continúa la historia desde donde se quedó. Si es el primer capítulo, iníciala.";
+        let chapterContext = "";
 
-        if (targetChapter) {
-            let volumeContext = "";
-            if (targetChapter.parentId && targetChapter.parentId !== 'system_estructura') {
-                const vol = worldItems.find(c => c.id === targetChapter.parentId);
-                if (vol) volumeContext = ` (Parte de: ${estLabels[vol.id] || ''}${vol.title})`;
+        if (generationMode === 'create') {
+            if (targetChapter) {
+                let volumeContext = "";
+                if (targetChapter.parentId && targetChapter.parentId !== 'system_estructura') {
+                    const vol = worldItems.find(c => c.id === targetChapter.parentId);
+                    if (vol) volumeContext = ` (Parte de: ${estLabels[vol.id] || ''}${vol.title})`;
+                }
+                chapterContext = `Volumen/Ubicación: ${estLabels[targetChapter.id] || ''}${targetChapter.title}${volumeContext}. Escribe el contenido narrativo completo enfocado a este capítulo basándote en la información que está en el documento maestro (master_document).`;
+            } else {
+                chapterContext = "Inicia una nueva escena o capítulo de la historia.";
             }
-            chapterContext = `Volumen/Ubicación: ${estLabels[targetChapter.id] || ''}${targetChapter.title}${volumeContext}. Escribe el contenido narrativo completo enfocado a este capítulo basándote en la información que está en el documento maestro (master_document).`;
+        } else {
+            // Expansion mode
+            const existingChapter = chapters.find(c => c.id === selectedChapterId) || worldItems.find(c => c.id === selectedChapterId);
+            chapterContext = `Toma el siguiente contenido y EXPÁNDELO. Mantén la misma trama y coherencia, pero añade mucha más profundidad, descripciones sensoriales, diálogos enriquecidos y desarrollo de personajes. No resumas, extiende la narración.\n\nContenido a expandir: ${existingChapter?.content || 'Selecciona un capítulo con contenido para expandir.'}`;
         }
+
+        const lengthTxt = generationLength === 'short' ? '800 a 1000 palabras' : generationLength === 'medium' ? '1000 a 1500 palabras' : '1500 a 2000 palabras';
+        const lengthPrompt = `\nLongitud objetivo: Aproximadamente ${lengthTxt}.`;
 
         const filteredChars = selectedCharacters.length > 0 ? characters.filter(c => selectedCharacters.includes(c.id)) : characters;
         const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n') : "Sin personajes.";
 
         const masterDocText = generateFullMasterDocContext();
-        const selectedRolesData = AI_ROLES.filter(r => aiRoles.includes(r.id));
-        const combinedPrompt = selectedRolesData.length > 0 ? selectedRolesData.map(r => r.prompt).join(' ') : AI_ROLES[0].prompt;
+        const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
 
-        return `${combinedPrompt}\n<master_document>\n${masterDocText}\n</master_document>\n<personajes>\n${charactersXml}\n</personajes>\n<contexto>\n${chapterContext}\nObjetivos: ${sceneGoals}\nNotas: ${promptNotes}\n</contexto>`;
+        return `${systemPersona}\n${lengthPrompt}\n<master_document>\n${masterDocText}\n</master_document>\n<personajes>\n${charactersXml}\n</personajes>\n<contexto>\n${chapterContext}\nObjetivos: ${sceneGoals}\nNotas: ${promptNotes}\n</contexto>`;
     };
 
     const generateReviewPrompt = () => {
@@ -335,8 +262,10 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
     };
 
     const generateFullMasterDocContext = () => {
-        const includedDynamicSections = worldItems.filter(sec => sec.parentId === null && includedSections[sec.id]);
-        return includedDynamicSections.map(sec => `${sec.title}: ${cleanText(sec.content)}`).join('\n');
+        return generateComprehensiveWorldContext(worldItems, includedSections, { 
+            includeEstructura, 
+            includeNotasGenerales 
+        });
     };
 
     const weightStatus = useMemo(() => {
@@ -380,13 +309,13 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
 
                     {mainTab === 'manual' && (
                         <div className="flex bg-[var(--bg-editor)]/50 p-1 rounded-xl border border-[var(--border-main)] shrink-0 shadow-sm overflow-x-auto scrollbar-hide w-full md:w-max animate-in fade-in slide-in-from-top-2 duration-300">
-                            {['generation', 'refine', 'master_refine', 'review', 'import'].map(tab => (
+                            {['writing', 'refine', 'master_refine', 'review', 'import'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
                                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === tab ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)]'}`}
                                 >
-                                    {tab === 'generation' ? 'Escribir' : tab === 'refine' ? 'Refinar' : tab === 'master_refine' ? 'Biblia' : tab === 'review' ? 'Revisar' : 'Importar'}
+                                    {tab === 'writing' ? 'Escritura' : tab === 'refine' ? 'Refinar' : tab === 'master_refine' ? 'Biblia' : tab === 'review' ? 'Revisar' : 'Importar'}
                                 </button>
                             ))}
                         </div>
@@ -394,13 +323,13 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
 
                     {mainTab === 'live' && (
                         <div className="flex bg-[var(--bg-editor)]/50 p-1 rounded-xl border border-[var(--border-main)] shrink-0 shadow-sm overflow-x-auto scrollbar-hide w-full md:w-max animate-in fade-in slide-in-from-top-2 duration-300">
-                             {['refine', 'coherence', 'extraction', 'import'].map(tab => (
+                             {['writing', 'refine', 'coherence', 'extraction', 'import'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setLiveTab(tab)}
                                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${liveTab === tab ? 'bg-indigo-600 text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-indigo-500/10'}`}
                                 >
-                                    {tab === 'refine' ? 'Refinado' : tab === 'coherence' ? 'Coherencia' : tab === 'extraction' ? 'Extractor' : tab === 'import' ? 'Importer' : ''}
+                                    {tab === 'writing' ? 'Escritura' : tab === 'refine' ? 'Refinado' : tab === 'coherence' ? 'Coherencia' : tab === 'extraction' ? 'Extractor' : tab === 'import' ? 'Importer' : ''}
                                 </button>
                             ))}
                         </div>
@@ -415,13 +344,9 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
                         <IALiveMode 
                             activeBook={activeBook}
                             updateBookData={updateBookData}
-                            profile={profile}
-                            updateProfile={updateProfile}
                             chapters={chapters}
                             characters={characters}
                             worldItems={worldItems}
-                            aiRoles={aiRoles}
-                            AI_ROLES={AI_ROLES}
                             liveTab={liveTab}
                             setLiveTab={setLiveTab}
                             updateChapter={updateChapter}
@@ -432,10 +357,21 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
                             updateWorldItem={updateWorldItem}
                             deleteWorldItem={deleteWorldItem}
                             setIsChapterModalOpen={setIsChapterModalOpen}
-                            setIsRoleModalOpen={setIsRoleModalOpen}
                             liveSelectedChapterId={liveSelectedChapterId}
                             setLiveSelectedChapterId={setLiveSelectedChapterId}
                             setReviewSelectionType={setReviewSelectionType}
+                            generationLength={generationLength}
+                            setGenerationLength={setGenerationLength}
+                            generationMode={generationMode}
+                            setGenerationMode={setGenerationMode}
+                            sceneGoals={sceneGoals}
+                            setSceneGoals={setSceneGoals}
+                            promptNotes={promptNotes}
+                            setPromptNotes={setPromptNotes}
+                            setIsContextModalOpen={setIsContextModalOpen}
+                            masterDocContext={generateFullMasterDocContext()}
+                            includeCharacters={includeCharacters}
+                            selectedCharacters={selectedCharacters}
                         />
                     ) : (
                         <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -490,12 +426,58 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
                                 </div>
                             ) : (
                                 <>
+                                    {activeTab === 'writing' && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                                            <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl space-y-4">
+                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)]">Modo de Escritura</h4>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button 
+                                                        onClick={() => setGenerationMode('create')}
+                                                        className={`py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${generationMode === 'create' ? 'bg-[var(--accent-main)] text-white border-[var(--accent-main)] shadow-lg' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-[var(--accent-main)]'}`}
+                                                    >
+                                                        <FilePlus size={14} />
+                                                        Crear Nuevo
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setGenerationMode('expand')}
+                                                        className={`py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${generationMode === 'expand' ? 'bg-[var(--accent-main)] text-white border-[var(--accent-main)] shadow-lg' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-[var(--accent-main)]'}`}
+                                                    >
+                                                        <Maximize2 size={14} />
+                                                        Expandir
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl space-y-4">
+                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Extensión del Capítulo</h4>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {[
+                                                        { id: 'short', label: '800-1000', desc: 'Corto' },
+                                                        { id: 'medium', label: '1000-1500', desc: 'Medio' },
+                                                        { id: 'long', label: '1500-2000', desc: 'Largo' }
+                                                    ].map(opt => (
+                                                        <button 
+                                                            key={opt.id}
+                                                            onClick={() => setGenerationLength(opt.id)}
+                                                            className={`py-3 rounded-xl border flex flex-col items-center gap-0.5 transition-all ${generationLength === opt.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-[var(--bg-editor)] text-[var(--text-muted)] border-[var(--border-main)] hover:border-indigo-500'}`}
+                                                        >
+                                                            <span className="text-[10px] font-black">{opt.label}</span>
+                                                            <span className="text-[8px] uppercase tracking-tighter opacity-70">{opt.desc}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <button onClick={() => setIsChapterModalOpen(true)} className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl text-left hover:border-[var(--accent-main)] transition-all group">
-                                            <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">Capítulo Objetivo</h4>
+                                            <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">
+                                                {activeTab === 'writing' && generationMode === 'expand' ? 'Capítulo a Expandir' : 'Capítulo Objetivo'}
+                                            </h4>
                                             <p className="font-bold text-lg font-serif">
-                                                {activeTab === 'generation' 
-                                                    ? (selectedChapterId ? worldItems.find(c => c.id === selectedChapterId)?.title : 'Autogeneración Libre')
+                                                {activeTab === 'writing' 
+                                                    ? (selectedChapterId ? (worldItems.find(c => c.id === selectedChapterId)?.title || chapters.find(c => c.id === selectedChapterId)?.title) : 'Seleccionar...')
                                                     : activeTab === 'refine'
                                                         ? (selectedRefineChapterId ? chapters.find(c => c.id === selectedRefineChapterId)?.title : 'Seleccionar...')
                                                         : (selectedReviewChapterId ? chapters.find(c => c.id === selectedReviewChapterId)?.title : 'Carga General')}
@@ -541,13 +523,6 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
             </div>
 
             {/* Modals */}
-            <AIPersonalityModal 
-                isOpen={isRoleModalOpen} 
-                onClose={() => setIsRoleModalOpen(false)}
-                aiRoles={aiRoles}
-                setAiRoles={setAiRoles}
-                AI_ROLES={AI_ROLES}
-            />
 
             <ContextConfigModal 
                 isOpen={isContextModalOpen}

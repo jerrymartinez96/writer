@@ -1,4 +1,4 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { useState, useEffect, useMemo } from 'react'
 import Modal from './Modal'
@@ -28,7 +28,7 @@ const SortableChapterItem = ({ chapter, isActive, label, statusColor, onSelect, 
                 <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1 -ml-1.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 transition-opacity shrink-0 touch-none text-[var(--text-muted)]">
                     <GripVertical size={12} />
                 </div>
-                
+
                 <div className="flex flex-col flex-1 truncate">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="text-[8px] font-black uppercase tracking-[0.1em] text-[var(--text-muted)] opacity-60 leading-none">
@@ -41,7 +41,7 @@ const SortableChapterItem = ({ chapter, isActive, label, statusColor, onSelect, 
                     </span>
                 </div>
             </button>
-            
+
             <button
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-lg hover:bg-red-50"
@@ -73,7 +73,7 @@ const SortableVolumeItem = ({ vol, isExpanded, onToggle, isActiveContainer, chil
                     className="flex-1 flex items-center gap-2 overflow-hidden text-left"
                 >
                     <ChevronRight size={14} className={`text-indigo-500/60 transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''} shrink-0`} />
-                    
+
                     <div className="flex flex-col truncate">
                         <span className="text-[8px] font-black uppercase tracking-[0.1em] text-indigo-500/60 mb-0">
                             {label.replace(': ', '')}
@@ -91,7 +91,7 @@ const SortableVolumeItem = ({ vol, isExpanded, onToggle, isActiveContainer, chil
                     <Trash2 size={12} />
                 </button>
             </div>
-            
+
             {isExpanded && (
                 <div className="ml-3 pl-2 border-l border-[var(--border-main)] space-y-0.5 mt-1 pb-1">
                     {children}
@@ -105,7 +105,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const {
         books, activeBook, selectBook, createBook,
         chapters, activeChapter, selectChapter, createChapter, deleteChapter,
-        activeView, setActiveView, reorderChapters
+        activeView, setActiveView, reorderChapters, setPromptStudioPreload, promptStudioPreload
     } = useData();
     const [isBooksOpen, setIsBooksOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -171,9 +171,9 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     );
 
     // Sorted chapters helpers
-    const currentVolumes = useMemo(() => 
+    const currentVolumes = useMemo(() =>
         chapters.filter(c => c.isVolume).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)),
-    [chapters]);
+        [chapters]);
 
     const standaloneChapters = useMemo(() =>
         chapters.filter(c => !c.parentId && !c.isVolume)
@@ -200,7 +200,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
             // Find parentId from active item
             const activeItem = chapters.find(c => c.id === active.id);
             parentId = activeItem?.parentId || null;
-            items = parentId 
+            items = parentId
                 ? chapters.filter(c => c.parentId === parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
                 : standaloneChapters;
         } else {
@@ -210,8 +210,8 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
             parentId = overItem?.parentId || null;
             const activeItem = chapters.find(c => c.id === active.id);
             if (activeItem?.parentId !== parentId) return; // Cross-parent dragging is more complex
-            
-            items = parentId 
+
+            items = parentId
                 ? chapters.filter(c => c.parentId === parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
                 : standaloneChapters;
         }
@@ -510,7 +510,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                             className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-[var(--text-main)] text-xl font-serif italic placeholder:opacity-30 placeholder:italic"
                         />
                     </div>
-                    
+
                     <div className="pt-4 flex flex-col gap-4">
                         <button
                             onClick={() => {
@@ -641,14 +641,14 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                     <div className="w-20 h-20 bg-red-500/10 rounded-[32px] flex items-center justify-center mx-auto mb-8 border-2 border-red-500/20 shadow-xl shadow-red-500/10">
                         <Trash2 size={32} className="text-red-500" />
                     </div>
-                    
+
                     <h3 className="text-2xl font-black text-[var(--text-main)] mb-3 tracking-tight font-serif italic">
                         {itemToDelete?.isVolume ? '¿Borrar este Volumen?' : '¿Borrar este Capítulo?'}
                     </h3>
-                    
+
                     <p className="text-[var(--text-muted)] text-sm max-w-sm mx-auto leading-relaxed">
-                        {itemToDelete?.isVolume 
-                            ? 'Los capítulos internos NO se borrarán de la app, pasarán a ser capítulos sueltos. Sin embargo, el volumen desaparecerá para siempre.' 
+                        {itemToDelete?.isVolume
+                            ? 'Los capítulos internos NO se borrarán de la app, pasarán a ser capítulos sueltos. Sin embargo, el volumen desaparecerá para siempre.'
                             : 'Estás a punto de borrar definitivamente este capítulo. Esta acción moverá el elemento a la papelera por 30 días.'}
                     </p>
 
