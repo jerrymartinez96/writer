@@ -5,7 +5,7 @@ import AIService from '../services/AIService';
 import { 
     Sparkles, Copy, CheckCircle2, ChevronDown, CheckSquare, Square, 
     Edit3, ShieldCheck, Database, MessageSquare, BookOpen, 
-    UserCheck, Zap, AlertCircle 
+    UserCheck, Zap, AlertCircle, FileJson, FolderDown, Upload, Clipboard
 } from 'lucide-react';
 
 // New Modular Components
@@ -108,7 +108,7 @@ const IAStudioView = () => {
         chapters, characters, worldItems, promptStudioPreload, setPromptStudioPreload, 
         profile, updateChapter, createCharacter, createWorldItem,
         updateCharacter, updateWorldItem, deleteCharacter, deleteWorldItem,
-        updateProfile
+        updateProfile, createChapter: createChapterContext, createWorldItem: createWorldItemContext
     } = useData();
     const toast = useToast();
 
@@ -132,6 +132,8 @@ const IAStudioView = () => {
     const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
     const [isContextModalOpen, setIsContextModalOpen] = useState(false);
     const [isChapterModalOpen, setIsChapterModalOpen] = useState(false);
+    const [importJson, setImportJson] = useState('');
+    const [isImporting, setIsImporting] = useState(false);
 
     // Filter states
     const [includeCharacters, setIncludeCharacters] = useState(true);
@@ -205,6 +207,79 @@ const IAStudioView = () => {
         setIsPostCopyView(true);
     };
 
+    const handleCopyImportPrompt = () => {
+        const prompt = `Actúa como un arquitecto de historias profesional. Genera la estructura de UN SOLO VOLUMEN con sus capítulos en formato JSON.
+El formato DEBE ser estrictamente el siguiente:
+{
+  "volume_title": "Título del Volumen",
+  "chapters": [
+    {
+      "title": "Título del Capítulo 1",
+      "content": "Contenido inicial que se usará tanto para el Master Doc como para el Manuscrito"
+    }
+  ]
+}
+Responde únicamente con el bloque JSON, sin texto adicional.`;
+        navigator.clipboard.writeText(prompt);
+        toast.success("Prompt de formato copiado al portapapeles");
+    };
+
+    const handleImportVolumeStructured = async () => {
+        if (!importJson.trim()) {
+            toast.error("Pega el JSON de la estructura primero.");
+            return;
+        }
+
+        setIsImporting(true);
+        try {
+            const data = JSON.parse(importJson);
+            if (!data.volume_title || !Array.isArray(data.chapters)) {
+                throw new Error("Formato JSON inválido. Debe contener 'volume_title' y un array 'chapters'.");
+            }
+
+            // 1. Create in Master Doc (World Items)
+            const masterVolume = await createWorldItemContext({
+                title: data.volume_title,
+                isCategory: true,
+                parentId: 'system_estructura'
+            });
+
+            // 2. Create in Manuscript (Chapters)
+            const manuscriptVolume = await createChapterContext({
+                title: data.volume_title,
+                isVolume: true
+            });
+
+            // 3. Create chapters in both places
+            for (const chap of data.chapters) {
+                // Master Doc Chapter
+                await createWorldItemContext({
+                    title: chap.title,
+                    content: chap.content || '',
+                    parentId: masterVolume.id,
+                    isCategory: false
+                });
+
+                // Manuscript Chapter
+                await createChapterContext({
+                    title: chap.title,
+                    content: chap.content || '',
+                    parentId: manuscriptVolume.id,
+                    isVolume: false
+                });
+            }
+
+            toast.success(`Volumen "${data.volume_title}" y ${data.chapters.length} capítulos importados con éxito.`);
+            setImportJson('');
+            setActiveTab('generation');
+        } catch (error) {
+            console.error("Import error:", error);
+            toast.error(error.message || "Error al procesar el JSON. Verifica el formato.");
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
     // Prompt Generators
     const generatePrompt = () => {
         const targetChapter = worldItems.find(c => c.id === selectedChapterId);
@@ -265,7 +340,6 @@ const IAStudioView = () => {
     };
 
     const weightStatus = useMemo(() => {
-        // Find context length from AIService models or default
         const modelData = AIService.MODELS.find(m => m.id === effectiveAISettings.selectedAiModel) || AIService.MODELS[0];
         const modelLimit = modelData?.context_length || 128000;
         const percent = Math.min((promptWeight / modelLimit) * 100, 100);
@@ -306,13 +380,13 @@ const IAStudioView = () => {
 
                     {mainTab === 'manual' && (
                         <div className="flex bg-[var(--bg-editor)]/50 p-1 rounded-xl border border-[var(--border-main)] shrink-0 shadow-sm overflow-x-auto scrollbar-hide w-full md:w-max animate-in fade-in slide-in-from-top-2 duration-300">
-                            {['generation', 'refine', 'master_refine', 'review'].map(tab => (
+                            {['generation', 'refine', 'master_refine', 'review', 'import'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
                                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === tab ? 'bg-[var(--accent-main)] text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)]'}`}
                                 >
-                                    {tab === 'generation' ? 'Escribir' : tab === 'refine' ? 'Refinar' : tab === 'master_refine' ? 'Biblia' : 'Revisar'}
+                                    {tab === 'generation' ? 'Escribir' : tab === 'refine' ? 'Refinar' : tab === 'master_refine' ? 'Biblia' : tab === 'review' ? 'Revisar' : 'Importar'}
                                 </button>
                             ))}
                         </div>
@@ -365,50 +439,102 @@ const IAStudioView = () => {
                         />
                     ) : (
                         <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-                            {/* Manual Mode View */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <button onClick={() => setIsChapterModalOpen(true)} className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl text-left hover:border-[var(--accent-main)] transition-all group">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">Capítulo Objetivo</h4>
-                                    <p className="font-bold text-lg font-serif">
-                                        {activeTab === 'generation' 
-                                            ? (selectedChapterId ? worldItems.find(c => c.id === selectedChapterId)?.title : 'Autogeneración Libre')
-                                            : activeTab === 'refine'
-                                                ? (selectedRefineChapterId ? chapters.find(c => c.id === selectedRefineChapterId)?.title : 'Seleccionar...')
-                                                : (selectedReviewChapterId ? chapters.find(c => c.id === selectedReviewChapterId)?.title : 'Carga General')}
-                                    </p>
-                                </button>
-                                <button onClick={() => setIsContextModalOpen(true)} className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl text-left hover:border-[var(--accent-main)] transition-all">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-1">Contexto de Biblia</h4>
-                                    <p className="font-bold text-lg font-serif">Configurar Master Doc</p>
-                                </button>
-                            </div>
-
-                            <div className="space-y-4">
-                                <h3 className="text-xl font-bold font-serif text-[var(--text-main)] italic flex items-center gap-2">
-                                    <MessageSquare size={20} className="text-[var(--accent-main)]" />
-                                    Instrucciones para Gemini
-                                </h3>
-                                <textarea 
-                                    value={promptNotes}
-                                    onChange={e => setPromptNotes(e.target.value)}
-                                    className="w-full h-48 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl p-8 text-lg font-serif outline-none focus:ring-2 ring-[var(--accent-main)]/20 transition-all shadow-inner"
-                                    placeholder="Escribe aquí lo que quieres que Gemini haga... (Ej: 'Escribe una escena de acción intensa', 'Busca errores de ritmo', etc.)"
-                                />
-                            </div>
-
-                            <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl space-y-6 shadow-sm">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Zap size={18} className={weightStatus.color} />
-                                        <span className={`text-sm font-black uppercase tracking-widest ${weightStatus.color}`}>Peso del Prompt: {weightStatus.label}</span>
+                            {activeTab === 'import' ? (
+                                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl">
+                                            <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">Importación de Estructura</h4>
+                                            <p className="text-sm text-[var(--text-muted)] mt-2 leading-relaxed">Importa un volumen completo con sus capítulos tanto al Master Doc como al Manuscrito usando JSON.</p>
+                                        </div>
+                                        <button 
+                                            onClick={handleCopyImportPrompt}
+                                            className="p-8 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl text-left hover:bg-indigo-500/10 transition-all group flex flex-col justify-center"
+                                        >
+                                            <div className="flex items-center gap-2 text-indigo-500 mb-1">
+                                                <Clipboard size={16} />
+                                                <h4 className="text-[10px] font-black uppercase tracking-widest">Preparar Formato</h4>
+                                            </div>
+                                            <p className="font-bold text-lg font-serif">Copiar Prompt de Formato</p>
+                                        </button>
                                     </div>
-                                    <span className="text-xs font-mono text-[var(--text-muted)] bg-[var(--bg-editor)] px-3 py-1 rounded-full">{promptWeight} chars</span>
+
+                                    <div className="space-y-4">
+                                        <h3 className="text-xl font-bold font-serif text-[var(--text-main)] italic flex items-center gap-2">
+                                            <FileJson size={20} className="text-[var(--accent-main)]" />
+                                            Estructura en JSON
+                                        </h3>
+                                        <div className="relative group">
+                                            <textarea 
+                                                value={importJson}
+                                                onChange={e => setImportJson(e.target.value)}
+                                                className="w-full h-64 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl p-8 font-mono text-sm outline-none focus:ring-2 ring-[var(--accent-main)]/20 transition-all shadow-inner scrollbar-hide"
+                                                placeholder='{ "volume_title": "...", "chapters": [...] }'
+                                            />
+                                            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="px-3 py-1 bg-[var(--accent-soft)] text-[var(--accent-main)] text-[10px] font-black rounded-full border border-[var(--accent-main)]/20">JSON MODE</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-sm">
+                                        <button 
+                                            onClick={handleImportVolumeStructured}
+                                            disabled={isImporting || !importJson.trim()}
+                                            className="w-full py-6 bg-gradient-to-r from-[var(--accent-main)] to-indigo-600 text-white font-black text-xl rounded-2xl shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale"
+                                        >
+                                            {isImporting ? <AlertCircle className="animate-spin" size={24} /> : <FolderDown size={24} />}
+                                            {isImporting ? 'IMPORTANDO...' : 'IMPORTAR VOLUMEN AHORA'}
+                                        </button>
+                                        <p className="text-[10px] text-center text-[var(--text-muted)] mt-4 uppercase tracking-[0.2em] font-black">Se creará en Estructura (Master Doc) y Manuscrito</p>
+                                    </div>
                                 </div>
-                                <button onClick={handleCopy} className="w-full py-6 bg-[var(--accent-main)] text-white font-black text-xl rounded-2xl shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-3">
-                                    {copied ? <CheckCircle2 size={24} /> : <Copy size={24} />}
-                                    {copied ? '¡COPIADO CON ÉXITO!' : 'COPIAR PROMPT MAESTRO'}
-                                </button>
-                            </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <button onClick={() => setIsChapterModalOpen(true)} className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl text-left hover:border-[var(--accent-main)] transition-all group">
+                                            <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">Capítulo Objetivo</h4>
+                                            <p className="font-bold text-lg font-serif">
+                                                {activeTab === 'generation' 
+                                                    ? (selectedChapterId ? worldItems.find(c => c.id === selectedChapterId)?.title : 'Autogeneración Libre')
+                                                    : activeTab === 'refine'
+                                                        ? (selectedRefineChapterId ? chapters.find(c => c.id === selectedRefineChapterId)?.title : 'Seleccionar...')
+                                                        : (selectedReviewChapterId ? chapters.find(c => c.id === selectedReviewChapterId)?.title : 'Carga General')}
+                                            </p>
+                                        </button>
+                                        <button onClick={() => setIsContextModalOpen(true)} className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl text-left hover:border-[var(--accent-main)] transition-all">
+                                            <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-1">Contexto de Biblia</h4>
+                                            <p className="font-bold text-lg font-serif">Configurar Master Doc</p>
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h3 className="text-xl font-bold font-serif text-[var(--text-main)] italic flex items-center gap-2">
+                                            <MessageSquare size={20} className="text-[var(--accent-main)]" />
+                                            Instrucciones para Gemini
+                                        </h3>
+                                        <textarea 
+                                            value={promptNotes}
+                                            onChange={e => setPromptNotes(e.target.value)}
+                                            className="w-full h-48 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl p-8 text-lg font-serif outline-none focus:ring-2 ring-[var(--accent-main)]/20 transition-all shadow-inner"
+                                            placeholder="Escribe aquí lo que quieres que Gemini haga... (Ej: 'Escribe una escena de acción intensa', 'Busca errores de ritmo', etc.)"
+                                        />
+                                    </div>
+
+                                    <div className="p-8 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl space-y-6 shadow-sm">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <Zap size={18} className={weightStatus.color} />
+                                                <span className={`text-sm font-black uppercase tracking-widest ${weightStatus.color}`}>Peso del Prompt: {weightStatus.label}</span>
+                                            </div>
+                                            <span className="text-xs font-mono text-[var(--text-muted)] bg-[var(--bg-editor)] px-3 py-1 rounded-full">{promptWeight} chars</span>
+                                        </div>
+                                        <button onClick={handleCopy} className="w-full py-6 bg-[var(--accent-main)] text-white font-black text-xl rounded-2xl shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-3">
+                                            {copied ? <CheckCircle2 size={24} /> : <Copy size={24} />}
+                                            {copied ? '¡COPIADO CON ÉXITO!' : 'COPIAR PROMPT MAESTRO'}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>
