@@ -27,7 +27,10 @@ import {
     updateUserProfile as updateUserProfileApi,
     subscribeToChapter,
     claimChapterLock as claimLockApi,
-    releaseChapterLock as releaseLockApi
+    releaseChapterLock as releaseLockApi,
+    permanentlyDeleteChapter,
+    permanentlyDeleteCharacter,
+    permanentlyDeleteWorldItem
 } from '../services/db';
 import { decompressData } from '../services/compression';
 import { uploadImageToCloudinary } from '../services/cloudinary';
@@ -691,6 +694,23 @@ export const DataProvider = ({ children }) => {
         }
     };
 
+    const handlePermanentlyDeleteTrashItem = async (item) => {
+        if (!activeBook) return;
+        try {
+            if (item.collectionType === 'chapters') {
+                await permanentlyDeleteChapter(activeBook.id, item.id);
+            } else if (item.collectionType === 'characters') {
+                await permanentlyDeleteCharacter(activeBook.id, item.id);
+            } else if (item.collectionType === 'world') {
+                await permanentlyDeleteWorldItem(activeBook.id, item.id);
+            }
+            setTrashItems(prev => prev.filter(t => t.id !== item.id));
+        } catch (error) {
+            console.error("Failed to permanently delete trash item", error);
+            throw error;
+        }
+    };
+
     const handleLogout = async () => {
         await flushAllSaves();
         await signOut(auth);
@@ -757,6 +777,7 @@ export const DataProvider = ({ children }) => {
         updateWorldItem: handleUpdateWorldItem,
         deleteWorldItem: handleDeleteWorldItem,
         restoreTrashItem: handleRestoreTrashItem,
+        permanentlyDeleteTrashItem: handlePermanentlyDeleteTrashItem,
         promptStudioPreload,
         setPromptStudioPreload,
         reorderChapters: handleReorderChapters,

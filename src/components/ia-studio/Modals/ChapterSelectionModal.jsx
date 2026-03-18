@@ -26,18 +26,24 @@ const ChapterSelectionModal = ({
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
-            <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="flex items-center justify-between p-6 border-b border-[var(--border-main)]">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}></div>
+            <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[32px] shadow-[0_30px_100px_rgba(0,0,0,0.5)] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+                <div className="flex items-center justify-between p-8 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/50">
                     <div>
-                        <h3 className="text-xl font-bold text-[var(--text-main)] font-serif italic">Mosaico de Capítulos</h3>
-                        <p className="text-xs text-[var(--text-muted)] mt-1">Selecciona el capítulo sobre el cual quieres que Gemini trabaje.</p>
+                        <h3 className="text-2xl font-black text-[var(--text-main)] font-serif italic tracking-tight">Mosaico de Capítulos</h3>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] mt-2 opacity-60">Selecciona el objetivo de ejecución para la IA</p>
                     </div>
-                    <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--bg-editor)] text-[var(--text-muted)] transition-colors"><ChevronDown size={20} /></button>
+                    <button 
+                        onClick={onClose} 
+                        className="p-3 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-muted)] hover:text-indigo-500 hover:border-indigo-500/30 transition-all hover:shadow-lg active:scale-95"
+                    >
+                        <ChevronDown size={22} />
+                    </button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 md:p-8 scrollbar-hide bg-[var(--bg-editor)]/30">
-                    <div className="space-y-10">
-                        {/* Option: Autogeneration / All Chapters (Only for Generation/Review) */}
+
+                <div className="flex-1 overflow-y-auto p-8 scrollbar-hide bg-indigo-500/[0.01]">
+                    <div className="space-y-12">
+                        {/* Option: Autogeneration / All Chapters */}
                         {(activeTab === 'generation' || activeTab === 'review') && reviewSelectionType === 'single' && (
                             <div className="flex justify-center">
                                 <button
@@ -50,12 +56,14 @@ const ChapterSelectionModal = ({
                                         }
                                         onClose();
                                     }}
-                                    className={`group relative overflow-hidden px-8 py-5 rounded-2xl border transition-all flex items-center gap-4 ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? `bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-xl shadow-[var(--accent-main)]/20` : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-[var(--accent-main)] text-[var(--text-main)]'}`}
+                                    className={`group relative overflow-hidden px-10 py-6 rounded-3xl border-2 transition-all flex items-center gap-6 ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? `bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20 scale-105` : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50 text-[var(--text-main)] hover:-translate-y-1'}`}
                                 >
-                                    <Sparkles size={24} className={(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'text-white' : 'text-[var(--accent-main)]'} />
+                                    <div className={`p-4 rounded-2xl transition-all ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'bg-white/20' : 'bg-indigo-500/10'}`}>
+                                        <Sparkles size={28} className={(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'text-white' : 'text-indigo-500'} />
+                                    </div>
                                     <div className="text-left">
-                                        <div className="text-[10px] uppercase font-bold tracking-widest opacity-70">Modo Directo</div>
-                                        <div className="font-bold text-lg font-serif">
+                                        <div className={`text-[10px] uppercase font-black tracking-[0.2em] mb-1 ${(activeTab === 'generation' ? !selectedChapterId : !selectedReviewChapterId) ? 'text-white/60' : 'text-indigo-500'}`}>Modo Global</div>
+                                        <div className="font-black text-xl font-serif italic">
                                             {activeTab === 'generation' ? "Autogeneración Libre" : "Todos los borradores"}
                                         </div>
                                     </div>
@@ -75,16 +83,17 @@ const ChapterSelectionModal = ({
                                 if (children.length === 0) return null;
 
                                 return (
-                                    <div key={vol.id} className="space-y-4">
-                                        <div className="flex items-center gap-4">
-                                            <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[var(--border-main)]"></div>
-                                            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] flex items-center gap-2">
+                                    <div key={vol.id} className="space-y-6">
+                                        <div className="flex items-center gap-6 px-4">
+                                            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-[var(--border-main)] to-transparent"></div>
+                                            <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-muted)] flex items-center gap-3 bg-[var(--bg-app)] px-4 py-1.5 rounded-full border border-[var(--border-main)]/50 shadow-sm">
+                                                <Layers size={14} className="text-indigo-500" />
                                                 {sourceLabels[vol.id] || ''}{vol.title}
                                             </h4>
-                                            <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[var(--border-main)]"></div>
+                                            <div className="h-px flex-1 bg-gradient-to-l from-transparent via-[var(--border-main)] to-transparent"></div>
                                         </div>
 
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                                             {children.map(c => {
                                                 const isSelected = activeTab === 'generation'
                                                     ? selectedChapterId === c.id
@@ -99,9 +108,8 @@ const ChapterSelectionModal = ({
                                                 const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
                                                 const isDisabled = activeTab === 'refine' && isFinalized;
 
-                                                const accentColor = activeTab === 'refine' ? 'blue-500' : activeTab === 'review' ? 'orange-500' : '[var(--accent-main)]';
-                                                const softBg = activeTab === 'refine' ? 'bg-blue-500/10' : activeTab === 'review' ? 'bg-orange-500/10' : 'bg-[var(--accent-soft)]';
-
+                                                const colorClass = activeTab === 'refine' ? 'blue' : activeTab === 'review' ? 'orange' : 'indigo';
+                                                
                                                 return (
                                                     <button
                                                         key={c.id}
@@ -128,19 +136,20 @@ const ChapterSelectionModal = ({
                                                             }
                                                             onClose();
                                                         }}
-                                                        className={`group relative p-5 rounded-2xl border transition-all text-left flex flex-col justify-between h-32 ${isSelected ? `bg-${accentColor.replace('[', '').replace(']', '')} border-${accentColor.replace('[', '').replace(']', '')} shadow-xl` : `bg-[var(--bg-app)] border-[var(--border-main)] hover:border-${accentColor.replace('[', '').replace(']', '')}/50 hover:translate-y--1`} ${isDisabled ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
-                                                        style={isSelected && (accentColor === '[var(--accent-main)]') ? { backgroundColor: 'var(--accent-main)', borderColor: 'var(--accent-main)' } : {}}
+                                                        className={`group relative p-6 rounded-[24px] border-2 transition-all text-left flex flex-col justify-between h-40 ${isSelected ? `bg-${colorClass}-600 border-${colorClass}-500 shadow-xl shadow-${colorClass}-600/20 scale-[1.02] z-10` : `bg-[var(--bg-app)] border-[var(--border-main)] hover:border-${colorClass}-500/50 hover:bg-${colorClass}-500/[0.03] hover:-translate-y-1`} ${isDisabled ? 'opacity-30 grayscale cursor-not-allowed' : ''}`}
                                                     >
-                                                        <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 flex justify-between items-center ${isSelected ? 'text-white/70' : `text-${accentColor.replace('[', '').replace(']', '')}`}`} style={!isSelected && (accentColor === '[var(--accent-main)]') ? { color: 'var(--accent-main)' } : {}}>
-                                                            <span>{sourceLabels[c.id]?.replace(': ', '') || 'Capítulo'}</span>
-                                                            {isFinalized && <ShieldCheck size={12} />}
+                                                        <div>
+                                                            <div className={`text-[10px] font-black uppercase tracking-[0.2em] mb-2 flex justify-between items-center ${isSelected ? 'text-white/70' : `text-${colorClass}-500`}`}>
+                                                                <span>{sourceLabels[c.id]?.replace(': ', '') || 'Capítulo'}</span>
+                                                                {isFinalized && <ShieldCheck size={14} />}
+                                                            </div>
+                                                            <div className={`font-black text-sm font-serif line-clamp-2 leading-snug tracking-tight ${isSelected ? 'text-white' : 'text-[var(--text-main)] group-hover:text-${colorClass}-600'}`}>
+                                                                {c.title}
+                                                            </div>
                                                         </div>
-                                                        <div className={`font-bold text-sm font-serif line-clamp-2 leading-tight ${isSelected ? 'text-white' : 'text-[var(--text-main)]'}`}>
-                                                            {c.title}
-                                                        </div>
-                                                        <div className="mt-auto flex justify-end">
-                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isSelected ? 'bg-white/20 text-white' : `${softBg} text-${accentColor.replace('[', '').replace(']', '')}`}`} style={!isSelected && (accentColor === '[var(--accent-main)]') ? { color: 'var(--accent-main)' } : {}}>
-                                                                {activeTab === 'refine' ? <Edit3 size={14} /> : activeTab === 'review' ? <CheckCircle2 size={14} /> : <Sparkles size={14} />}
+                                                        <div className="flex justify-end">
+                                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isSelected ? 'bg-white/20 text-white' : `bg-${colorClass}-500/10 text-${colorClass}-500 group-hover:scale-110 shadow-sm`}`}>
+                                                                {activeTab === 'refine' ? <Edit3 size={18} /> : activeTab === 'review' ? <CheckCircle2 size={18} /> : <Sparkles size={18} />}
                                                             </div>
                                                         </div>
                                                     </button>
@@ -161,13 +170,13 @@ const ChapterSelectionModal = ({
                             if (standalone.length === 0) return null;
 
                             return (
-                                <div className="space-y-4">
-                                    <div className="flex items-center gap-4">
-                                        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[var(--border-main)]"></div>
-                                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Capítulos Sueltos</h4>
-                                        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[var(--border-main)]"></div>
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-6 px-4">
+                                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-[var(--border-main)] to-transparent"></div>
+                                        <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-muted)] flex items-center gap-3 bg-[var(--bg-app)] px-4 py-1.5 rounded-full border border-[var(--border-main)]/50 shadow-sm">Capítulos Sueltos</h4>
+                                        <div className="h-px flex-1 bg-gradient-to-l from-transparent via-[var(--border-main)] to-transparent"></div>
                                     </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                                         {standalone.map(c => {
                                             const isSelected = activeTab === 'generation'
                                                 ? selectedChapterId === c.id
@@ -182,9 +191,8 @@ const ChapterSelectionModal = ({
                                             const isFinalized = (activeTab === 'refine' || activeTab === 'review') && c.status === 'Finalizado';
                                             const isDisabled = activeTab === 'refine' && isFinalized;
 
-                                            const accentColor = activeTab === 'refine' ? 'blue-500' : activeTab === 'review' ? 'orange-500' : '[var(--accent-main)]';
-                                            const softBg = activeTab === 'refine' ? 'bg-blue-500/10' : activeTab === 'review' ? 'bg-orange-500/10' : 'bg-[var(--accent-soft)]';
-
+                                            const colorClass = activeTab === 'refine' ? 'blue' : activeTab === 'review' ? 'orange' : 'indigo';
+                                            
                                             return (
                                                 <button
                                                     key={c.id}
@@ -211,19 +219,20 @@ const ChapterSelectionModal = ({
                                                         }
                                                         onClose();
                                                     }}
-                                                    className={`group relative p-5 rounded-2xl border transition-all text-left flex flex-col justify-between h-32 ${isSelected ? `bg-${accentColor.replace('[', '').replace(']', '')} border-${accentColor.replace('[', '').replace(']', '')} shadow-xl` : `bg-[var(--bg-app)] border-[var(--border-main)] hover:border-${accentColor.replace('[', '').replace(']', '')}/50`} ${isDisabled ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
-                                                    style={isSelected && (accentColor === '[var(--accent-main)]') ? { backgroundColor: 'var(--accent-main)', borderColor: 'var(--accent-main)' } : {}}
+                                                    className={`group relative p-6 rounded-[24px] border-2 transition-all text-left flex flex-col justify-between h-40 ${isSelected ? `bg-${colorClass}-600 border-${colorClass}-500 shadow-xl shadow-${colorClass}-600/20 scale-[1.02] z-10` : `bg-[var(--bg-app)] border-[var(--border-main)] hover:border-${colorClass}-500/50 hover:bg-${colorClass}-500/[0.03] hover:-translate-y-1`} ${isDisabled ? 'opacity-30 grayscale cursor-not-allowed' : ''}`}
                                                 >
-                                                    <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 flex justify-between items-center ${isSelected ? 'text-white/70' : `text-${accentColor.replace('[', '').replace(']', '')}`}`} style={!isSelected && (accentColor === '[var(--accent-main)]') ? { color: 'var(--accent-main)' } : {}}>
-                                                        <span>{sourceLabels[c.id]?.replace(': ', '') || 'Capítulo'}</span>
-                                                        {isFinalized && <ShieldCheck size={12} />}
+                                                    <div>
+                                                        <div className={`text-[10px] font-black uppercase tracking-[0.2em] mb-2 flex justify-between items-center ${isSelected ? 'text-white/70' : `text-${colorClass}-500`}`}>
+                                                            <span>{sourceLabels[c.id]?.replace(': ', '') || 'Capítulo'}</span>
+                                                            {isFinalized && <ShieldCheck size={14} />}
+                                                        </div>
+                                                        <div className={`font-black text-sm font-serif line-clamp-2 leading-snug tracking-tight ${isSelected ? 'text-white' : 'text-[var(--text-main)] group-hover:text-${colorClass}-600'}`}>
+                                                            {c.title}
+                                                        </div>
                                                     </div>
-                                                    <div className={`font-bold text-sm font-serif line-clamp-2 leading-tight ${isSelected ? 'text-white' : 'text-[var(--text-main)]'}`}>
-                                                        {c.title}
-                                                    </div>
-                                                    <div className="mt-auto flex justify-end">
-                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isSelected ? 'bg-white/20 text-white' : `${softBg} text-${accentColor.replace('[', '').replace(']', '')}`}`} style={!isSelected && (accentColor === '[var(--accent-main)]') ? { color: 'var(--accent-main)' } : {}}>
-                                                            {activeTab === 'refine' ? <Edit3 size={14} /> : activeTab === 'review' ? <CheckCircle2 size={14} /> : <Sparkles size={14} />}
+                                                    <div className="flex justify-end">
+                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isSelected ? 'bg-white/20 text-white' : `bg-${colorClass}-500/10 text-${colorClass}-500 group-hover:scale-110 shadow-sm`}`}>
+                                                            {activeTab === 'refine' ? <Edit3 size={18} /> : activeTab === 'review' ? <CheckCircle2 size={18} /> : <Sparkles size={18} />}
                                                         </div>
                                                     </div>
                                                 </button>
@@ -235,8 +244,14 @@ const ChapterSelectionModal = ({
                         })()}
                     </div>
                 </div>
-                <div className="p-6 bg-[var(--bg-editor)] border-t border-[var(--border-main)] flex justify-end">
-                    <button onClick={onClose} className="px-8 py-3 bg-[var(--accent-main)] text-white font-bold rounded-2xl shadow-lg hover:scale-[1.02] transition-transform">Cerrar</button>
+                <div className="p-8 bg-[var(--bg-editor)]/80 backdrop-blur-md border-t border-[var(--border-main)] flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] opacity-50">Explora la jerarquía de tu manuscrito</p>
+                    <button 
+                        onClick={onClose} 
+                        className="px-12 py-4 bg-[var(--text-main)] text-[var(--bg-app)] font-black text-[10px] uppercase tracking-[0.3em] rounded-2xl shadow-xl transition-all hover:scale-[1.05] active:scale-95"
+                    >
+                        Cerrar Mosaico
+                    </button>
                 </div>
             </div>
         </div>

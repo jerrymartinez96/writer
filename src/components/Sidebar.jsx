@@ -481,14 +481,17 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
 
             {/* Modals - rendered outside sidebar container for proper z-index */}
             <Modal isOpen={isBookModalOpen} onClose={() => setIsBookModalOpen(false)} title="Nuevo Manuscrito">
-                <div className="space-y-4 text-left font-sans">
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Título del libro</label>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setNewBookTitle(newBookTitle.toUpperCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Mayúsculas">AA</button>
-                                <button onClick={() => setNewBookTitle(newBookTitle.toLowerCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Minúsculas">aa</button>
-                                <button onClick={() => setNewBookTitle(newBookTitle ? newBookTitle.charAt(0).toUpperCase() + newBookTitle.slice(1).toLowerCase() : '')} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Capitalizar Letra Inicial">Aa</button>
+                <div className="p-8 space-y-8 text-left font-sans">
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                                <Plus size={14} />
+                                Identificación del Libro
+                            </label>
+                            <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-editor)] rounded-xl border border-[var(--border-main)]">
+                                <button onClick={() => setNewBookTitle(newBookTitle.toUpperCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase" title="Mayúsculas">AA</button>
+                                <button onClick={() => setNewBookTitle(newBookTitle.toLowerCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase" title="Minúsculas">aa</button>
+                                <button onClick={() => setNewBookTitle(newBookTitle ? newBookTitle.charAt(0).toUpperCase() + newBookTitle.slice(1).toLowerCase() : '')} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase" title="Capitalizar">Aa</button>
                             </div>
                         </div>
                         <input
@@ -503,17 +506,12 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     setNewBookTitle('');
                                 }
                             }}
-                            placeholder="Ej. El viento en los sauces..."
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)] max-w-full"
+                            placeholder="Ej. Crónicas del Alba..."
+                            className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-[var(--text-main)] text-xl font-serif italic placeholder:opacity-30 placeholder:italic"
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4">
-                        <button
-                            onClick={() => setIsBookModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
-                        >
-                            Cancelar
-                        </button>
+                    
+                    <div className="pt-4 flex flex-col gap-4">
                         <button
                             onClick={() => {
                                 if (newBookTitle.trim()) {
@@ -523,39 +521,42 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 }
                             }}
                             disabled={!newBookTitle.trim()}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                            className="w-full px-8 py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[24px] font-black text-[11px] uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-4 shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-30"
                         >
-                            Crear
+                            <Plus size={20} /> Crear Nuevo Manuscrito
                         </button>
+                        <p className="text-[10px] font-bold text-[var(--text-muted)] text-center opacity-50 italic">Podrás agregar capítulos y volúmenes después</p>
                     </div>
                 </div>
             </Modal>
 
             <Modal isOpen={isChapterModalOpen} onClose={() => setIsChapterModalOpen(false)} title="Agregar al Manuscrito">
-                <div className="space-y-5 text-left font-sans">
-                    {/* Select Type */}
-                    <div className="flex bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl overflow-hidden p-1 shadow-sm">
+                <div className="p-8 space-y-8 text-left font-sans bg-indigo-500/[0.01]">
+                    <div className="flex bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl overflow-hidden p-1.5 shadow-inner">
                         <button
                             onClick={() => setCreateMode('chapter')}
-                            className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-2 rounded-lg transition-colors ${createMode === 'chapter' ? 'bg-[var(--bg-editor)] text-[var(--accent-main)] shadow-sm' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]/50'}`}
+                            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2.5 rounded-xl transition-all ${createMode === 'chapter' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)] hover:text-indigo-500'}`}
                         >
                             <FileText size={16} /> Capítulo
                         </button>
                         <button
                             onClick={() => setCreateMode('volume')}
-                            className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-2 rounded-lg transition-colors ${createMode === 'volume' ? 'bg-[var(--bg-editor)] text-indigo-500 shadow-sm' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]/50'}`}
+                            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2.5 rounded-xl transition-all ${createMode === 'volume' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)] hover:text-indigo-500'}`}
                         >
                             <Layers size={16} /> Volumen
                         </button>
                     </div>
 
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Título del {createMode === 'volume' ? 'volumen' : 'capítulo'}</label>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setNewChapterTitle(newChapterTitle.toUpperCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Mayúsculas">AA</button>
-                                <button onClick={() => setNewChapterTitle(newChapterTitle.toLowerCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Minúsculas">aa</button>
-                                <button onClick={() => setNewChapterTitle(newChapterTitle ? newChapterTitle.charAt(0).toUpperCase() + newChapterTitle.slice(1).toLowerCase() : '')} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Capitalizar Letra Inicial">Aa</button>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                                <Plus size={14} />
+                                Detalles del {createMode === 'volume' ? 'Volumen' : 'Capítulo'}
+                            </label>
+                            <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-editor)] rounded-xl border border-[var(--border-main)]">
+                                <button onClick={() => setNewChapterTitle(newChapterTitle.toUpperCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">AA</button>
+                                <button onClick={() => setNewChapterTitle(newChapterTitle.toLowerCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">aa</button>
+                                <button onClick={() => setNewChapterTitle(newChapterTitle ? newChapterTitle.charAt(0).toUpperCase() + newChapterTitle.slice(1).toLowerCase() : '')} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">Aa</button>
                             </div>
                         </div>
                         <input
@@ -574,40 +575,43 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     setNewChapterTitle('');
                                 }
                             }}
-                            placeholder={createMode === 'volume' ? "Ej. El Despertar" : "Ej. El primer encuentro"}
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)] max-w-full"
+                            placeholder={createMode === 'volume' ? "Ej. Volumen II: La Tormenta" : "Ej. Capítulo 1: Un comienzo inesperado"}
+                            className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-[var(--text-main)] text-xl font-serif italic placeholder:opacity-30 placeholder:italic"
                         />
                     </div>
 
                     {createMode === 'chapter' && chapters.filter(c => c.isVolume).length > 0 && (
-                        <div>
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-3">Perteneciente al Volumen (Opcional)</label>
-                            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2 scrollbar-hide">
+                        <div className="space-y-4">
+                            <label className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.3em] flex items-center gap-2 opacity-60">
+                                <Layers size={14} />
+                                Ubicación (Opcional)
+                            </label>
+                            <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto pr-3 scrollbar-hide py-1">
                                 <button
                                     onClick={() => setSelectedVolumeId('')}
-                                    className={`p-3 rounded-xl border text-xs font-bold transition-all text-left flex flex-col gap-1 ${!selectedVolumeId ? 'bg-indigo-500 border-indigo-500 text-white shadow-md' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50'}`}
+                                    className={`p-4 rounded-[20px] border-2 text-[10px] font-black uppercase tracking-[0.1em] transition-all text-left flex flex-col gap-2 relative overflow-hidden ${!selectedVolumeId ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50 hover:bg-indigo-500/[0.03]'}`}
                                 >
-                                    <span className="opacity-70 uppercase tracking-tighter">Suelto</span>
-                                    <span className="truncate">Ninguno</span>
+                                    <span className={`text-[8px] uppercase font-black tracking-widest ${!selectedVolumeId ? 'text-white/60' : 'text-indigo-500'}`}>Desvincular</span>
+                                    <span className="truncate font-sans tracking-tight">Capítulo Suelto</span>
                                 </button>
                                 {chapters.filter(c => c.isVolume).map(v => (
                                     <button
                                         key={v.id}
                                         onClick={() => setSelectedVolumeId(v.id)}
-                                        className={`p-3 rounded-xl border text-xs font-bold transition-all text-left flex flex-col gap-1 ${selectedVolumeId === v.id ? 'bg-indigo-500 border-indigo-500 text-white shadow-md' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-indigo-500/50'}`}
+                                        className={`p-4 rounded-[20px] border-2 text-[10px] font-black uppercase tracking-[0.1em] transition-all text-left flex flex-col gap-2 relative overflow-hidden ${selectedVolumeId === v.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-indigo-500/50 hover:bg-indigo-500/[0.03]'}`}
                                     >
-                                        <span className={`opacity-70 uppercase tracking-tighter ${selectedVolumeId === v.id ? 'text-white/80' : 'text-indigo-500'}`}>{itemLabels[v.id]?.replace(': ', '') || 'Volumen'}</span>
-                                        <span className="truncate">{v.title}</span>
+                                        <span className={`text-[8px] uppercase font-black tracking-widest ${selectedVolumeId === v.id ? 'text-white/60' : 'text-indigo-500'}`}>{itemLabels[v.id]?.replace(': ', '') || 'Volumen'}</span>
+                                        <span className="truncate font-serif italic tracking-tight">{v.title}</span>
                                     </button>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
+                    <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => setIsChapterModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="flex-1 px-8 py-5 rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
                         >
                             Cancelar
                         </button>
@@ -624,58 +628,61 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 }
                             }}
                             disabled={!newChapterTitle.trim()}
-                            className={`px-5 py-2.5 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md ${createMode === 'volume' ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-[var(--accent-main)] hover:bg-indigo-500'}`}
+                            className="flex-1 px-8 py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-30"
                         >
-                            Crear {createMode === 'volume' ? 'Volumen' : 'Capítulo'}
+                            Confirmar
                         </button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Delete Modal */}
-            {isDeleteModalOpen && (
-                <div className="fixed inset-0 bg-[#020617]/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                    <div className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-6 text-center">
-                            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20 shadow-inner">
-                                <Trash2 size={24} className="text-red-500" />
-                            </div>
-                            <h3 className="text-xl font-black text-[var(--text-main)] mb-2 tracking-tight">
-                                {itemToDelete?.isVolume ? '¿Eliminar Volumen?' : '¿Eliminar Capítulo?'}
-                            </h3>
-                            <p className="text-[var(--text-muted)] text-sm px-4">
-                                {itemToDelete?.isVolume ? 'Los capítulos internos NO se borrarán de la app, pasarán a ser capítulos sueltos. Sin embargo, el volumen desaparecerá para siempre.' : 'Estás a punto de borrar definitivamente este capítulo. Esta acción no se puede deshacer.'}
-                            </p>
-                            <div className="mt-5 p-3 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <p className="font-bold text-red-500 text-sm font-serif italic truncate">
-                                    "{itemToDelete ? (itemLabels[itemToDelete.id] || '') + itemToDelete.title : ''}"
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex border-t border-[var(--border-main)] mt-2">
-                            <button
-                                onClick={() => {
-                                    setIsDeleteModalOpen(false);
-                                    setChapterToDelete(null);
-                                }}
-                                className="flex-1 py-4 font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-app)] transition-colors text-sm uppercase tracking-widest"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={() => {
-                                    deleteChapter(chapterToDelete);
-                                    setIsDeleteModalOpen(false);
-                                    setChapterToDelete(null);
-                                }}
-                                className="flex-1 py-4 font-black text-red-500 hover:text-red-600 hover:bg-red-50 transition-colors text-sm uppercase tracking-widest bg-red-500/5"
-                            >
-                                Sí, eliminar
-                            </button>
-                        </div>
+            <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Confirmar Eliminación">
+                <div className="p-8 text-center bg-red-500/[0.02]">
+                    <div className="w-20 h-20 bg-red-500/10 rounded-[32px] flex items-center justify-center mx-auto mb-8 border-2 border-red-500/20 shadow-xl shadow-red-500/10">
+                        <Trash2 size={32} className="text-red-500" />
+                    </div>
+                    
+                    <h3 className="text-2xl font-black text-[var(--text-main)] mb-3 tracking-tight font-serif italic">
+                        {itemToDelete?.isVolume ? '¿Borrar este Volumen?' : '¿Borrar este Capítulo?'}
+                    </h3>
+                    
+                    <p className="text-[var(--text-muted)] text-sm max-w-sm mx-auto leading-relaxed">
+                        {itemToDelete?.isVolume 
+                            ? 'Los capítulos internos NO se borrarán de la app, pasarán a ser capítulos sueltos. Sin embargo, el volumen desaparecerá para siempre.' 
+                            : 'Estás a punto de borrar definitivamente este capítulo. Esta acción moverá el elemento a la papelera por 30 días.'}
+                    </p>
+
+                    <div className="mt-8 p-5 bg-[var(--bg-app)] rounded-3xl border-2 border-red-500/10 shadow-inner group overflow-hidden relative">
+                        <div className="absolute inset-0 bg-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500/60 mb-2">Elemento Objetivo</p>
+                        <p className="font-black text-lg text-red-600 font-serif italic truncate relative z-10">
+                            "{itemToDelete ? (itemLabels[itemToDelete.id] || '') + itemToDelete.title : 'Desconocido'}"
+                        </p>
+                    </div>
+
+                    <div className="mt-10 flex items-center gap-4">
+                        <button
+                            onClick={() => {
+                                setIsDeleteModalOpen(false);
+                                setChapterToDelete(null);
+                            }}
+                            className="flex-1 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-all active:scale-95"
+                        >
+                            No, Conservar
+                        </button>
+                        <button
+                            onClick={() => {
+                                deleteChapter(chapterToDelete);
+                                setIsDeleteModalOpen(false);
+                                setChapterToDelete(null);
+                            }}
+                            className="flex-1 py-5 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] shadow-xl shadow-red-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-3"
+                        >
+                            Sí, Eliminar
+                        </button>
                     </div>
                 </div>
-            )}
+            </Modal>
         </>
     )
 }

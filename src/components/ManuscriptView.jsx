@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2 } from 'lucide-react';
+import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2, Pencil, ChevronDown, Check, Type, Maximize2, MoveHorizontal } from 'lucide-react';
 import Modal from './Modal';
 
 const ManuscriptView = () => {
@@ -18,6 +18,11 @@ const ManuscriptView = () => {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [editTitle, setEditTitle] = useState('');
+
+    // Reading settings dropdowns
+    const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
+    const [isSizeDropdownOpen, setIsSizeDropdownOpen] = useState(false);
+    const [isWidthDropdownOpen, setIsWidthDropdownOpen] = useState(false);
 
     // Filter data
     const volumes = chapters.filter(c => c.isVolume);
@@ -85,40 +90,115 @@ const ManuscriptView = () => {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 md:gap-3 bg-[var(--bg-editor)] rounded-xl border border-[var(--border-main)] p-1 shadow-sm overflow-x-auto scrollbar-hide shrink-0">
-                        <select
-                            value={readingFont}
-                            onChange={(e) => setReadingFont(e.target.value)}
-                            className="bg-transparent text-xs sm:text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer border-r border-[var(--border-main)] pr-2 pl-2"
-                        >
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="font-serif">Serif (Libro)</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="font-sans">Sans (Moderna)</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="font-[Arial,sans-serif]">Arial</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="font-['Roboto',sans-serif]">Google (Roboto)</option>
-                        </select>
+                    <div className="flex items-center gap-2 md:gap-3 bg-[var(--bg-editor)] rounded-full border border-[var(--border-main)] p-1.5 shadow-sm shrink-0">
+                        {/* Font Dropdown */}
+                        <div className="relative">
+                            <button 
+                                onClick={() => { setIsFontDropdownOpen(!isFontDropdownOpen); setIsSizeDropdownOpen(false); setIsWidthDropdownOpen(false); }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs font-black uppercase tracking-widest ${isFontDropdownOpen ? 'bg-indigo-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-indigo-600'}`}
+                            >
+                                <Type size={14} />
+                                <span className="hidden sm:inline">Fuente</span>
+                                <ChevronDown size={12} className={`transition-transform duration-300 ${isFontDropdownOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {isFontDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsFontDropdownOpen(false)}></div>
+                                    <div className="absolute left-0 mt-3 w-48 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-1.5 space-y-1">
+                                            {[
+                                                { id: 'font-serif', label: 'Serif (Libro)' },
+                                                { id: 'font-sans', label: 'Sans (Moderna)' },
+                                                { id: 'font-[Arial,sans-serif]', label: 'Arial Classic' },
+                                                { id: "font-['Roboto',sans-serif]", label: 'Google Roboto' }
+                                            ].map(opt => (
+                                                <button 
+                                                    key={opt.id}
+                                                    onClick={() => { setReadingFont(opt.id); setIsFontDropdownOpen(false); }}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${readingFont === opt.id ? 'bg-indigo-600/5 text-indigo-600' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)] hover:text-[var(--text-main)]'}`}
+                                                >
+                                                    <span className={`text-[10px] font-black uppercase tracking-widest ${opt.id}`}>{opt.label}</span>
+                                                    {readingFont === opt.id && <Check size={12} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
-                        <select
-                            value={readingTextSize}
-                            onChange={(e) => setReadingTextSize(e.target.value)}
-                            className="bg-transparent text-xs sm:text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer border-r border-[var(--border-main)] pr-2 pl-2"
-                        >
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="sm">Letra Chica</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="base">Letra Normal</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="lg">Letra Grande</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="xl">Letra Gigante</option>
-                        </select>
+                        {/* Size Dropdown */}
+                        <div className="relative">
+                            <button 
+                                onClick={() => { setIsSizeDropdownOpen(!isSizeDropdownOpen); setIsFontDropdownOpen(false); setIsWidthDropdownOpen(false); }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs font-black uppercase tracking-widest ${isSizeDropdownOpen ? 'bg-indigo-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-indigo-600'}`}
+                            >
+                                <Maximize2 size={14} />
+                                <span className="hidden sm:inline">Tamaño</span>
+                                <ChevronDown size={12} className={`transition-transform duration-300 ${isSizeDropdownOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {isSizeDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeDropdownOpen(false)}></div>
+                                    <div className="absolute left-1/2 -translate-x-1/2 mt-3 w-44 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-1.5 space-y-1">
+                                            {[
+                                                { id: 'sm', label: 'Chico' },
+                                                { id: 'base', label: 'Normal' },
+                                                { id: 'lg', label: 'Grande' },
+                                                { id: 'xl', label: 'Gigante' }
+                                            ].map(opt => (
+                                                <button 
+                                                    key={opt.id}
+                                                    onClick={() => { setReadingTextSize(opt.id); setIsSizeDropdownOpen(false); }}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${readingTextSize === opt.id ? 'bg-indigo-600/5 text-indigo-600' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)] hover:text-[var(--text-main)]'}`}
+                                                >
+                                                    <span className="text-[10px] font-black uppercase tracking-widest">{opt.label}</span>
+                                                    {readingTextSize === opt.id && <Check size={12} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
-                        <select
-                            value={readingWidth}
-                            onChange={(e) => setReadingWidth(e.target.value)}
-                            className="bg-transparent text-xs sm:text-sm font-bold text-[var(--text-main)] focus:outline-none cursor-pointer pr-2 pl-2"
-                        >
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="sm">Centro Angosto</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="md">Centro Ideal</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="lg">Ancho</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="xl">Súper Ancho</option>
-                            <option className="bg-[var(--bg-editor)] text-[var(--text-main)]" value="full">Pantalla Completa</option>
-                        </select>
+                        {/* Width Dropdown */}
+                        <div className="relative">
+                            <button 
+                                onClick={() => { setIsWidthDropdownOpen(!isWidthDropdownOpen); setIsFontDropdownOpen(false); setIsSizeDropdownOpen(false); }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs font-black uppercase tracking-widest ${isWidthDropdownOpen ? 'bg-indigo-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-indigo-600'}`}
+                            >
+                                <MoveHorizontal size={14} />
+                                <span className="hidden sm:inline">Ancho</span>
+                                <ChevronDown size={12} className={`transition-transform duration-300 ${isWidthDropdownOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {isWidthDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsWidthDropdownOpen(false)}></div>
+                                    <div className="absolute right-0 mt-3 w-48 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-1.5 space-y-1">
+                                            {[
+                                                { id: 'sm', label: 'Angosto' },
+                                                { id: 'md', label: 'Ideal' },
+                                                { id: 'lg', label: 'Ancho' },
+                                                { id: 'xl', label: 'Súper Ancho' },
+                                                { id: 'full', label: 'Completo' }
+                                            ].map(opt => (
+                                                <button 
+                                                    key={opt.id}
+                                                    onClick={() => { setReadingWidth(opt.id); setIsWidthDropdownOpen(false); }}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${readingWidth === opt.id ? 'bg-indigo-600/5 text-indigo-600' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)] hover:text-[var(--text-main)]'}`}
+                                                >
+                                                    <span className="text-[10px] font-black uppercase tracking-widest">{opt.label}</span>
+                                                    {readingWidth === opt.id && <Check size={12} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <div className={`flex-1 overflow-y-auto p-6 md:p-10 lg:p-16 scrollbar-hide ${readingFont} transition-all duration-300`}>
@@ -368,9 +448,12 @@ const ManuscriptView = () => {
             {content}
 
             <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Renombrar ${editingItem?.isVolume ? 'Volumen' : 'Capítulo'}`}>
-                <div className="space-y-5 text-left font-sans">
-                    <div>
-                        <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Nuevo Título</label>
+                <div className="p-8 space-y-8 text-left font-sans">
+                    <div className="space-y-4">
+                        <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                            <Pencil size={14} />
+                            Edición de Título
+                        </label>
                         <input
                             type="text"
                             autoFocus
@@ -382,15 +465,17 @@ const ManuscriptView = () => {
                                     setIsEditModalOpen(false);
                                 }
                             }}
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)]"
+                            placeholder="Nuevo título..."
+                            className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-[var(--text-main)] text-xl font-serif italic placeholder:opacity-30 placeholder:italic"
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
+                    
+                    <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => setIsEditModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="flex-1 px-8 py-5 rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
                         >
-                            Cancelar
+                            No, Cancelar
                         </button>
                         <button
                             onClick={() => {
@@ -400,7 +485,7 @@ const ManuscriptView = () => {
                                 }
                             }}
                             disabled={!editTitle.trim() || editTitle.trim() === editingItem?.title}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] text-white rounded-xl font-bold hover:bg-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                            className="flex-1 px-8 py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] shadow-xl shadow-indigo-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-3 disabled:opacity-30"
                         >
                             Guardar Cambios
                         </button>
@@ -409,31 +494,34 @@ const ManuscriptView = () => {
             </Modal>
 
             <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Agregar al Manuscrito">
-                <div className="space-y-5 text-left font-sans">
+                <div className="p-8 space-y-8 text-left font-sans bg-indigo-500/[0.01]">
                     {currentStep.type !== 'volume_detail' && (
-                        <div className="flex bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl overflow-hidden p-1 shadow-sm">
+                        <div className="flex bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl overflow-hidden p-1.5 shadow-inner">
                             <button
                                 onClick={() => setCreateMode('chapter')}
-                                className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-2 rounded-lg transition-colors ${createMode === 'chapter' ? 'bg-[var(--bg-editor)] text-[var(--accent-main)] shadow-sm' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]/50'}`}
+                                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2.5 rounded-xl transition-all ${createMode === 'chapter' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)] hover:text-indigo-500'}`}
                             >
                                 <FileText size={16} /> Capítulo
                             </button>
                             <button
                                 onClick={() => setCreateMode('volume')}
-                                className={`flex-1 py-2 text-sm font-bold flex items-center justify-center gap-2 rounded-lg transition-colors ${createMode === 'volume' ? 'bg-[var(--bg-editor)] text-indigo-500 shadow-sm' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]/50'}`}
+                                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2.5 rounded-xl transition-all ${createMode === 'volume' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-app)] hover:text-indigo-500'}`}
                             >
                                 <Layers size={16} /> Volumen
                             </button>
                         </div>
                     )}
 
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Título del {createMode === 'volume' && currentStep.type !== 'volume_detail' ? 'volumen' : 'capítulo'}</label>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setNewItemTitle(newItemTitle.toUpperCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all">AA</button>
-                                <button onClick={() => setNewItemTitle(newItemTitle.toLowerCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all">aa</button>
-                                <button onClick={() => setNewItemTitle(newItemTitle ? newItemTitle.charAt(0).toUpperCase() + newItemTitle.slice(1).toLowerCase() : '')} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all">Aa</button>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                                <Plus size={14} />
+                                Detalles del {createMode === 'volume' && currentStep.type !== 'volume_detail' ? 'Volumen' : 'Capítulo'}
+                            </label>
+                            <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-editor)] rounded-xl border border-[var(--border-main)]">
+                                <button onClick={() => setNewItemTitle(newItemTitle.toUpperCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">AA</button>
+                                <button onClick={() => setNewItemTitle(newItemTitle.toLowerCase())} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">aa</button>
+                                <button onClick={() => setNewItemTitle(newItemTitle ? newItemTitle.charAt(0).toUpperCase() + newItemTitle.slice(1).toLowerCase() : '')} className="px-2 py-1 rounded-lg hover:bg-white/10 text-[9px] font-black text-[var(--text-muted)] hover:text-indigo-500 transition-all uppercase">Aa</button>
                             </div>
                         </div>
                         <input
@@ -452,14 +540,15 @@ const ManuscriptView = () => {
                                     setNewItemTitle('');
                                 }
                             }}
-                            placeholder={createMode === 'volume' && currentStep.type !== 'volume_detail' ? "Ej. El Despertar" : "Ej. El primer encuentro"}
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)] max-w-full"
+                            placeholder={createMode === 'volume' && currentStep.type !== 'volume_detail' ? "Ej. Volumen III: El Renacimiento" : "Ej. Capítulo 4: Sombras en el bosque"}
+                            className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-[var(--text-main)] text-xl font-serif italic placeholder:opacity-30 placeholder:italic"
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
+
+                    <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => setIsCreateModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="flex-1 px-8 py-5 rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
                         >
                             Cancelar
                         </button>
@@ -476,9 +565,9 @@ const ManuscriptView = () => {
                                 }
                             }}
                             disabled={!newItemTitle.trim()}
-                            className={`px-5 py-2.5 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md ${createMode === 'volume' && currentStep.type !== 'volume_detail' ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-[var(--accent-main)] hover:bg-indigo-500'}`}
+                            className="flex-1 px-8 py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] shadow-xl shadow-indigo-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-3 disabled:opacity-30"
                         >
-                            Crear {createMode === 'volume' && currentStep.type !== 'volume_detail' ? 'Volumen' : 'Capítulo'}
+                            Confirmar
                         </button>
                     </div>
                 </div>

@@ -123,15 +123,15 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
             <div className="flex flex-col h-[80vh] min-h-[500px] p-4 md:p-8">
                 
                 {/* Header Section - Hide on mobile preview */}
-                <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 bg-[var(--bg-editor)] p-5 md:p-6 rounded-3xl border border-[var(--border-main)] border-dashed ${mobileView === 'preview' ? 'hidden md:flex' : ''}`}>
-                    <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
-                            <History size={20} className="md:w-6 md:h-6" />
+                <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 bg-indigo-500/5 p-6 rounded-[32px] border border-indigo-500/10 shadow-inner ${mobileView === 'preview' ? 'hidden md:flex' : ''}`}>
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-indigo-600/20">
+                            <History size={28} />
                         </div>
                         <div>
-                            <h3 className="font-serif font-black text-lg md:text-xl text-[var(--text-main)] italic leading-none md:leading-normal">Control de Versiones</h3>
-                            <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 mt-1">
-                                {snapshots.length} de 5 espacios utilizados
+                            <h3 className="font-serif font-black text-2xl text-[var(--text-main)] italic leading-none">Cápsulas de Tiempo</h3>
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 mt-2">
+                                {snapshots.length} de 5 espacios de memoria activos
                             </p>
                         </div>
                     </div>
@@ -139,9 +139,9 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                     <button
                         onClick={handleCreateSnapshot}
                         disabled={loading}
-                        className="w-full sm:w-auto flex items-center justify-center gap-2 bg-indigo-600 text-white px-5 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                        className="w-full sm:w-auto flex items-center justify-center gap-3 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-600/20 disabled:opacity-50 active:scale-95"
                     >
-                        <Save size={16} />
+                        <Save size={18} />
                         Fijar Punto de Control
                     </button>
                 </div>
@@ -165,25 +165,24 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                                     <button
                                         key={snap.id}
                                         onClick={() => handleSelectSnapshot(snap.content)}
-                                        className={`group relative flex items-start gap-4 p-4 rounded-3xl border transition-all duration-300 text-left ${isActive ? 'bg-indigo-500 border-indigo-500 text-white shadow-xl shadow-indigo-500/20' : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50'}`}
+                                        className={`group relative flex items-start gap-4 p-5 rounded-[32px] border transition-all duration-500 text-left ${isActive ? 'bg-indigo-600 border-indigo-600 text-white shadow-2xl shadow-indigo-600/30' : 'bg-[var(--bg-editor)] border-[var(--border-main)] hover:border-indigo-500/50 hover:bg-[var(--bg-app)]'}`}
                                     >
-                                        <div className={`p-2.5 rounded-xl transition-colors ${isActive ? 'bg-white/20 text-white' : 'bg-[var(--bg-editor)] text-[var(--text-muted)]'}`}>
-                                            <Clock size={16} />
+                                        <div className={`p-3 rounded-2xl transition-all ${isActive ? 'bg-white/20 text-white scale-110' : 'bg-[var(--bg-app)] text-[var(--text-muted)] group-hover:text-indigo-500 shadow-inner'}`}>
+                                            <Clock size={18} />
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-0.5">
-                                                <span className={`text-[9px] font-black uppercase tracking-widest truncate ${isActive ? 'text-white/80' : 'text-indigo-500'}`}>
-                                                    {index === 0 ? 'Reciente' : `Versión ${snapshots.length - index}`}
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className={`text-[9px] font-black uppercase tracking-[0.2em] truncate ${isActive ? 'text-white/80' : 'text-indigo-500'}`}>
+                                                    {index === 0 ? 'Punto Reciente' : `Cápsula ${snapshots.length - index}`}
                                                 </span>
-                                                <span className={`text-[8px] md:text-[9px] font-mono ${isActive ? 'text-white/60' : 'text-[var(--text-muted)]'}`}>{date}</span>
                                             </div>
-                                            <div className="text-base md:text-lg font-serif font-black leading-none mb-2">{time}</div>
-                                            <div className={`flex items-center gap-3 text-[10px] font-bold ${isActive ? 'text-white/80' : 'text-[var(--text-muted)] opacity-60'}`}>
-                                                <span className="flex items-center gap-1"><FileText size={10} /> {words.toLocaleString()}</span>
-                                                <span className="flex items-center gap-1 md:hidden lg:inline-flex"><Calendar size={10} /> {date}</span>
+                                            <div className="text-xl font-serif font-black leading-tight mb-3">{time}</div>
+                                            <div className={`flex items-center gap-4 text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-white/70' : 'text-[var(--text-muted)] opacity-60'}`}>
+                                                <span className="flex items-center gap-2"><FileText size={12} /> {words.toLocaleString()}</span>
+                                                <span className="flex items-center gap-2"><Calendar size={12} /> {date}</span>
                                             </div>
                                         </div>
-                                        <ChevronRight size={16} className={`shrink-0 self-center transition-transform ${isActive ? 'translate-x-1' : 'opacity-20'}`} />
+                                        <ChevronRight size={18} className={`shrink-0 self-center transition-all ${isActive ? 'translate-x-1 opacity-100' : 'opacity-10 opacity-100 group-hover:translate-x-1 group-hover:opacity-40'}`} />
                                     </button>
                                 );
                             })
@@ -203,47 +202,47 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                         ) : (
                             <>
                                 {/* Preview Header */}
-                                <div className="p-4 md:p-6 border-b border-[var(--border-main)] bg-[var(--bg-app)]/80 backdrop-blur-xl flex flex-col gap-4 z-10 rounded-t-[32px] md:rounded-t-[40px]">
+                                <div className="p-5 md:p-8 border-b border-[var(--border-main)] bg-[var(--bg-app)]/90 backdrop-blur-2xl flex flex-col gap-5 z-10 rounded-t-[40px]">
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1 md:gap-3">
+                                        <div className="flex items-center gap-4">
                                             <button 
                                                 onClick={() => setMobileView('list')}
-                                                className="p-1.5 -ml-1 rounded-full hover:bg-[var(--bg-editor)] md:hidden text-[var(--text-main)] transition-colors"
+                                                className="p-2 -ml-2 rounded-xl hover:bg-[var(--bg-editor)] md:hidden text-[var(--text-main)] transition-all"
                                             >
-                                                <ChevronLeft size={18} />
+                                                <ChevronLeft size={20} />
                                             </button>
-                                            <div className="flex items-center gap-2 text-emerald-500">
-                                                <RotateCcw size={14} className="hidden sm:block" />
-                                                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden xs:block">Inspección</span>
+                                            <div className="flex items-center gap-3 px-4 py-2 bg-indigo-500/5 rounded-full border border-indigo-500/10 text-indigo-500">
+                                                <RotateCcw size={14} className="animate-pulse shadow-glow" />
+                                                <span className="text-[10px] font-black uppercase tracking-[0.2em] whitespace-nowrap">Modo Inspección</span>
                                             </div>
                                         </div>
                                         
-                                        <div className="flex items-center gap-1.5 md:gap-3">
-                                            {/* Diff Toggle Toggle - Balanced for mobile */}
+                                        <div className="flex items-center gap-3">
                                             <button
                                                 onClick={() => setShowDiff(!showDiff)}
-                                                className={`flex items-center gap-2 px-2.5 py-1.5 md:px-4 md:py-2 rounded-xl border text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all ${showDiff ? 'bg-indigo-500 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-transparent border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50 hover:text-indigo-500'}`}
+                                                className={`flex items-center gap-3 px-5 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-[0.2em] transition-all ${showDiff ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/30' : 'bg-transparent border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-600'}`}
                                             >
-                                                <span className="whitespace-nowrap">{showDiff ? (window.innerWidth < 400 ? 'Comparar' : 'Comparando') : (window.innerWidth < 400 ? 'Diff' : 'Diferencias')}</span>
+                                                <Diff size={16} />
+                                                <span className="hidden sm:inline">{showDiff ? 'Ocultar Cambios' : 'Ver Cambios'}</span>
                                             </button>
 
                                             <button
                                                 onClick={handleRestoreAction}
-                                                className="bg-emerald-500 text-white px-3 py-1.5 md:px-6 md:py-2.5 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 active:scale-95 whitespace-nowrap"
+                                                className="bg-emerald-500 text-white px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/30 active:scale-95 whitespace-nowrap"
                                             >
-                                                Restaurar
+                                                Restaurar Capítulo
                                             </button>
                                         </div>
                                     </div>
                                     {showDiff && (
-                                        <div className="flex gap-4 items-center animate-in fade-in slide-in-from-top-1 duration-200">
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                                                <span className="text-[8px] font-black uppercase opacity-60">Eliminado en actual</span>
+                                        <div className="flex gap-6 items-center animate-in fade-in slide-in-from-top-2 duration-300 bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"></div>
+                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Eliminado</span>
                                             </div>
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                                                <span className="text-[8px] font-black uppercase opacity-60">Añadido en actual</span>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Añadido</span>
                                             </div>
                                         </div>
                                     )}

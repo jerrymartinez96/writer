@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../context/DataContext';
-import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check } from 'lucide-react';
 import Modal from './Modal';
 import { useToast } from './Toast';
 import { uploadImageToCloudinary } from '../services/cloudinary';
+import { useEditor, EditorContent } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Bold, Italic, List, ListOrdered, Quote, Heading1, Heading2, Heading3 } from 'lucide-react';
 
 const WorldView = () => {
     const {
@@ -47,6 +52,13 @@ const WorldView = () => {
     const [isFullImageModalOpen, setIsFullImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState('');
     const [zoomLevel, setZoomLevel] = useState(1);
+
+    const [imageSourceType, setImageSourceType] = useState('file'); // 'file' | 'url'
+    const [imageUrlInput, setImageUrlInput] = useState('');
+
+    const [isMaximized, setIsMaximized] = useState(false);
+    const [localContent, setLocalContent] = useState('');
+    const [isUnsaved, setIsUnsaved] = useState(false);
 
     // Zoom dragging state
     const zoomContainerRef = React.useRef(null);
@@ -131,11 +143,19 @@ const WorldView = () => {
         setEditTarget(null);
     };
 
+
     const handleAddImage = async () => {
-        if (imageFile && imageTarget) {
+        if (imageTarget) {
+            if (imageSourceType === 'file' && !imageFile) return;
+            if (imageSourceType === 'url' && !imageUrlInput.trim()) return;
+
             setIsUploading(true);
             try {
-                const uploadedUrl = await uploadImageToCloudinary(imageFile);
+                let uploadedUrl = imageUrlInput;
+                if (imageSourceType === 'file') {
+                    uploadedUrl = await uploadImageToCloudinary(imageFile);
+                }
+                
                 if (imageTarget.type === 'character') {
                     const char = characters.find(c => c.id === imageTarget.id);
                     const newImages = [...(char.images || []), uploadedUrl];
@@ -147,9 +167,11 @@ const WorldView = () => {
                 }
                 setIsImageModalOpen(false);
                 setImageFile(null);
+                setImageUrlInput('');
+                setImageSourceType('file');
             } catch (error) {
-                console.error("Error uploading image:", error);
-                toast.error("Error al subir la imagen. Por favor, intenta de nuevo.");
+                console.error("Error adding image:", error);
+                toast.error("Error al añadir la imagen. Por favor, intenta de nuevo.");
             } finally {
                 setIsUploading(false);
             }
@@ -547,6 +569,19 @@ const WorldView = () => {
 
         if (!realItem) return <div>Elemento no encontrado.</div>;
 
+        // Initialize local content if not set or item changed
+        if (localContent === '' && !isUnsaved) {
+            const initialVal = isCharacter ? (realItem.description || '') : (realItem.content || '');
+            setLocalContent(initialVal);
+        }
+
+        const handleManualSave = () => {
+            if (isCharacter) updateCharacter(realItem.id, { description: localContent });
+            else updateWorldItem(realItem.id, { content: localContent });
+            setIsUnsaved(false);
+            toast.success("Cambios guardados correctamente.");
+        };
+
         return (
             <div className="animate-in slide-in-from-bottom-4 duration-300 pb-20">
                 <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-4">
@@ -591,15 +626,44 @@ const WorldView = () => {
                     </div>
                 </div>
 
-                <textarea
-                    value={isCharacter ? (realItem.description || '') : (realItem.content || '')}
-                    onChange={(e) => {
-                        if (isCharacter) updateCharacter(realItem.id, { description: e.target.value });
-                        else updateWorldItem(realItem.id, { content: e.target.value });
-                    }}
-                    placeholder={`Describe los detalles, resúmenes profundos o reglas para ${isCharacter ? realItem.name : realItem.title}...`}
-                    className="w-full h-[400px] bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl p-8 text-lg focus:outline-none focus:ring-2 focus:ring-[var(--accent-main)]/50 focus:border-[var(--accent-main)] resize-y transition-all mb-8 shadow-sm leading-relaxed text-[var(--text-main)]"
-                />
+                <div className={`relative group/editor border border-[var(--border-main)] rounded-2xl mb-8 shadow-sm overflow-hidden bg-[var(--bg-app)] flex flex-col transition-all duration-300 ${isMaximized ? 'fixed inset-4 z-[150] m-0 max-h-none' : 'h-[500px]'}`}>
+                    <textarea
+                        value={localContent}
+                        onChange={(e) => {
+                            setLocalContent(e.target.value);
+                            setIsUnsaved(true);
+                        }}
+                        placeholder={`Describe los detalles, resúmenes profundos o reglas para ${isCharacter ? realItem.name : realItem.title}...`}
+                        className={`w-full flex-1 bg-transparent p-8 text-lg focus:outline-none resize-none transition-all leading-relaxed text-[var(--text-main)] scrollbar-hide`}
+                    />
+                    
+                    <div className="p-4 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/80 backdrop-blur-md flex items-center justify-between shrink-0">
+                        <div className="flex items-center gap-2">
+                            {isUnsaved && (
+                                <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-600 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse border border-amber-500/20">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                                    Cambios sin guardar
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => setIsMaximized(!isMaximized)}
+                                className={`px-4 py-2 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-editor)] rounded-xl transition-all text-xs font-bold flex items-center gap-2 ${isMaximized ? 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20' : ''}`}
+                            >
+                                {isMaximized ? <ZoomOut size={16} /> : <ZoomIn size={16} />}
+                                {isMaximized ? 'Contraer' : 'Maximizar'}
+                            </button>
+                            <button
+                                onClick={handleManualSave}
+                                disabled={!isUnsaved}
+                                className={`px-6 py-2 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg active:scale-95 disabled:opacity-40 disabled:grayscale disabled:scale-100 disabled:shadow-none`}
+                            >
+                                <Bookmark size={16} /> Guardar Cambios
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 {/* Imágenes */}
                 <div className="bg-[var(--bg-app)] rounded-2xl p-8 border border-[var(--border-main)] shadow-sm">
@@ -687,16 +751,25 @@ const WorldView = () => {
 
             {/* Create Modal */}
             <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Agregar Elemento">
-                <div className="space-y-4 text-left font-sans">
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                <div className="p-8 space-y-6 text-left font-sans">
+                    <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-2xl p-6 flex items-center gap-4 mb-2 shadow-inner">
+                        <div className="p-3 bg-indigo-500/10 rounded-xl">
+                            {createType === 'character' || createType === 'character_category' ? <Users size={24} className="text-indigo-500" /> : createType === 'nota' ? <Bookmark size={24} className="text-orange-500" /> : <Layers size={24} className="text-indigo-500" />}
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em] mb-1">Nuevo Registro</p>
+                            <p className="text-sm text-[var(--text-muted)] font-medium leading-relaxed">Asigna un nombre distintivo para tu nueva entrada en el Master Doc.</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-end px-1">
+                            <label className="block text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">
                                 Nombre / Título
                             </label>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setNewItemTitle(newItemTitle.toUpperCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Mayúsculas">AA</button>
-                                <button onClick={() => setNewItemTitle(newItemTitle.toLowerCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Minúsculas">aa</button>
-                                <button onClick={() => setNewItemTitle(newItemTitle ? newItemTitle.charAt(0).toUpperCase() + newItemTitle.slice(1).toLowerCase() : '')} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Capitalizar Letra Inicial">Aa</button>
+                            <div className="flex items-center gap-1.5 translate-y-1">
+                                <button onClick={() => setNewItemTitle(newItemTitle.toUpperCase())} className="w-8 h-8 flex items-center justify-center rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-indigo-500 hover:border-indigo-500/50 transition-all uppercase" title="Mayúsculas">AA</button>
+                                <button onClick={() => setNewItemTitle(newItemTitle ? newItemTitle.charAt(0).toUpperCase() + newItemTitle.slice(1).toLowerCase() : '')} className="w-8 h-8 flex items-center justify-center rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-indigo-500 hover:border-indigo-500/50 transition-all uppercase" title="Capitalizar">Aa</button>
                             </div>
                         </div>
                         <input
@@ -707,72 +780,116 @@ const WorldView = () => {
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') handleCreate();
                             }}
-                            placeholder="Ej. Espada Larga, Clima, etc..."
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)]"
+                            placeholder="Ej. Espada de Orion, El Reino del Norte..."
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-6 py-5 focus:outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 transition-all text-[var(--text-main)] text-xl placeholder:opacity-30 font-serif italic"
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4">
-                        <button
-                            onClick={() => setIsCreateModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
-                        >
-                            Cancelar
-                        </button>
+                    
+                    <div className="flex justify-end pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={handleCreate}
                             disabled={!newItemTitle.trim()}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                            className="w-full px-8 py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-30 disabled:grayscale"
                         >
-                            Crear
+                            <Plus size={20} /> Crear en {currentStep.title}
                         </button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Image Modal */}
-            <Modal isOpen={isImageModalOpen} onClose={() => { setIsImageModalOpen(false); setImageFile(null); }} title="Subir Imagen de Referencia">
-                <div className="space-y-4 text-left font-sans">
-                    <div className="border-2 border-dashed border-[var(--border-main)] rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:border-[var(--accent-main)]/50 hover:bg-[var(--accent-soft)]/20 transition-all relative">
-                        <input
-                            type="file"
-                            accept="image/*"
-                            disabled={isUploading}
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                            onChange={(e) => {
-                                if (e.target.files && e.target.files[0]) {
-                                    setImageFile(e.target.files[0]);
-                                }
-                            }}
-                        />
-                        {imageFile ? (
-                            <div className="flex flex-col items-center">
-                                <ImageIcon size={40} className="text-[var(--accent-main)] mb-3" />
-                                <p className="text-sm font-bold text-[var(--text-main)] truncate max-w-xs">{imageFile.name}</p>
-                                <p className="text-xs text-[var(--text-muted)] mt-1">{(imageFile.size / 1024 / 1024).toFixed(2)} MB • Haz clic para cambiar</p>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center pointer-events-none">
-                                <Upload size={40} className="text-[var(--text-muted)] mb-3" />
-                                <p className="text-sm font-bold text-[var(--text-main)] mb-1">Haz clic para subir una imagen</p>
-                                <p className="text-xs text-[var(--text-muted)]">PNG, JPG, GIF hasta 10MB</p>
-                            </div>
-                        )}
+            <Modal 
+                isOpen={isImageModalOpen} 
+                onClose={() => { setIsImageModalOpen(false); setImageFile(null); setImageUrlInput(''); }} 
+                title="🎨 Añadir Referencia Visual"
+            >
+                <div className="p-8 space-y-6 text-left font-sans">
+                    {/* Source Type Selector */}
+                    <div className="flex bg-[var(--bg-editor)] p-1.5 rounded-2xl border border-[var(--border-main)] shadow-inner">
+                        <button
+                            onClick={() => setImageSourceType('file')}
+                            className={`flex-1 flex items-center justify-center gap-3 py-3.5 text-[10px] font-black uppercase tracking-[0.1em] rounded-xl transition-all ${imageSourceType === 'file' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 scale-[1.02]' : 'text-[var(--text-muted)] hover:text-indigo-600 hover:bg-indigo-500/5'}`}
+                        >
+                            <Upload size={16} /> Desde mi PC
+                        </button>
+                        <button
+                            onClick={() => setImageSourceType('url')}
+                            className={`flex-1 flex items-center justify-center gap-3 py-3.5 text-[10px] font-black uppercase tracking-[0.1em] rounded-xl transition-all ${imageSourceType === 'url' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 scale-[1.02]' : 'text-[var(--text-muted)] hover:text-indigo-600 hover:bg-indigo-500/5'}`}
+                        >
+                            <LinkIcon size={16} /> Enlace Externo
+                        </button>
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-4">
+                    {imageSourceType === 'file' ? (
+                        <div className="border-2 border-dashed border-[var(--border-main)] rounded-[32px] p-12 flex flex-col items-center justify-center text-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all relative group/upload">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                disabled={isUploading}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                        setImageFile(e.target.files[0]);
+                                    }
+                                }}
+                            />
+                            {imageFile ? (
+                                <div className="flex flex-col items-center animate-in zoom-in-95 duration-300">
+                                    <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mb-5 border border-indigo-500/20 shadow-inner">
+                                        <ImageIcon size={32} className="text-indigo-600" />
+                                    </div>
+                                    <h4 className="text-sm font-black text-[var(--text-main)] truncate max-w-[200px] mb-1">{imageFile.name}</h4>
+                                    <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest bg-[var(--bg-editor)] px-3 py-1 rounded-full border border-[var(--border-main)]">
+                                        {(imageFile.size / 1024 / 1024).toFixed(2)} MB • Listo
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center pointer-events-none transition-transform group-hover/upload:scale-105 duration-500">
+                                    <div className="w-20 h-20 bg-indigo-500/5 rounded-3xl flex items-center justify-center mb-5 border border-[var(--border-main)] shadow-sm group-hover/upload:border-indigo-500/30 group-hover/upload:shadow-inner transition-all">
+                                        <Upload size={32} className="text-[var(--text-muted)] group-hover/upload:text-indigo-500 transition-colors" />
+                                    </div>
+                                    <p className="text-base font-black text-[var(--text-main)] mb-1">Cargar Archivo</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] font-black uppercase tracking-widest opacity-60">PNG, JPG, GIF hasta 10MB</p>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            <div className="p-6 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl flex items-center gap-5 shadow-inner">
+                                <div className="p-4 bg-indigo-500/10 rounded-2xl shadow-sm">
+                                    <Globe2 size={24} className="text-indigo-500 shrink-0" />
+                                </div>
+                                <div className="text-left">
+                                    <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-1.5 leading-none">Importación Directa</h4>
+                                    <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed">Nuestra nube optimizará automáticamente tu imagen desde cualquier dirección web válida.</p>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest ml-1">URL de la Imagen</label>
+                                <input
+                                    type="url"
+                                    value={imageUrlInput}
+                                    onChange={(e) => setImageUrlInput(e.target.value)}
+                                    placeholder="https://images.unsplash.com/photo-..."
+                                    className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-6 py-5 focus:outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 transition-all text-[var(--text-main)] text-sm font-mono placeholder:opacity-30 placeholder:font-sans"
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-[var(--border-main)]">
                         <button
-                            onClick={() => { setIsImageModalOpen(false); setImageFile(null); }}
+                            onClick={() => { setIsImageModalOpen(false); setImageFile(null); setImageUrlInput(''); }}
                             disabled={isUploading}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors disabled:opacity-50"
+                            className="px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-all disabled:opacity-50"
                         >
                             Cancelar
                         </button>
                         <button
                             onClick={handleAddImage}
-                            disabled={!imageFile || isUploading}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-2"
+                            disabled={(imageSourceType === 'file' ? !imageFile : !imageUrlInput.trim()) || isUploading}
+                            className="px-10 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100 shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 active:scale-95 translate-y-0"
                         >
-                            {isUploading ? <><Loader2 size={16} className="animate-spin" /> Subiendo...</> : "Subir Imagen"}
+                            {isUploading ? <><Loader2 size={18} className="animate-spin" /> Procesando</> : <><ImageIcon size={18} /> Añadir a Galería</>}
                         </button>
                     </div>
                 </div>
@@ -780,18 +897,27 @@ const WorldView = () => {
 
             {/* Delete Confirmation Modal */}
             <Modal isOpen={!!itemToDelete} onClose={() => setItemToDelete(null)} title="Confirmar Eliminación">
-                <div className="space-y-4 text-left font-sans">
-                    <p className="text-[var(--text-main)]">
-                        ¿Estás seguro de que deseas eliminar permanentemente <strong>{itemToDelete?.title}</strong>?
-                        <br /><span className="text-xs text-red-500 font-bold uppercase mt-2 block">Esta acción no se puede deshacer.</span>
-                    </p>
-                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-main)] mt-4">
-                        <button
-                            onClick={() => setItemToDelete(null)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
-                        >
-                            Cancelar
-                        </button>
+                <div className="p-10 space-y-8 text-center font-sans">
+                    <div className="relative inline-block">
+                        <div className="w-24 h-24 bg-red-500/5 rounded-[32px] flex items-center justify-center mx-auto border border-red-500/10 shadow-inner">
+                            <Trash2 size={40} className="text-red-500" />
+                        </div>
+                        <div className="absolute -top-1 -right-1 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg border-2 border-[var(--bg-app)] animate-bounce">
+                            <AlertTriangle size={16} />
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                        <div>
+                            <p className="text-[10px] font-black text-red-500 uppercase tracking-[0.3em] mb-2">Advertencia Crítica</p>
+                            <h3 className="text-2xl font-black text-[var(--text-main)] tracking-tight italic">¿Eliminar permanentemente?</h3>
+                        </div>
+                        <p className="text-[var(--text-muted)] text-sm leading-relaxed font-medium max-w-xs mx-auto">
+                            Vas a borrar <strong>"{itemToDelete?.title}"</strong> del Master Doc. Esta acción no se puede deshacer y todo el contenido asociado será purgado.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 pt-6 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => {
                                 if (!itemToDelete) return;
@@ -803,25 +929,40 @@ const WorldView = () => {
                                 if (itemToDelete.pop) popPath(path.length - 2);
                                 setItemToDelete(null);
                             }}
-                            className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-colors shadow-md"
+                            className="w-full px-8 py-5 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all shadow-xl shadow-red-600/30 active:scale-95"
                         >
-                            Sí, Eliminar
+                            Sí, eliminar definitivamente
+                        </button>
+                        <button
+                            onClick={() => setItemToDelete(null)}
+                            className="w-full px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-editor)] transition-all"
+                        >
+                            Cancelar Acción
                         </button>
                     </div>
                 </div>
             </Modal>
             {/* Edit Title Modal */}
             <Modal isOpen={isEditModalOpen} onClose={() => { setIsEditModalOpen(false); setEditTarget(null); setEditTitle(''); }} title="Editar Título">
-                <div className="space-y-4 text-left font-sans">
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                                Nuevo Nombre / Título
+                <div className="p-8 space-y-8 text-left font-sans">
+                    <div className="bg-blue-500/5 border border-blue-500/10 rounded-2xl p-6 flex items-center gap-4 shadow-inner">
+                        <div className="p-3 bg-blue-500/10 rounded-xl">
+                            <Pencil size={24} className="text-blue-500" />
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-black uppercase text-blue-500 tracking-[0.2em] mb-1.5">Renombrar Registro</p>
+                            <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed">El nuevo título se reflejará instantáneamente en todo el Master Doc y la navegación.</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-end px-1">
+                            <label className="block text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">
+                                Identificador de Entrada
                             </label>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setEditTitle(editTitle.toUpperCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Mayúsculas">AA</button>
-                                <button onClick={() => setEditTitle(editTitle.toLowerCase())} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Minúsculas">aa</button>
-                                <button onClick={() => setEditTitle(editTitle ? editTitle.charAt(0).toUpperCase() + editTitle.slice(1).toLowerCase() : '')} className="px-1.5 py-0.5 rounded bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:border-[var(--accent-main)] transition-all" title="Capitalizar Letra Inicial">Aa</button>
+                            <div className="flex items-center gap-1.5 translate-y-2">
+                                <button onClick={() => setEditTitle(editTitle.toUpperCase())} className="w-8 h-8 flex items-center justify-center rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-blue-500 hover:border-blue-500/50 transition-all uppercase" title="Mayúsculas">AA</button>
+                                <button onClick={() => setEditTitle(editTitle ? editTitle.charAt(0).toUpperCase() + editTitle.slice(1).toLowerCase() : '')} className="w-8 h-8 flex items-center justify-center rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-[10px] font-black text-[var(--text-muted)] hover:text-blue-500 hover:border-blue-500/50 transition-all uppercase" title="Capitalizar">Aa</button>
                             </div>
                         </div>
                         <input
@@ -832,22 +973,22 @@ const WorldView = () => {
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') handleEditSave();
                             }}
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-[var(--accent-main)] focus:ring-1 focus:ring-[var(--accent-main)] transition-all text-[var(--text-main)]"
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-[24px] px-6 py-5 focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/5 transition-all text-[var(--text-main)] text-xl font-serif italic"
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4">
+                    <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => { setIsEditModalOpen(false); setEditTarget(null); setEditTitle(''); }}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-all"
                         >
-                            Cancelar
+                            Omitir
                         </button>
                         <button
                             onClick={handleEditSave}
                             disabled={!editTitle.trim()}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md flex items-center gap-2"
+                            className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all disabled:opacity-40 disabled:grayscale shadow-xl shadow-blue-600/20 active:scale-95 flex items-center justify-center gap-3"
                         >
-                            <Pencil size={16} /> Guardar Cambios
+                            <Check size={18} /> Actualizar Título
                         </button>
                     </div>
                 </div>

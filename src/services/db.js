@@ -379,7 +379,7 @@ export const releaseChapterLock = async (bookId, chapterId, sessionId) => {
 
 export const deleteChapter = async (bookId, chapterId) => {
     try {
-        const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
+        const chapterRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString());
         await updateDoc(chapterRef, {
             deletedAt: serverTimestamp(),
             updatedAt: serverTimestamp()
@@ -387,6 +387,17 @@ export const deleteChapter = async (bookId, chapterId) => {
         return true;
     } catch (error) {
         console.error("Error deleting (soft) chapter: ", error);
+        throw error;
+    }
+};
+
+export const permanentlyDeleteChapter = async (bookId, chapterId) => {
+    try {
+        const chapterRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString());
+        await deleteDoc(chapterRef);
+        return true;
+    } catch (error) {
+        console.error("Error deleting (permanent) chapter: ", error);
         throw error;
     }
 };
@@ -509,7 +520,7 @@ export const updateCharacter = async (bookId, charId, updateData) => {
 
 export const deleteCharacter = async (bookId, characterId) => {
     try {
-        const charRef = doc(db, BOOKS_COLLECTION, bookId, CHARACTERS_COLLECTION, characterId);
+        const charRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHARACTERS_COLLECTION, characterId.toString());
         await updateDoc(charRef, {
             deletedAt: serverTimestamp(),
             updatedAt: serverTimestamp()
@@ -517,6 +528,17 @@ export const deleteCharacter = async (bookId, characterId) => {
         return true;
     } catch (error) {
         console.error("Error deleting (soft) character: ", error);
+        throw error;
+    }
+};
+
+export const permanentlyDeleteCharacter = async (bookId, characterId) => {
+    try {
+        const charRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHARACTERS_COLLECTION, characterId.toString());
+        await deleteDoc(charRef);
+        return true;
+    } catch (error) {
+        console.error("Error deleting (permanent) character: ", error);
         throw error;
     }
 };
@@ -573,7 +595,7 @@ export const updateWorldItem = async (bookId, itemId, updateData) => {
 
 export const deleteWorldItem = async (bookId, itemId) => {
     try {
-        const itemRef = doc(db, BOOKS_COLLECTION, bookId, WORLD_COLLECTION, itemId);
+        const itemRef = doc(db, BOOKS_COLLECTION, bookId.toString(), WORLD_COLLECTION, itemId.toString());
         await updateDoc(itemRef, {
             deletedAt: serverTimestamp(),
             updatedAt: serverTimestamp()
@@ -581,6 +603,17 @@ export const deleteWorldItem = async (bookId, itemId) => {
         return true;
     } catch (error) {
         console.error("Error deleting (soft) world item: ", error);
+        throw error;
+    }
+};
+
+export const permanentlyDeleteWorldItem = async (bookId, itemId) => {
+    try {
+        const itemRef = doc(db, BOOKS_COLLECTION, bookId.toString(), WORLD_COLLECTION, itemId.toString());
+        await deleteDoc(itemRef);
+        return true;
+    } catch (error) {
+        console.error("Error deleting (permanent) world item: ", error);
         throw error;
     }
 };

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Plus, Book, Clock, ChevronRight, Search, BookMarked, Trash2, Edit3, Play, Upload, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Plus, Book, Clock, ChevronRight, Search, BookMarked, Trash2, Edit3, Play, Upload, Loader2, Image as ImageIcon, FileText, ExternalLink } from 'lucide-react';
 import Modal from './Modal';
 import ConfirmModal from './ConfirmModal';
 
@@ -181,39 +181,45 @@ const LibraryView = () => {
             </div>
 
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Nueva Obra Creativa">
-                <div className="space-y-6 font-sans">
-                    <div className="p-4 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl border border-indigo-200 dark:border-indigo-500/20 flex items-start gap-4">
-                        <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg">
-                            <SparklesIcon size={20} />
+                <div className="p-8 space-y-10 text-left font-sans bg-indigo-500/[0.01]">
+                    <div className="p-6 bg-indigo-600/5 rounded-[32px] border border-indigo-500/10 flex items-start gap-5 shadow-inner">
+                        <div className="p-3.5 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/20 shrink-0">
+                            <SparklesIcon size={24} />
                         </div>
                         <div>
-                            <p className="text-xs font-bold text-indigo-900 dark:text-indigo-300 uppercase tracking-widest mb-1">Dato de Autor</p>
-                            <p className="text-sm text-indigo-800/70 dark:text-indigo-400 font-medium">Usa una relación de 2:3 para que tu portada luzca como un libro real impreso.</p>
+                            <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.3em] mb-2">Consejo Editorial</p>
+                            <p className="text-[11px] text-indigo-900/60 dark:text-indigo-400 font-bold leading-relaxed uppercase tracking-tighter">Usa una relación de aspecto 2:3 para que tu portada luzca como un libro real impreso de alta gama.</p>
                         </div>
                     </div>
 
-                    <div className="space-y-5">
-                        <div className="space-y-2">
-                            <label className="text-xs font-black text-[var(--text-muted)] uppercase tracking-wider">Título de la obra</label>
+                    <div className="space-y-8">
+                        <div className="space-y-4">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                                <FileText size={14} />
+                                Título de la Obra
+                            </label>
                             <input 
                                 type="text" 
                                 autoFocus
                                 placeholder="Ej. El Guardian de los Secretos..."
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
-                                className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl px-6 py-4 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-[var(--text-main)] transition-all font-serif text-lg"
+                                className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] px-8 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-[var(--text-main)] transition-all font-serif italic text-2xl placeholder:opacity-20 placeholder:italic shadow-sm"
                             />
                         </div>
 
-                        <div className="space-y-3">
-                            <div className="flex justify-between items-end px-1">
-                                <label className="text-xs font-black text-[var(--text-muted)] uppercase tracking-wider">Portada del Libro</label>
-                                <span className="text-[10px] text-indigo-500 font-black bg-indigo-500/10 px-3 py-1 rounded-full uppercase tracking-tighter text-right">600x900px sugerido</span>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center px-1">
+                                <label className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                                    <ImageIcon size={14} />
+                                    Identidad Visual
+                                </label>
+                                <span className="text-[9px] text-indigo-500 font-black bg-indigo-500/10 px-4 py-1.5 rounded-full uppercase tracking-[0.2em] shadow-sm">600x900px sugerido</span>
                             </div>
                             
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                 {/* Upload Box */}
-                                <label className={`relative group/upload cursor-pointer border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-6 transition-all ${isUploading ? 'bg-indigo-50/50 border-indigo-300 opacity-60 pointer-events-none' : 'hover:bg-indigo-50/50 hover:border-indigo-400 border-[var(--border-main)]'}`}>
+                                <label className={`relative group/upload cursor-pointer border-2 border-dashed rounded-[32px] flex flex-col items-center justify-center p-10 transition-all ${isUploading ? 'bg-indigo-500/5 border-indigo-300 opacity-60 pointer-events-none' : 'bg-[var(--bg-editor)]/50 hover:bg-indigo-500/[0.03] hover:border-indigo-500/50 border-[var(--border-main)] hover:shadow-2xl hover:shadow-indigo-500/5'}`}>
                                     <input 
                                         type="file" 
                                         className="hidden" 
@@ -221,41 +227,48 @@ const LibraryView = () => {
                                         onChange={handleFileUpload}
                                     />
                                     {isUploading ? (
-                                        <Loader2 className="animate-spin text-indigo-600 mb-2" size={24} />
+                                        <Loader2 className="animate-spin text-indigo-600 mb-4" size={32} />
                                     ) : (
-                                        <Upload className="text-[var(--text-muted)] group-hover/upload:text-indigo-600 mb-2" size={24} />
+                                        <div className="w-16 h-16 bg-[var(--bg-app)] rounded-2xl flex items-center justify-center mb-4 border border-[var(--border-main)] group-hover/upload:border-indigo-500/20 group-hover/upload:scale-110 transition-all shadow-sm">
+                                            <Upload className="text-[var(--text-muted)] group-hover/upload:text-indigo-600" size={28} />
+                                        </div>
                                     )}
-                                    <p className="text-xs font-bold text-[var(--text-muted)] group-hover/upload:text-indigo-900">{isUploading ? 'Subiendo...' : 'Subir Imagen'}</p>
+                                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] group-hover/upload:text-indigo-600 transition-colors">{isUploading ? 'Procesando...' : 'Cargar Imagen'}</p>
                                 </label>
 
                                 {/* URL Input Box */}
-                                <div className="flex flex-col justify-center gap-3">
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                                            <ImageIcon size={16} className="text-[var(--text-muted)]" />
+                                <div className="flex flex-col justify-center gap-4">
+                                    <div className="relative group">
+                                        <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
+                                            <ExternalLink size={18} className="text-[var(--text-muted)] group-focus-within:text-indigo-500 transition-colors opacity-50" />
                                         </div>
                                         <input 
                                             type="url" 
-                                            placeholder="O pega una URL..."
+                                            placeholder="O vincula una URL externa..."
                                             value={coverUrl}
                                             onChange={(e) => setCoverUrl(e.target.value)}
-                                            className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl pl-12 pr-6 py-4 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-[var(--text-main)] transition-all font-mono text-[10px]"
+                                            className="w-full bg-[var(--bg-editor)] border-2 border-[var(--border-main)] rounded-[24px] pl-16 pr-8 py-5 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-[var(--text-main)] transition-all font-mono text-[11px] placeholder:opacity-30 shadow-inner"
                                         />
                                     </div>
-                                    <p className="px-2 text-[10px] text-[var(--text-muted)] font-medium italic opacity-60">Ideal para portadas de Unsplash o links externos.</p>
+                                    <p className="px-6 text-[10px] text-[var(--text-muted)] font-bold italic opacity-40 uppercase tracking-tighter leading-tight text-center">Referencia digital remota (Unsplash, Pinterest, etc.)</p>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex justify-end gap-4 pt-6">
-                        <button onClick={() => setIsModalOpen(false)} className="px-8 py-3.5 font-black text-[var(--text-muted)] hover:bg-[var(--bg-app)] rounded-2xl transition-colors">Cancelar</button>
+                    <div className="flex flex-col sm:flex-row items-center gap-4 pt-8 border-t border-[var(--border-main)]">
+                        <button 
+                            onClick={() => setIsModalOpen(false)} 
+                            className="w-full sm:flex-1 py-5 font-black text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] rounded-[22px] transition-all"
+                        >
+                            No, ahora no
+                        </button>
                         <button 
                             onClick={handleCreate}
                             disabled={!title.trim() || isUploading}
-                            className="px-10 py-3.5 bg-indigo-600 text-white rounded-2xl font-black hover:bg-indigo-700 disabled:opacity-30 disabled:grayscale transition-all shadow-xl shadow-indigo-600/30"
+                            className="w-full sm:flex-1 py-5 bg-indigo-600 text-white rounded-[22px] font-black text-[10px] uppercase tracking-[0.3em] hover:bg-indigo-700 disabled:opacity-30 disabled:grayscale transition-all shadow-xl shadow-indigo-600/30 hover:shadow-indigo-600/40 hover:scale-105 active:scale-95"
                         >
-                            {isUploading ? 'Preparando...' : 'Crear Obra Maestra'}
+                            {isUploading ? 'Sincronizando...' : 'Publicar Obra'}
                         </button>
                     </div>
                 </div>

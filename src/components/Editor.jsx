@@ -1,6 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, BookMarked, Languages, Plus, FileAudio, MoreHorizontal, Sliders } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, BookMarked, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -138,6 +138,15 @@ const Editor = () => {
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isReadingSettingsModalOpen, setIsReadingSettingsModalOpen] = useState(false);
     const [isDesktopMoreOpen, setIsDesktopMoreOpen] = useState(false);
+    const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+
+    const STATUS_OPTIONS = [
+        { label: 'Idea', value: 'Idea', color: 'bg-gray-400', shadow: 'shadow-gray-400/50' },
+        { label: 'Borrador', value: 'Borrador', color: 'bg-blue-500', shadow: 'shadow-blue-500/50' },
+        { label: 'Revisión', value: 'Revisión', color: 'bg-amber-500', shadow: 'shadow-amber-500/50' },
+        { label: 'Completado', value: 'Completado', color: 'bg-emerald-500', shadow: 'shadow-emerald-500/50' },
+        { label: 'Finalizado', value: 'Finalizado', color: 'bg-indigo-500', shadow: 'shadow-indigo-500/50' },
+    ];
     const [isCopyDropdownOpen, setIsCopyDropdownOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -946,19 +955,45 @@ const Editor = () => {
                         {/* Right Group */}
                         <div className="flex items-center gap-3">
                             {activeChapter && (
-                                <div className="flex items-center gap-2 px-5 h-11 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-sm">
-                                    <div className={`w-2.5 h-2.5 rounded-full ${activeChapter.status === 'Finalizado' ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]'}`}></div>
-                                    <select
-                                        className="bg-transparent text-[var(--text-main)] text-[10px] font-black focus:outline-none cursor-pointer appearance-none pr-2 uppercase tracking-widest"
-                                        value={activeChapter.status || 'Idea'}
-                                        onChange={(e) => handleStatusChange(e.target.value)}
+                                <div className="relative">
+                                    <button 
+                                        onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                                        className="flex items-center gap-3 px-5 h-11 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-sm hover:border-[var(--accent-main)] transition-all group"
                                     >
-                                        <option value="Idea">Idea</option>
-                                        <option value="Borrador">Borrador</option>
-                                        <option value="Revisión">Revisión</option>
-                                        <option value="Completado">Completado</option>
-                                        <option value="Finalizado">Finalizado</option>
-                                    </select>
+                                        <div className={`w-2.5 h-2.5 rounded-full ${
+                                            STATUS_OPTIONS.find(o => o.value === activeChapter.status)?.color || 'bg-gray-400'
+                                        } ${
+                                            STATUS_OPTIONS.find(o => o.value === activeChapter.status)?.shadow || ''
+                                        } shadow-sm transition-all duration-300`}></div>
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)] italic">{activeChapter.status || 'Idea'}</span>
+                                        <ChevronDown size={14} className={`text-[var(--text-muted)] group-hover:text-[var(--accent-main)] transition-transform duration-300 ${isStatusDropdownOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {isStatusDropdownOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-40" onClick={() => setIsStatusDropdownOpen(false)}></div>
+                                            <div className="absolute right-0 mt-3 w-52 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-[24px] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200">
+                                                <div className="p-2 space-y-1">
+                                                    {STATUS_OPTIONS.map((opt) => (
+                                                        <button 
+                                                            key={opt.value}
+                                                            onClick={() => {
+                                                                handleStatusChange(opt.value);
+                                                                setIsStatusDropdownOpen(false);
+                                                            }}
+                                                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group ${activeChapter.status === opt.value ? 'bg-indigo-500/5' : 'hover:bg-[var(--bg-editor)]'}`}
+                                                        >
+                                                            <div className={`w-2.5 h-2.5 rounded-full ${opt.color} ${opt.shadow} shadow-sm transition-transform group-hover:scale-110`} />
+                                                            <span className={`text-[10px] font-black uppercase tracking-widest ${activeChapter.status === opt.value ? 'text-indigo-600' : 'text-[var(--text-muted)] group-hover:text-[var(--text-main)]'}`}>{opt.label}</span>
+                                                            {activeChapter.status === opt.value && (
+                                                                <Check size={12} className="ml-auto text-indigo-500" />
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
 
@@ -1159,16 +1194,16 @@ const Editor = () => {
 
             {/* Modal de confirmación de detección de personajes */}
             <Modal isOpen={isDetectionModalOpen} onClose={() => { setIsDetectionModalOpen(false); setHighlightedCharId(null); }} title="Personajes Detectados">
-                <div className="space-y-6">
-                    <div>
-                        <p className="text-sm text-[var(--text-muted)] mb-3">Haz clic en un personaje para resaltar sus menciones en la vista previa:</p>
-                        <div className="flex flex-wrap gap-2">
+                <div className="p-8 space-y-6 font-sans">
+                    <div className="space-y-4">
+                        <p className="text-sm text-[var(--text-muted)] font-medium leading-relaxed">Se han identificado menciones de personajes en tu texto. Selecciona uno para previsualizar los cambios:</p>
+                        <div className="flex flex-wrap gap-2 py-1">
                             {detectedCharacters.map(char => (
                                 <button
                                     key={char.id}
                                     onClick={() => setHighlightedCharId(highlightedCharId === char.id ? null : char.id)}
-                                    className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${highlightedCharId === char.id
-                                        ? 'bg-[var(--accent-main)] text-white border-[var(--accent-main)] shadow-md scale-105'
+                                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer border ${highlightedCharId === char.id
+                                        ? 'bg-[var(--accent-main)] text-white border-[var(--accent-main)] shadow-lg scale-105'
                                         : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)]'
                                         }`}
                                 >
@@ -1178,18 +1213,16 @@ const Editor = () => {
                         </div>
                     </div>
 
-                    <div>
-                        <p className="text-xs font-bold uppercase text-[var(--text-muted)] mb-2">Vista Previa:</p>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest">Vista Previa de Anotaciones</label>
                         <div
-                            className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl p-4 max-h-40 overflow-y-auto text-sm prose prose-sm"
+                            className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl p-6 max-h-48 overflow-y-auto text-sm prose prose-sm shadow-inner"
                             dangerouslySetInnerHTML={{
                                 __html: (() => {
                                     let html = newPreviewHtml;
                                     if (highlightedCharId) {
-                                        // Highlight the selected character's mentions with a bright background
                                         const regex = new RegExp(`<span data-char-id="${highlightedCharId}">(.*?)</span>`, 'gi');
                                         html = html.replace(regex, '<mark style="background:linear-gradient(135deg,#6366f1 0%,#a855f7 100%);color:white;padding:1px 4px;border-radius:4px;font-weight:700;">$1</mark>');
-                                        // Other character mentions stay styled normally
                                         html = html.replace(/<span data-char-id/g, '<span style="color:var(--accent-main);font-weight:600;border-bottom:1px dashed var(--accent-main);" data-char-id');
                                     } else {
                                         html = html.replace(/<span data-char-id/g, '<span style="color:var(--accent-main);font-weight:600;border-bottom:1px dashed var(--accent-main);" data-char-id');
@@ -1200,10 +1233,10 @@ const Editor = () => {
                         />
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-2">
+                    <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => { setIsDetectionModalOpen(false); setHighlightedCharId(null); }}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="px-6 py-3 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors text-sm"
                         >
                             Descartar
                         </button>
@@ -1215,9 +1248,9 @@ const Editor = () => {
                                 setIsDetectionModalOpen(false);
                                 setHighlightedCharId(null);
                             }}
-                            className="px-5 py-2.5 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-bold transition-colors shadow-md"
+                            className="px-8 py-3 bg-[var(--accent-main)] hover:bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-xl active:scale-95"
                         >
-                            Aplicar y Guardar
+                            Aplicar al Documento
                         </button>
                     </div>
                 </div>
@@ -1225,34 +1258,37 @@ const Editor = () => {
 
             {/* Modal de selección de modo de detección */}
             <Modal isOpen={isDetectionModeModalOpen} onClose={() => setIsDetectionModeModalOpen(false)} title="Modo de Detección">
-                <div className="space-y-4">
-                    <p className="text-sm text-[var(--text-muted)]">¿Cómo deseas buscar a los personajes en el texto?</p>
-                    <div className="grid grid-cols-1 gap-3">
+                <div className="p-8 space-y-6 font-sans">
+                    <p className="text-sm text-[var(--text-muted)] font-medium leading-relaxed">Personaliza el motor de búsqueda para encontrar los nombres de tus personajes en el manuscrito:</p>
+                    <div className="grid grid-cols-1 gap-4">
                         <button
                             onClick={() => {
                                 setIsDetectionModeModalOpen(false);
                                 runDetection('full');
                             }}
-                            className="p-4 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] hover:border-[var(--accent-main)] hover:bg-[var(--accent-soft)] transition-all text-left group"
+                            className="p-6 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all text-left group shadow-sm"
                         >
-                            <div className="font-bold text-[var(--text-main)] mb-1 group-hover:text-[var(--accent-main)] transition-colors">Solo nombres completos</div>
-                            <p className="text-xs text-[var(--text-muted)]">Busca coincidencias exactas. Ej: "Claire Wilson" solo detecta "Claire Wilson".</p>
+                            <div className="font-black text-xs uppercase tracking-widest text-[var(--text-main)] mb-2 group-hover:text-indigo-600 transition-colors">Solo nombres completos</div>
+                            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">Busca coincidencias exactas. Ej: "Claire Wilson" solo detectará el nombre completo.</p>
                         </button>
                         <button
                             onClick={() => {
                                 setIsDetectionModeModalOpen(false);
                                 runDetection('simple');
                             }}
-                            className="p-4 rounded-xl border border-[var(--accent-main)]/30 bg-[var(--accent-soft)]/50 hover:border-[var(--accent-main)] hover:bg-[var(--accent-soft)] transition-all text-left group"
+                            className="p-6 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 hover:border-indigo-500 hover:bg-indigo-500/10 transition-all text-left group shadow-md"
                         >
-                            <div className="font-bold text-[var(--accent-main)] mb-1">Completos + Simples <span className="text-[10px] bg-[var(--accent-main)] text-white rounded-full px-2 py-0.5 ml-1">Recomendado</span></div>
-                            <p className="text-xs text-[var(--text-muted)]">Busca el nombre completo y también el primer nombre por separado. Ej: "Claire Wilson" detecta "Claire Wilson" y también "Claire" sola.</p>
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="font-black text-xs uppercase tracking-widest text-indigo-600 transition-colors">Completos + Simples</div>
+                                <span className="text-[9px] bg-indigo-600 text-white rounded-full px-2.5 py-1 font-black uppercase tracking-tighter shadow-sm">Recomendado</span>
+                            </div>
+                            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">Detecta nombres completos y también por separado. Ej: "Claire Wilson" y también "Claire".</p>
                         </button>
                     </div>
-                    <div className="flex justify-end pt-2">
+                    <div className="flex justify-end pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => setIsDetectionModeModalOpen(false)}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-all"
                         >
                             Cancelar
                         </button>
@@ -1382,10 +1418,10 @@ const Editor = () => {
 
             {/* Formatting Hub Modal */}
             <Modal isOpen={isFormattingModalOpen} onClose={() => setIsFormattingModalOpen(false)} title="Opciones de Formato">
-                <div className="space-y-8 py-2">
+                <div className="p-8 space-y-8 font-sans">
                     {/* Headings & Text Styles */}
-                    <div>
-                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Estilos de Título</label>
+                    <div className="space-y-4">
+                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Estilos de Jerarquía</label>
                         <div className="grid grid-cols-3 gap-3">
                             {[1, 2, 3].map(level => (
                                 <button
@@ -1394,9 +1430,9 @@ const Editor = () => {
                                         editor?.chain().focus().toggleHeading({ level }).run();
                                         setIsFormattingModalOpen(false);
                                     }}
-                                    className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 ${editor?.isActive('heading', { level }) ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                    className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 ${editor?.isActive('heading', { level }) ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                                 >
-                                    <span className="text-xl font-black">H{level}</span>
+                                    <span className="text-2xl font-black">H{level}</span>
                                     <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Nivel {level}</span>
                                 </button>
                             ))}
@@ -1405,37 +1441,37 @@ const Editor = () => {
                                     editor?.chain().focus().setParagraph().run();
                                     setIsFormattingModalOpen(false);
                                 }}
-                                className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 col-span-3 ${editor?.isActive('paragraph') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                className={`p-4 rounded-2xl border transition-all flex flex-col items-center justify-center gap-1 col-span-3 ${editor?.isActive('paragraph') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                             >
-                                <span className="text-sm font-bold">Párrafo Estándar</span>
-                                <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Texto normal del manuscrito</span>
+                                <span className="text-sm font-black uppercase tracking-widest leading-none">Párrafo Estándar</span>
+                                <span className="text-[9px] font-medium opacity-60">Texto normal del manuscrito</span>
                             </button>
                         </div>
                     </div>
 
                     {/* Basic Formatting */}
-                    <div>
-                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Estilos de Énfasis</label>
+                    <div className="space-y-4">
+                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Énfasis de Texto</label>
                         <div className="grid grid-cols-2 gap-3">
                             <button
                                 onClick={() => editor?.chain().focus().toggleBold().run()}
-                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('bold') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('bold') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                             >
-                                <span className="text-xl font-black">B</span>
+                                <span className="text-2xl font-black">B</span>
                                 <span className="text-xs font-black uppercase tracking-widest">Negrita</span>
                             </button>
                             <button
                                 onClick={() => editor?.chain().focus().toggleItalic().run()}
-                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('italic') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('italic') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                             >
-                                <span className="text-xl italic font-serif">I</span>
+                                <span className="text-2xl italic font-serif">I</span>
                                 <span className="text-xs font-black uppercase tracking-widest">Cursiva</span>
                             </button>
                         </div>
                     </div>
 
                     {/* Cleanup */}
-                    <div className="pt-4 border-t border-[var(--border-main)]">
+                    <div className="pt-6 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => {
                                 editor?.chain().focus().unsetAllMarks().run();
@@ -1443,7 +1479,7 @@ const Editor = () => {
                                 setIsFormattingModalOpen(false);
                                 toast.info("Formato limpiado.");
                             }}
-                            className="w-full py-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-red-500/20 hover:border-red-500"
+                            className="w-full py-4 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 border border-red-500/10 hover:border-red-500 shadow-sm"
                         >
                             <Trash2 size={16} />
                             Limpiar Todo el Formato
@@ -1454,10 +1490,10 @@ const Editor = () => {
 
             {/* Settings Reading Modal */}
             <Modal isOpen={isReadingSettingsModalOpen} onClose={() => setIsReadingSettingsModalOpen(false)} title="Configuración de Lectura">
-                <div className="space-y-8 py-2">
+                <div className="p-8 space-y-8 font-sans">
                     {/* Typography Mosaic */}
-                    <div>
-                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Tipografía</label>
+                    <div className="space-y-4">
+                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Tipografía</label>
                         <div className="grid grid-cols-2 gap-3">
                             {[
                                 { id: 'font-serif', label: 'Serif', detail: 'Clásica y Elegante' },
@@ -1468,30 +1504,32 @@ const Editor = () => {
                                 <button
                                     key={font.id}
                                     onClick={() => setReadingFont(font.id)}
-                                    className={`p-4 rounded-2xl border transition-all text-left flex flex-col gap-1 ${readingFont === font.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                    className={`p-4 rounded-2xl border transition-all text-left flex flex-col gap-1.5 ${readingFont === font.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                                 >
-                                    <span className={`text-lg font-bold ${font.id}`}>Aa</span>
-                                    <span className="text-xs font-black uppercase tracking-widest">{font.label}</span>
-                                    <span className={`text-[9px] opacity-60 ${readingFont === font.id ? 'text-white' : 'text-[var(--text-muted)]'}`}>{font.detail}</span>
+                                    <span className={`text-2xl font-bold ${font.id} leading-none`}>Aa</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-black uppercase tracking-widest leading-none">{font.label}</span>
+                                        <span className={`text-[9px] font-medium mt-1 ${readingFont === font.id ? 'text-white/70' : 'text-[var(--text-muted)]'}`}>{font.detail}</span>
+                                    </div>
                                 </button>
                             ))}
                         </div>
                     </div>
 
                     {/* Text Size Mosaic */}
-                    <div>
-                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Tamaño de Texto</label>
+                    <div className="space-y-4">
+                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Escala de Texto</label>
                         <div className="grid grid-cols-4 gap-2">
                             {[
                                 { id: 'sm', label: 'Chica', size: 'text-xs' },
                                 { id: 'base', label: 'Normal', size: 'text-sm' },
                                 { id: 'lg', label: 'Grande', size: 'text-base' },
-                                { id: 'xl', label: 'Gigante', size: 'text-lg' }
+                                { id: 'xl', label: 'Extra', size: 'text-lg' }
                             ].map(size => (
                                 <button
                                     key={size.id}
                                     onClick={() => setReadingTextSize(size.id)}
-                                    className={`p-3 rounded-xl border transition-all flex flex-col items-center justify-center gap-2 ${readingTextSize === size.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                    className={`p-3 py-4 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 ${readingTextSize === size.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                                 >
                                     <span className={`font-serif font-black ${size.size}`}>A</span>
                                     <span className="text-[9px] font-black uppercase tracking-tighter">{size.label}</span>
@@ -1501,8 +1539,8 @@ const Editor = () => {
                     </div>
 
                     {/* Width Mosaic */}
-                    <div>
-                        <label className="block text-[10px] font-black uppercase text-[var(--accent-main)] tracking-[0.2em] mb-4">Ancho de Lectura</label>
+                    <div className="space-y-4">
+                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Ancho de Enfoque</label>
                         <div className="grid grid-cols-5 gap-2">
                             {[
                                 { id: 'sm', label: 'Min' },
@@ -1514,9 +1552,9 @@ const Editor = () => {
                                 <button
                                     key={width.id}
                                     onClick={() => setReadingWidth(width.id)}
-                                    className={`p-2 py-4 rounded-xl border transition-all flex flex-col items-center justify-center gap-2 ${readingWidth === width.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
+                                    className={`p-2 py-4 rounded-xl border transition-all flex flex-col items-center justify-center gap-2 ${readingWidth === width.id ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
                                 >
-                                    <div className="flex items-center gap-0.5 opacity-40">
+                                    <div className="flex items-center gap-0.5 opacity-60">
                                         <div className="w-0.5 h-3 bg-current rounded-full"></div>
                                         <div className={`h-3 bg-current rounded-sm ${width.id === 'sm' ? 'w-2' : width.id === 'md' ? 'w-4' : width.id === 'lg' ? 'w-6' : width.id === 'xl' ? 'w-8' : 'w-10'}`}></div>
                                         <div className="w-0.5 h-3 bg-current rounded-full"></div>
@@ -1526,50 +1564,51 @@ const Editor = () => {
                             ))}
                         </div>
                     </div>
-                </div>
-                <div className="mt-8 pt-6 border-t border-[var(--border-main)]">
-                    <button
-                        onClick={() => setIsReadingSettingsModalOpen(false)}
-                        className="w-full py-4 bg-[var(--accent-main)] hover:bg-[#4f46e5] text-white font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl shadow-indigo-500/20 active:scale-95 text-xs"
-                    >
-                        Confirmar Cambios
-                    </button>
+
+                    <div className="pt-6 border-t border-[var(--border-main)]">
+                        <button
+                            onClick={() => setIsReadingSettingsModalOpen(false)}
+                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95 text-xs"
+                        >
+                            Actualizar Preferencias
+                        </button>
+                    </div>
                 </div>
             </Modal>
 
 
             {/* Note Creation Modal */}
             <Modal isOpen={isNoteModalOpen} onClose={() => { setIsNoteModalOpen(false); setNoteText(''); setNoteSelectionRange(null); }} title="📝 Añadir Nota al Texto">
-                <div className="space-y-4">
-                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
-                        <p className="text-xs font-bold uppercase text-amber-600 tracking-wider mb-1">Texto seleccionado:</p>
-                        <p className="text-sm text-[var(--text-main)] italic font-serif leading-relaxed">
+                <div className="p-8 space-y-6 font-sans">
+                    <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-6 space-y-3 shadow-inner">
+                        <p className="text-[10px] font-black uppercase text-amber-600 tracking-[0.2em]">Fragmento Seleccionado</p>
+                        <p className="text-base text-[var(--text-main)] italic font-serif leading-relaxed opacity-80">
                             "{editor && noteSelectionRange ? editor.state.doc.textBetween(noteSelectionRange.from, noteSelectionRange.to, ' ') : ''}"
                         </p>
                     </div>
-                    <div>
-                        <label className="block text-xs font-black uppercase text-[var(--text-muted)] tracking-widest mb-2">Tu nota / comentario:</label>
+                    <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase text-[var(--text-muted)] tracking-[0.2em]">Tu anotación</label>
                         <textarea
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
-                            placeholder="Escribe tu anotación aquí... (ej: 'Revisar tono', 'Ampliar diálogo', 'Cambiar escenario')"
-                            className="w-full h-32 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-[var(--text-main)] resize-none transition-all font-[Arial,sans-serif]"
+                            placeholder="Escribe tu comentario aquí... (ej: 'Revisar tono', 'Ampliar diálogo')"
+                            className="w-full h-40 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-6 py-4 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500/50 text-[var(--text-main)] resize-none transition-all font-sans leading-relaxed placeholder:opacity-30"
                             autoFocus
                         />
                     </div>
-                    <div className="flex justify-end gap-3 pt-2">
+                    <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-[var(--border-main)]">
                         <button
                             onClick={() => { setIsNoteModalOpen(false); setNoteText(''); setNoteSelectionRange(null); }}
-                            className="px-5 py-2.5 rounded-xl font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors"
+                            className="px-8 py-4 font-black text-xs uppercase tracking-[0.2em] text-[var(--text-muted)] hover:bg-[var(--bg-editor)] rounded-2xl transition-all"
                         >
                             Cancelar
                         </button>
                         <button
                             onClick={handleSaveNote}
                             disabled={!noteText.trim()}
-                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                            className="px-10 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all shadow-xl shadow-amber-500/20 disabled:opacity-30 disabled:grayscale flex items-center justify-center gap-3 active:scale-95"
                         >
-                            <MessageSquarePlus size={16} />
+                            <MessageSquarePlus size={18} />
                             Guardar Nota
                         </button>
                     </div>
@@ -1579,47 +1618,45 @@ const Editor = () => {
             {/* Note Viewer Modal */}
             <Modal isOpen={isViewNoteModalOpen} onClose={() => { setIsViewNoteModalOpen(false); setViewingNote(null); setIsEditingNote(false); }} title="📌 Nota del Autor">
                 {viewingNote && (
-                    <div className="space-y-4">
-                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
-                            <p className="text-xs font-bold uppercase text-amber-600 tracking-wider mb-1">Fragmento resaltado:</p>
-                            <p className="text-sm text-[var(--text-main)] italic font-serif leading-relaxed">
+                    <div className="p-8 space-y-6 font-sans">
+                        <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-6 space-y-3 shadow-inner">
+                            <p className="text-[10px] font-black uppercase text-amber-600 tracking-[0.2em]">Fragmento Resaltado</p>
+                            <p className="text-base text-[var(--text-main)] italic font-serif leading-relaxed opacity-80">
                                 "{viewingNote.highlightedText}"
                             </p>
                         </div>
 
-                        <div>
-                            <p className="text-xs font-bold uppercase text-[var(--text-muted)] tracking-wider mb-2">Comentario:</p>
+                        <div className="space-y-4">
+                            <label className="block text-[10px] font-black uppercase text-[var(--text-muted)] tracking-[0.2em]">Comentario</label>
                             {isEditingNote ? (
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     <textarea
                                         value={editNoteText}
                                         onChange={(e) => setEditNoteText(e.target.value)}
-                                        className="w-full h-28 bg-[var(--bg-editor)] border border-amber-500/50 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-[var(--text-main)] resize-none transition-all font-[Arial,sans-serif]"
+                                        className="w-full h-32 bg-[var(--bg-editor)] border border-amber-500/30 rounded-2xl px-6 py-4 focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-[var(--text-main)] resize-none transition-all font-sans leading-relaxed shadow-inner"
                                         autoFocus
                                     />
-                                    <div className="flex justify-end gap-2">
-                                        <button onClick={() => { setIsEditingNote(false); setEditNoteText(viewingNote.noteText); }} className="px-4 py-2 rounded-lg text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--bg-editor)] transition-colors">
-                                            Cancelar
-                                        </button>
-                                        <button onClick={handleUpdateNote} disabled={!editNoteText.trim()} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-colors shadow-sm disabled:opacity-40">
-                                            Guardar Cambios
-                                        </button>
+                                    <div className="flex justify-end gap-3">
+                                        <button onClick={() => setIsEditingNote(false)} className="px-6 py-3 font-bold text-xs uppercase tracking-widest text-[var(--text-muted)] hover:bg-[var(--bg-editor)] rounded-xl transition-all">Cancelar</button>
+                                        <button onClick={handleUpdateNote} className="px-8 py-3 bg-amber-500 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-500/20 active:scale-95">Guardar Cambios</button>
                                     </div>
                                 </div>
                             ) : (
-                                <div className="bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl p-4 text-sm text-[var(--text-main)] leading-relaxed whitespace-pre-wrap font-[Arial,sans-serif]">
-                                    {viewingNote.noteText}
+                                <div className="p-6 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-sm">
+                                    <p className="text-sm text-[var(--text-main)] leading-relaxed whitespace-pre-wrap font-medium">
+                                        {viewingNote.noteText}
+                                    </p>
                                 </div>
                             )}
                         </div>
 
                         {/* Action Buttons */}
                         {!isEditingNote && (
-                            <div className="flex flex-col gap-3 pt-2">
+                            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-6 border-t border-[var(--border-main)]">
                                 {/* Bridge to Prompt Studio — the KEY feature */}
                                 <button
                                     onClick={handleSendToIAStudio}
-                                    className="w-full group relative px-5 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 flex items-center justify-center gap-2 overflow-hidden"
+                                    className="w-full sm:w-auto group relative px-5 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 flex items-center justify-center gap-2 overflow-hidden active:scale-95"
                                 >
                                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                                     <span className="relative z-10 flex items-center gap-2">
@@ -1727,101 +1764,118 @@ const Editor = () => {
 
             {/* Mobile Actions Modal */}
             <Modal isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} title="Herramientas del Editor">
-                <div className="space-y-6 pt-2 pb-4">
-                    <div className="grid grid-cols-2 gap-3">
+                <div className="p-8 space-y-10 bg-indigo-500/[0.01]">
+                    <div className="grid grid-cols-2 gap-4">
                         <button
                             onClick={() => { setIsFormattingModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 group"
                         >
-                            <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] text-[var(--accent-main)] flex items-center justify-center mb-1">
-                                <Pencil size={24} />
+                            <div className="w-14 h-14 rounded-[20px] bg-indigo-100 text-indigo-600 flex items-center justify-center transition-transform group-hover:scale-110">
+                                <Pencil size={28} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest">Formato</span>
-                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Títulos y Estilos</span>
+                            <div className="text-center">
+                                <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">Formato</span>
+                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Tipografía</span>
+                            </div>
                         </button>
 
                         <button
                             onClick={() => { setIsDetectionModeModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-emerald-500/5 group"
                         >
-                            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center mb-1">
-                                <ScanSearch size={24} />
+                            <div className="w-14 h-14 rounded-[20px] bg-emerald-100 text-emerald-600 flex items-center justify-center transition-transform group-hover:scale-110">
+                                <ScanSearch size={28} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest">IA Scan</span>
-                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Detectar Personajes</span>
+                            <div className="text-center">
+                                <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">IA Scan</span>
+                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Detección</span>
+                            </div>
                         </button>
 
                         <button
                             onClick={() => { setIsHistoryModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-blue-500/5 group"
                         >
-                            <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mb-1">
-                                <History size={24} />
+                            <div className="w-14 h-14 rounded-[20px] bg-blue-100 text-blue-600 flex items-center justify-center transition-transform group-hover:scale-110">
+                                <History size={28} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest">Historial</span>
-                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Versiones Anteriores</span>
+                            <div className="text-center">
+                                <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">Versiones</span>
+                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Control</span>
+                            </div>
                         </button>
 
                         <button
                             onClick={() => { setIsReadingSettingsModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-6 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-main)] flex flex-col items-center gap-3 active:scale-95 transition-all shadow-sm"
+                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-orange-500/5 group"
                         >
-                            <div className="w-12 h-12 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center mb-1">
-                                <Sliders size={24} />
+                            <div className="w-14 h-14 rounded-[20px] bg-orange-100 text-orange-600 flex items-center justify-center transition-transform group-hover:scale-110">
+                                <Sliders size={28} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest">Ajustes</span>
-                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter text-center">Tipografía y Diseño</span>
+                            <div className="text-center">
+                                <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">Lectura</span>
+                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Ajustes</span>
+                            </div>
                         </button>
                     </div>
 
-                    <div className="bg-blue-500/5 rounded-2xl p-4 border border-blue-500/10">
-                        <label className="block text-[9px] font-black uppercase text-blue-500 tracking-widest mb-3 text-center">Modo de Copia</label>
-                        <div className="flex gap-2 justify-center mb-3">
-                            {[
-                                { id: 'title', label: 'Título' },
-                                { id: 'text', label: 'Texto' },
-                                { id: 'all', label: 'Todo' }
-                            ].map(mode => (
-                                <button
-                                    key={mode.id}
-                                    onClick={() => setCopyMode(mode.id)}
-                                    className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase transition-all ${
-                                        copyMode === mode.id 
-                                        ? 'bg-blue-500 text-white shadow-lg' 
-                                        : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)]'
-                                    }`}
-                                >
-                                    {mode.label}
-                                </button>
-                            ))}
+                    <div className="space-y-6">
+                        <div className="bg-blue-600/5 rounded-[32px] p-8 border border-blue-500/10 shadow-inner">
+                            <label className="block text-[9px] font-black uppercase text-blue-600 tracking-[0.3em] mb-6 text-center">Configuración de Portapapeles</label>
+                            <div className="flex gap-3 justify-center mb-6">
+                                {[
+                                    { id: 'title', label: 'Título' },
+                                    { id: 'text', label: 'Contenido' },
+                                    { id: 'all', label: 'Completo' }
+                                ].map(mode => (
+                                    <button
+                                        key={mode.id}
+                                        onClick={() => setCopyMode(mode.id)}
+                                        className={`px-6 py-2.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            copyMode === mode.id 
+                                            ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20 scale-105' 
+                                            : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)] hover:border-blue-500/30'
+                                        }`}
+                                    >
+                                        {mode.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => { handleCopyToClipboard(); setIsMobileMenuOpen(false); }}
+                                className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] flex items-center justify-center gap-3 shadow-xl shadow-blue-600/30 active:scale-95 transition-all"
+                            >
+                                <Copy size={18} />
+                                <span>Copiar Selección</span>
+                            </button>
                         </div>
-                        <button
-                            onClick={() => { handleCopyToClipboard(); setIsMobileMenuOpen(false); }}
-                            className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
-                        >
-                            <Copy size={16} />
-                            <span>Copiar {copyMode === 'title' ? 'Título' : copyMode === 'text' ? 'Contenido' : 'Título + Contenido'}</span>
-                        </button>
-                    </div>
 
-                    <div className="bg-[var(--accent-soft)]/30 rounded-2xl p-4 border border-[var(--accent-main)]/10">
-                        <label className="block text-[9px] font-black uppercase text-[var(--accent-main)] tracking-widest mb-3 text-center">Estado de Edición</label>
-                        <div className="flex flex-wrap gap-2 justify-center">
-                            {['Idea', 'Borrador', 'Revisión', 'Completado', 'Finalizado'].map(status => (
-                                <button
-                                    key={status}
-                                    onClick={() => { handleStatusChange(status); setIsMobileMenuOpen(false); }}
-                                    className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase transition-all ${
-                                        activeChapter?.status === status 
-                                        ? 'bg-[var(--accent-main)] text-white shadow-lg scale-105' 
-                                        : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)]'
-                                    }`}
-                                >
-                                    {status}
-                                </button>
-                            ))}
+                        <div className="bg-indigo-600/5 rounded-[32px] p-8 border border-indigo-500/10 shadow-inner">
+                            <label className="block text-[9px] font-black uppercase text-indigo-600 tracking-[0.3em] mb-6 text-center">Estado del Manuscrito</label>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                                {['Idea', 'Borrador', 'Revisión', 'Completado', 'Finalizado'].map(status => (
+                                    <button
+                                        key={status}
+                                        onClick={() => { handleStatusChange(status); setIsMobileMenuOpen(false); }}
+                                        className={`px-5 py-2.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            activeChapter?.status === status 
+                                            ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20 scale-110' 
+                                            : 'bg-[var(--bg-app)] text-[var(--text-muted)] border border-[var(--border-main)] hover:border-indigo-500/30'
+                                        }`}
+                                    >
+                                        {status}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
+                    
+                    <button 
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className="w-full py-4 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.4em] opacity-40 hover:opacity-100 transition-opacity"
+                    >
+                        Cerrar Herramientas
+                    </button>
                 </div>
             </Modal>
 
