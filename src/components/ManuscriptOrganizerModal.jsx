@@ -98,7 +98,7 @@ const SortableItem = ({ id, item, type, viewMode, onMoveToEmptyVolume }) => {
 };
 
 const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
-    const { chapters, updateChapter } = useData();
+    const { chapters, updateChapter, batchUpdateChapters } = useData();
     const toast = useToast();
 
     // Local state for reordering (allows undo and preview)
@@ -224,25 +224,17 @@ const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            // 1. Group by parent to use batch logic if possible (simulated here)
             const updates = localChapters.map(c => ({
                 id: c.id,
-                parentId: c.parentId || null,
-                orderIndex: c.orderIndex ?? 0,
-                title: c.title,
-                masterDocId: c.masterDocId || null
+                data: {
+                    parentId: c.parentId || null,
+                    orderIndex: c.orderIndex ?? 0,
+                    title: c.title,
+                    masterDocId: c.masterDocId || null
+                }
             }));
 
-
-            // Persist each change to Firebase
-            for (const update of updates) {
-                await updateChapter(update.id, {
-                    parentId: update.parentId,
-                    orderIndex: update.orderIndex,
-                    title: update.title,
-                    masterDocId: update.masterDocId || null
-                });
-            }
+            await batchUpdateChapters(updates);
 
             toast.success("Estructura guardada con éxito.");
             onClose();

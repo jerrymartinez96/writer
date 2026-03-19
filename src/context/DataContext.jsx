@@ -608,6 +608,26 @@ export const DataProvider = ({ children }) => {
             }
         }
     };
+    const handleBatchUpdateChapters = async (updates) => {
+        if (!activeBook || !updates.length) return;
+
+        // Update local state once
+        setChapters(prev => {
+            const updated = [...prev];
+            updates.forEach(upd => {
+                const itemIdx = updated.findIndex(i => i.id === upd.id);
+                if (itemIdx !== -1) {
+                    updated[itemIdx] = { ...updated[itemIdx], ...upd.data };
+                }
+            });
+            return updated;
+        });
+
+        // Backend updates (can be parallelized)
+        await Promise.all(updates.map(upd => updateChapterApi(activeBook.id, upd.id, upd.data)));
+        setLastSaved(new Date());
+    };
+
 
     const handleBatchUpdateWorldItems = async (updates) => {
         if (!activeBook || !updates.length) return;
@@ -808,6 +828,7 @@ export const DataProvider = ({ children }) => {
         selectChapter: handleSelectChapter,
         createChapter: handleCreateChapter,
         updateChapter: handleUpdateChapter,
+        batchUpdateChapters: handleBatchUpdateChapters,
         deleteChapter: handleDeleteChapter,
         getChapterSnapshots: handleGetChapterSnapshots,
         saveChapterSnapshot: handleSaveChapterSnapshot,
