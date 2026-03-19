@@ -588,6 +588,27 @@ export const DataProvider = ({ children }) => {
         }
     };
 
+    const handleReorderWorldItems = async (orderedIds) => {
+        if (!activeBook) return;
+        // Update local state immediately
+        setWorldItems(prev => {
+            const updated = [...prev];
+            orderedIds.forEach((id, index) => {
+                const item = updated.find(i => i.id === id);
+                if (item) item.orderIndex = index;
+            });
+            return updated;
+        });
+        // Persist to backend
+        for (const [index, id] of orderedIds.entries()) {
+            try {
+                await updateWorldItemApi(activeBook.id, id, { orderIndex: index });
+            } catch (error) {
+                console.error('Failed to reorder world item', id, error);
+            }
+        }
+    };
+
     // Auto-save for chapters
     const saveChapterContent = useCallback(async (content) => {
         if (!activeBook || !activeChapter) return;
@@ -781,6 +802,7 @@ export const DataProvider = ({ children }) => {
         promptStudioPreload,
         setPromptStudioPreload,
         reorderChapters: handleReorderChapters,
+        reorderWorldItems: handleReorderWorldItems,
         finalizeChapterCleanup,
         lastSaved,
         chapterLock,

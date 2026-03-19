@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useData } from '../context/DataContext';
 import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check } from 'lucide-react';
 import Modal from './Modal';
+import MasterDocOrganizerModal from './MasterDocOrganizerModal';
 import { useToast } from './Toast';
 import { uploadImageToCloudinary } from '../services/cloudinary';
 import { useEditor, EditorContent } from '@tiptap/react';
@@ -25,6 +26,7 @@ const WorldView = () => {
     const [localContent, setLocalContent] = useState('');
     const [isUnsaved, setIsUnsaved] = useState(false);
     const [isMaximized, setIsMaximized] = useState(false);
+    const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
 
     const pushPath = (step) => setPath([...path, step]);
     const popPath = (index) => setPath(path.slice(0, index + 1));
@@ -270,9 +272,23 @@ const WorldView = () => {
                         >
                             <div className="flex justify-between items-center mb-2 shrink-0">
                                 <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">{item.isCategory ? 'Carpeta' : 'Tarjeta'}</span>
-                                <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
-                                    <ChevronRight size={12} className="shrink-0" />
+                                <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditTarget({ id: item.id, title: item.title, type: 'worldItem' });
+                                            setEditTitle(item.title);
+                                            setIsEditModalOpen(true);
+                                        }}
+                                        className="p-1 hover:text-[var(--accent-main)] transition-colors"
+                                        title="Renombrar"
+                                    >
+                                        <Pencil size={12} />
+                                    </button>
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
+                                        <ChevronRight size={12} className="shrink-0" />
+                                    </div>
                                 </div>
                             </div>
                             <h3 className="font-bold text-sm leading-snug text-[var(--text-main)] line-clamp-3" title={item.title}>{item.title}</h3>
@@ -394,9 +410,23 @@ const WorldView = () => {
                                         <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
                                             {char.isCategory ? 'Familia' : 'Personaje'}
                                         </span>
-                                        <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
-                                            <ChevronRight size={12} className="shrink-0" />
+                                        <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditTarget({ id: char.id, title: char.name, type: 'character' });
+                                                    setEditTitle(char.name);
+                                                    setIsEditModalOpen(true);
+                                                }}
+                                                className="p-1 hover:text-blue-500 transition-colors"
+                                                title="Renombrar"
+                                            >
+                                                <Pencil size={12} />
+                                            </button>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
+                                                <ChevronRight size={12} className="shrink-0" />
+                                            </div>
                                         </div>
                                     </div>
                                     <h3 className="font-bold text-base leading-tight text-[var(--text-main)] line-clamp-1" title={char.name}>{char.name}</h3>
@@ -503,6 +533,14 @@ const WorldView = () => {
                             }
                             return null;
                         })()}
+                        {isEstructura && (
+                            <button
+                                onClick={() => setIsOrganizerOpen(true)}
+                                className="px-4 py-2 text-sm font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-indigo-500 transition-all flex items-center gap-2 shadow-sm"
+                            >
+                                <Layers size={16} className="text-indigo-500" /> Organizar
+                            </button>
+                        )}
                         <button
                             onClick={() => { setCreateType(createType1); setIsCreateModalOpen(true); }}
                             className="px-4 py-2 text-sm font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-[var(--accent-main)] transition-all flex items-center gap-2"
@@ -533,9 +571,23 @@ const WorldView = () => {
                                     <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">
                                         {item.isCategory ? (isEstructura ? `Volumen ${estLabels[item.id]}` : 'Carpeta') : (parentId === 'system_notas' ? 'Nota' : (isEstructura ? `Capítulo ${estLabels[item.id]}` : 'Tarjeta'))}
                                     </span>
-                                    <div className="text-[var(--text-muted)] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
-                                        <ChevronRight size={12} className="shrink-0" />
+                                    <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setEditTarget({ id: item.id, title: item.title, type: 'worldItem' });
+                                                setEditTitle(item.title);
+                                                setIsEditModalOpen(true);
+                                            }}
+                                            className="p-1 hover:text-[var(--accent-main)] transition-colors"
+                                            title="Renombrar"
+                                        >
+                                            <Pencil size={12} />
+                                        </button>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
+                                            <ChevronRight size={12} className="shrink-0" />
+                                        </div>
                                     </div>
                                 </div>
                                 <h3 className="font-bold text-sm leading-snug text-[var(--text-main)] line-clamp-3" title={item.title}>
@@ -764,6 +816,12 @@ const WorldView = () => {
                     {(currentStep.type === 'character_detail' || currentStep.type === 'world_item_detail') && renderDetail()}
                 </div>
             </div>
+
+            {/* Master Doc Organizer Modal */}
+            <MasterDocOrganizerModal 
+                isOpen={isOrganizerOpen}
+                onClose={() => setIsOrganizerOpen(false)}
+            />
 
             {/* Create Modal */}
             <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Agregar Elemento">

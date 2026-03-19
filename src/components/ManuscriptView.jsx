@@ -5,7 +5,7 @@ import Modal from './Modal';
 import ManuscriptOrganizerModal from './ManuscriptOrganizerModal';
 
 const ManuscriptView = () => {
-    const { chapters, selectChapter, setActiveView, createChapter } = useData();
+    const { chapters, selectChapter, setActiveView, createChapter, updateChapter } = useData();
     const [currentStep, setCurrentStep] = useState({ type: 'root', data: null });
     const [focusMode, setFocusMode] = useState(false);
     const [readingFont, setReadingFont] = useState('font-[Arial,sans-serif]');
