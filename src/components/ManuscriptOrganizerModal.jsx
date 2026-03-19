@@ -27,7 +27,6 @@ import {
     RefreshCw, 
     Check, 
     AlertCircle,
-    Hash,
     Layers,
     FileText,
     ArrowRight
@@ -99,14 +98,13 @@ const SortableItem = ({ id, item, type, viewMode, onMoveToEmptyVolume }) => {
 };
 
 const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
-    const { chapters, reorderChapters, updateChapter, worldItems, updateWorldItem, activeBook } = useData();
+    const { chapters, updateChapter } = useData();
     const toast = useToast();
 
     // Local state for reordering (allows undo and preview)
     const [localChapters, setLocalChapters] = useState([]);
     const [history, setHistory] = useState([]);
     const [viewMode, setViewMode] = useState('list'); // 'list' or 'cards'
-    const [syncWithMaster, setSyncWithMaster] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [activeId, setActiveId] = useState(null);
 
@@ -222,34 +220,6 @@ const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
         }
     };
 
-    const handleAutoRenumber = () => {
-        let newItems = [...localChapters];
-        let chapterTotal = 1;
-        
-        // Strategy: Standalone chapters first, then volumes
-        // (Or volumes first, depends on project style. Let's do logical sequence)
-        
-        const sortedVols = newItems.filter(c => c.isVolume).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-        
-        sortedVols.forEach((vol, vIdx) => {
-            const volChapters = newItems.filter(c => c.parentId === vol.id).sort((a,b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-            volChapters.forEach((chap, cIdx) => {
-                const item = newItems.find(it => it.id === chap.id);
-                item.title = `Capítulo ${chapterTotal}: ${item.title.split(': ').slice(1).join(': ') || item.title}`;
-                chapterTotal++;
-            });
-        });
-
-        const standalone = newItems.filter(c => !c.isVolume && !c.parentId).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-        standalone.forEach((chap) => {
-             const item = newItems.find(it => it.id === chap.id);
-             item.title = `Capítulo ${chapterTotal}: ${item.title.split(': ').slice(1).join(': ') || item.title}`;
-             chapterTotal++;
-        });
-
-        addToHistory(newItems);
-        toast.success("Capítulos renumerados visualmente. No olvides guardar.");
-    };
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -259,56 +229,10 @@ const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
                 id: c.id,
                 parentId: c.parentId || null,
                 orderIndex: c.orderIndex ?? 0,
-                title: c.title
+                title: c.title,
+                masterDocId: c.masterDocId || null
             }));
 
-            // Match and Sync with Master Doc (if enabled)
-            if (syncWithMaster) {
-                for (const update of updates) {
-                    // Try to finding matching item in Master Doc (worldItems)
-                    // Match by masterDocId (UUID idea) or Title (fallback)
-                    const manuscriptItem = chapters.find(c => c.id === update.id);
-                    const masterId = manuscriptItem?.masterDocId;
-                    
-                    let masterItem = null;
-                    if (masterId) {
-                        masterItem = worldItems.find(i => i.id === masterId);
-                    } else {
-                        // Fallback match by Title (clean of "Capítulo X: ")
-                        const cleanTitle = update.title.split(': ').slice(1).join(': ') || update.title;
-                        masterItem = worldItems.find(i => 
-                            i.title.toLowerCase().includes(cleanTitle.toLowerCase()) || 
-                            update.title.toLowerCase() === i.title.toLowerCase()
-                        );
-                    }
-
-                    if (masterItem) {
-                        // Sync parent if possible
-                        let newMasterParent = masterItem.parentId;
-                        if (update.parentId) {
-                            const manuscriptParent = localChapters.find(c => c.id === update.parentId);
-                            if (manuscriptParent) {
-                                // Find matching volume in Master Doc
-                                const masterVolume = worldItems.find(i => i.isCategory && i.title.toLowerCase().includes(manuscriptParent.title.toLowerCase()));
-                                if (masterVolume) newMasterParent = masterVolume.id;
-                            }
-                        } else {
-                            newMasterParent = 'system_estructura'; // Main structure category
-                        }
-
-                        // Update Master Doc
-                        await updateWorldItem(masterItem.id, { 
-                            parentId: newMasterParent,
-                            orderIndex: update.orderIndex
-                        });
-                        
-                        // Link manuscript item with masterDocId for future moves
-                        if (!masterId) {
-                            update.masterDocId = masterItem.id;
-                        }
-                    }
-                }
-            }
 
             // Persist each change to Firebase
             for (const update of updates) {
@@ -384,29 +308,9 @@ const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
                         >
                             <RotateCcw size={14} /> Deshacer ({history.length})
                         </button>
-
-                        <button 
-                            onClick={handleAutoRenumber}
-                            className="flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-emerald-500 transition-all hover:bg-emerald-500/5 rounded-xl"
-                        >
-                            <Hash size={14} /> Renumerar
-                        </button>
                     </div>
 
                     <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-3 px-4 py-2 bg-[var(--bg-app)] rounded-2xl border border-[var(--border-main)] shadow-sm">
-                            <div className="flex items-center gap-2">
-                                <RefreshCw size={14} className={syncWithMaster ? 'text-indigo-500' : 'text-[var(--text-muted)]'} />
-                                <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-main)]">Sincronizar Biblia</span>
-                            </div>
-                            <button 
-                                onClick={() => setSyncWithMaster(!syncWithMaster)}
-                                className={`w-10 h-5 rounded-full transition-all relative ${syncWithMaster ? 'bg-indigo-600' : 'bg-[var(--text-muted)]/20'}`}
-                            >
-                                <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${syncWithMaster ? 'left-6' : 'left-1'}`}></div>
-                            </button>
-                        </div>
-
                         <button 
                             onClick={handleSave}
                             disabled={isSaving}
