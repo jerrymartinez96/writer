@@ -46,3 +46,8 @@ Una plataforma minimalista y potente diseñada para escritores que buscan un ent
    ```bash
    npm run dev
    ```
+
+5. **Desplegar en Firebase:**
+   ```bash
+   npm run build && npx firebase-tools deploy --only hosting
+   ```

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2, Pencil, ChevronDown, Check, Type, Maximize2, MoveHorizontal } from 'lucide-react';
+import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2, Pencil, ChevronDown, Check, Type, Maximize2, MoveHorizontal, ListFilter } from 'lucide-react';
 import Modal from './Modal';
+import ManuscriptOrganizerModal from './ManuscriptOrganizerModal';
 
 const ManuscriptView = () => {
     const { chapters, selectChapter, setActiveView, createChapter } = useData();
@@ -23,6 +24,7 @@ const ManuscriptView = () => {
     const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
     const [isSizeDropdownOpen, setIsSizeDropdownOpen] = useState(false);
     const [isWidthDropdownOpen, setIsWidthDropdownOpen] = useState(false);
+    const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
 
     // Filter data
     const volumes = chapters.filter(c => c.isVolume);
@@ -328,12 +330,20 @@ const ManuscriptView = () => {
                             <h1 className="text-3xl md:text-5xl font-black font-serif text-[var(--accent-main)] tracking-tight mb-2">Vista General</h1>
                             <p className="text-sm md:text-base text-[var(--text-muted)] mt-2 font-medium">Visualiza tu obra en forma de tarjetas y accede al modo de lectura inmersivo.</p>
                         </div>
-                        <button
-                            onClick={() => { setCreateMode('chapter'); setIsCreateModalOpen(true); }}
-                            className="bg-[var(--accent-main)] text-white hover:bg-indigo-600 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md w-full sm:w-auto shrink-0"
-                        >
-                            <Plus size={18} /> Nuevo Documento
-                        </button>
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                            <button
+                                onClick={() => setIsOrganizerOpen(true)}
+                                className="bg-[var(--bg-app)] text-[var(--text-main)] border border-[var(--border-main)] hover:border-[var(--accent-main)] px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm w-full sm:w-auto shrink-0"
+                            >
+                                <ListFilter size={18} className="text-[var(--accent-main)]" /> Organizar
+                            </button>
+                            <button
+                                onClick={() => { setCreateMode('chapter'); setIsCreateModalOpen(true); }}
+                                className="bg-[var(--accent-main)] text-white hover:bg-indigo-600 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md w-full sm:w-auto shrink-0"
+                            >
+                                <Plus size={18} /> Nuevo Documento
+                            </button>
+                        </div>
                     </div>
 
                     {volumes.length > 0 && (
@@ -446,6 +456,11 @@ const ManuscriptView = () => {
     return (
         <div className="w-full h-full relative">
             {content}
+
+            <ManuscriptOrganizerModal 
+                isOpen={isOrganizerOpen}
+                onClose={() => setIsOrganizerOpen(false)}
+            />
 
             <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Renombrar ${editingItem?.isVolume ? 'Volumen' : 'Capítulo'}`}>
                 <div className="p-8 space-y-8 text-left font-sans">
