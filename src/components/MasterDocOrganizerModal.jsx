@@ -99,7 +99,7 @@ const SortableItem = ({ id, item, type, viewMode }) => {
 };
 
 const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
-    const { worldItems, updateWorldItem, reorderWorldItems } = useData();
+    const { worldItems, updateWorldItem, batchUpdateWorldItems, reorderWorldItems } = useData();
     const toast = useToast();
 
     // Local state for reordering
@@ -120,7 +120,7 @@ const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
             setLocalItems(JSON.parse(JSON.stringify(structureItems)));
             setHistory([]);
         }
-    }, [isOpen, worldItems]);
+    }, [isOpen]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -220,42 +220,20 @@ const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
         }
     };
 
-    const handleAutoRenumber = () => {
-        let newItems = [...localItems];
-        let chapterTotal = 1;
-        
-        const sortedVols = newItems.filter(i => i.isCategory && i.parentId === 'system_estructura').sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-        
-        sortedVols.forEach((vol) => {
-            const volChapters = newItems.filter(i => i.parentId === vol.id && !i.isCategory).sort((a,b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-            volChapters.forEach((chap) => {
-                const item = newItems.find(it => it.id === chap.id);
-                item.title = `Capítulo ${chapterTotal}: ${item.title.split(': ').slice(1).join(': ') || item.title}`;
-                chapterTotal++;
-            });
-        });
-
-        const standalone = newItems.filter(i => !i.isCategory && i.parentId === 'system_estructura').sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-        standalone.forEach((chap) => {
-             const item = newItems.find(it => it.id === chap.id);
-             item.title = `Capítulo ${chapterTotal}: ${item.title.split(': ').slice(1).join(': ') || item.title}`;
-             chapterTotal++;
-        });
-
-        addToHistory(newItems);
-        toast.success("Capítulos renumerados visualmente. No olvides guardar.");
-    };
-
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            for (const item of localItems) {
-                await updateWorldItem(item.id, {
+            const updates = localItems.map(item => ({
+                id: item.id,
+                data: {
                     parentId: item.parentId,
                     orderIndex: item.orderIndex ?? 0,
                     title: item.title
-                });
-            }
+                }
+            }));
+            
+            await batchUpdateWorldItems(updates);
+            
             toast.success("Estructura del Master Doc guardada.");
             onClose();
         } catch (error) {
@@ -319,13 +297,6 @@ const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
                             className="flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-indigo-500 disabled:opacity-30 transition-all hover:bg-indigo-500/5 rounded-xl"
                         >
                             <RotateCcw size={14} /> Deshacer ({history.length})
-                        </button>
-
-                        <button 
-                            onClick={handleAutoRenumber}
-                            className="flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-emerald-500 transition-all hover:bg-emerald-500/5 rounded-xl"
-                        >
-                            <Hash size={14} /> Renumerar
                         </button>
                     </div>
 

@@ -609,6 +609,26 @@ export const DataProvider = ({ children }) => {
         }
     };
 
+    const handleBatchUpdateWorldItems = async (updates) => {
+        if (!activeBook || !updates.length) return;
+        
+        // Update local state once
+        setWorldItems(prev => {
+            const updated = [...prev];
+            updates.forEach(upd => {
+                const itemIdx = updated.findIndex(i => i.id === upd.id);
+                if (itemIdx !== -1) {
+                    updated[itemIdx] = { ...updated[itemIdx], ...upd.data };
+                }
+            });
+            return updated;
+        });
+
+        // Backend updates (can be parallelized)
+        await Promise.all(updates.map(upd => updateWorldItemApi(activeBook.id, upd.id, upd.data)));
+        setLastSaved(new Date());
+    };
+
     // Auto-save for chapters
     const saveChapterContent = useCallback(async (content) => {
         if (!activeBook || !activeChapter) return;
@@ -796,6 +816,7 @@ export const DataProvider = ({ children }) => {
         deleteCharacter: handleDeleteCharacter,
         createWorldItem: handleCreateWorldItem,
         updateWorldItem: handleUpdateWorldItem,
+        batchUpdateWorldItems: handleBatchUpdateWorldItems,
         deleteWorldItem: handleDeleteWorldItem,
         restoreTrashItem: handleRestoreTrashItem,
         permanentlyDeleteTrashItem: handlePermanentlyDeleteTrashItem,
