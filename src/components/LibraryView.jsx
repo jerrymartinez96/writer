@@ -44,35 +44,42 @@ const LibraryView = () => {
     return (
         <div className="min-h-screen bg-[var(--bg-app)] p-4 sm:p-6 lg:p-12 animate-in fade-in duration-700">
             <div className="max-w-7xl mx-auto">
-                {/* Header Section */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-10 md:mb-16">
-                    <div>
-                        <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-black text-[var(--text-main)] mb-2 md:mb-3 tracking-tight">
+                {/* New Header Section */}
+                <header className="mb-12 space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 border-b border-[var(--border-main)]">
+                        <div className="flex items-center gap-2 text-indigo-500 opacity-80">
+                            <Book size={14} />
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em]">{user?.displayName?.split(' ')[0]}'s Collections</span>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-center gap-3 shrink-0">
+                            <div className="relative group w-full sm:w-auto">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-indigo-500 transition-colors" size={14} />
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar obra..." 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full sm:w-48 pl-9 pr-4 py-2 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-xs transition-all shadow-sm"
+                                />
+                            </div>
+                            <button 
+                                onClick={() => setIsModalOpen(true)}
+                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-md transition-all active:scale-95"
+                            >
+                                <Plus size={16} />
+                                <span>Nueva Obra</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="pt-2">
+                        <h1 className="text-3xl md:text-5xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight">
                             El Librero de <span className="text-indigo-600 italic select-none">{user?.displayName?.split(' ')[0]}</span>
                         </h1>
-                        <p className="text-[var(--text-muted)] font-medium text-base md:text-lg">Tu colección privada de mundos y relatos.</p>
+                        <p className="text-[var(--text-muted)] font-medium text-sm md:text-base mt-2">Tu colección privada de mundos y relatos.</p>
                     </div>
-                    
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 md:gap-4">
-                        <div className="relative group flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-indigo-500 transition-colors" size={18} />
-                            <input 
-                                type="text" 
-                                placeholder="Buscar en mi estantería..." 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-11 pr-6 py-3.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm transition-all sm:w-64 md:w-72 shadow-inner"
-                            />
-                        </div>
-                        <button 
-                            onClick={() => setIsModalOpen(true)}
-                            className="flex items-center justify-center gap-2 px-6 md:px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black shadow-xl shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                        >
-                            <Plus size={20} />
-                            <span>Nueva Obra</span>
-                        </button>
-                    </div>
-                </div>
+                </header>
 
                 {filteredBooks.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-y-12 sm:gap-y-16 gap-x-8 md:gap-x-12 px-4 sm:px-0">

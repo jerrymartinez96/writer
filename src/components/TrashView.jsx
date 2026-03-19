@@ -66,26 +66,35 @@ const TrashView = () => {
 
     return (
         <div className="max-w-5xl mx-auto p-6 md:p-10 animate-in fade-in duration-500 h-full flex flex-col">
-            <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6 shrink-0">
-                <div className="flex items-center gap-5">
-                    <div className="w-16 h-16 bg-red-500/10 rounded-[28px] flex items-center justify-center text-red-500 shadow-xl border border-red-500/10 ring-4 ring-red-500/5 transition-transform hover:rotate-3">
-                        <Trash2 size={32} />
+            <header className="mb-10 space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 border-b border-[var(--border-main)]">
+                    <div className="flex items-center gap-2 text-red-500 opacity-80">
+                        <AlertTriangle size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Zona de Recuperación</span>
                     </div>
-                    <div>
-                        <h1 className="text-3xl md:text-5xl font-serif font-black text-[var(--text-main)] italic tracking-tight">Papelera</h1>
-                        <p className="text-[var(--text-muted)] text-sm md:text-base mt-2 font-medium opacity-80 uppercase tracking-widest text-[10px]">Los elementos eliminados se guardan aquí para seguridad.</p>
+
+                    <div className="flex items-center gap-3">
+                        {trashItems.length > 0 && (
+                            <button 
+                                onClick={() => setIsEmptyTrashConfirmOpen(true)}
+                                className="group flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all duration-300 shadow-sm border border-red-500/20"
+                            >
+                                <XCircle size={14} className="group-hover:rotate-90 transition-transform duration-500" />
+                                <span className="font-bold text-xs">Vaciar Papelera</span>
+                            </button>
+                        )}
                     </div>
                 </div>
 
-                {trashItems.length > 0 && (
-                    <button 
-                        onClick={() => setIsEmptyTrashConfirmOpen(true)}
-                        className="group flex items-center gap-3 px-6 py-3.5 bg-red-50 text-red-600 rounded-2xl hover:bg-red-600 hover:text-white transition-all duration-300 shadow-sm hover:shadow-xl hover:shadow-red-600/20 border border-red-100"
-                    >
-                        <XCircle size={18} className="group-hover:rotate-90 transition-transform duration-500" />
-                        <span className="font-black text-[10px] uppercase tracking-[0.2em]">Vaciar Papelera</span>
-                    </button>
-                )}
+                <div className="flex items-center gap-6 pt-2">
+                    <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 border border-red-500/10 hidden sm:flex">
+                        <Trash2 size={32} />
+                    </div>
+                    <div>
+                        <h1 className="text-3xl md:text-5xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight">Papelera</h1>
+                        <p className="text-[var(--text-muted)] text-sm font-medium mt-1">Los elementos eliminados se guardan aquí para seguridad.</p>
+                    </div>
+                </div>
             </header>
 
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-20">

@@ -484,79 +484,94 @@ const WorldView = () => {
         const estLabels = isEstructura ? computeEstructuraLabels() : {};
 
         return (
-            <div className="animate-in fade-in duration-300 pb-10">
-                <div className="flex flex-col md:flex-row md:items-start justify-between mb-8 gap-4">
-                    <div className="flex-1">
+            <div className="animate-in fade-in duration-500 pb-10">
+                <header className="mb-10 space-y-6">
+                    {/* Top Row: Info & Actions */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 border-b border-[var(--border-main)]">
+                        <div className="flex-1 min-w-0">
+                            {/* Metadata label if any */}
+                            {(() => {
+                                const realItem = worldItems.find(w => w.id === parentId);
+                                if (realItem && isEstructura && estLabels[realItem.id]) {
+                                    return (
+                                        <div className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">
+                                            {realItem.isCategory ? `Volumen ${estLabels[realItem.id]}` : `Capítulo ${estLabels[realItem.id]}`}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 justify-start md:justify-end shrink-0">
+                            {!parentId.startsWith('system_') && (() => {
+                                const realItem = worldItems.find(w => w.id === parentId);
+                                if (realItem) {
+                                    return (
+                                        <>
+                                            <button
+                                                onClick={() => {
+                                                    setEditTarget({ id: realItem.id, title: realItem.title, type: 'worldItem' });
+                                                    setEditTitle(realItem.title);
+                                                    setIsEditModalOpen(true);
+                                                }}
+                                                className="px-3 py-1.5 border border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--bg-editor)] hover:text-blue-500 rounded-lg transition-all text-xs font-bold flex items-center gap-2 bg-[var(--bg-app)]"
+                                            >
+                                                <Pencil size={14} /> <span className="hidden sm:inline">Renombrar</span>
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setItemToDelete({ id: realItem.id, title: realItem.title, type: 'worldItem', pop: true });
+                                                }}
+                                                className="px-3 py-1.5 border border-red-500/10 text-red-500/80 hover:bg-red-500 hover:text-white rounded-lg transition-all text-xs font-bold flex items-center gap-2 bg-[var(--bg-app)]"
+                                            >
+                                                <Trash2 size={14} /> <span className="hidden sm:inline">Eliminar</span>
+                                            </button>
+                                        </>
+                                    );
+                                }
+                                return null;
+                            })()}
+                            {isEstructura && (
+                                <button
+                                    onClick={() => setIsOrganizerOpen(true)}
+                                    className="px-3 py-1.5 text-xs font-bold bg-[var(--bg-app)] border border-indigo-500/30 text-indigo-500 rounded-lg hover:bg-indigo-500 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                                >
+                                    <Layers size={14} /> Organizar
+                                </button>
+                            )}
+                            <button
+                                onClick={() => { setCreateType(createType1); setIsCreateModalOpen(true); }}
+                                className="px-3 py-1.5 text-xs font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-[var(--accent-main)] transition-all flex items-center gap-2 shadow-sm font-sans"
+                            >
+                                <Plus size={14} /> {btn1Label}
+                            </button>
+                            {parentId !== 'system_notas' && (
+                                <button
+                                    onClick={() => { setCreateType(createType2); setIsCreateModalOpen(true); }}
+                                    className="px-3 py-1.5 text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent-main)] rounded-lg border border-[var(--accent-main)]/20 hover:bg-[var(--accent-main)] hover:text-white transition-all flex items-center gap-2 shadow-sm font-sans"
+                                >
+                                    <Folder size={14} /> {btn2Label}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Large Title */}
+                    <div className="pt-2">
                         {parentId.startsWith('system_') ? (
-                            <h1 className="text-3xl font-serif font-black text-[var(--text-main)]">{currentStep.title}</h1>
+                            <h1 className="text-2xl font-serif font-black text-indigo-500 uppercase tracking-widest">{currentStep.title}</h1>
                         ) : (() => {
                             const realItem = worldItems.find(w => w.id === parentId);
                             if (!realItem) return <h1 className="text-3xl font-serif font-black text-[var(--text-main)]">{currentStep.title}</h1>;
                             return (
-                                <div>
-                                    {isEstructura && estLabels[realItem.id] && (
-                                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-1">
-                                            {realItem.isCategory ? `Volumen ${estLabels[realItem.id]}` : `Capítulo ${estLabels[realItem.id]}`}
-                                        </div>
-                                    )}
-                                    <h1 className="text-2xl md:text-3xl font-serif font-black text-[var(--text-main)] leading-tight">{realItem.title}</h1>
-                                </div>
+                                <h1 className="text-2xl md:text-3xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight break-words" style={{ textWrap: 'balance' }}>
+                                    {realItem.title}
+                                </h1>
                             );
                         })()}
                     </div>
-                    <div className="flex flex-wrap gap-2 shrink-0 md:pt-1 md:justify-end">
-                        {!parentId.startsWith('system_') && (() => {
-                            const realItem = worldItems.find(w => w.id === parentId);
-                            if (realItem) {
-                                return (
-                                    <>
-                                        <button
-                                            onClick={() => {
-                                                setEditTarget({ id: realItem.id, title: realItem.title, type: 'worldItem' });
-                                                setEditTitle(realItem.title);
-                                                setIsEditModalOpen(true);
-                                            }}
-                                            className="px-4 py-2 border border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--bg-editor)] hover:text-blue-500 rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
-                                        >
-                                            <Pencil size={16} /> <span className="hidden sm:inline">Editar Título</span>
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setItemToDelete({ id: realItem.id, title: realItem.title, type: 'worldItem', pop: true });
-                                            }}
-                                            className="px-4 py-2 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
-                                        >
-                                            <Trash2 size={16} /> <span className="hidden sm:inline">Eliminar</span>
-                                        </button>
-                                    </>
-                                );
-                            }
-                            return null;
-                        })()}
-                        {isEstructura && (
-                            <button
-                                onClick={() => setIsOrganizerOpen(true)}
-                                className="px-4 py-2 text-sm font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-indigo-500 transition-all flex items-center gap-2 shadow-sm"
-                            >
-                                <Layers size={16} className="text-indigo-500" /> Organizar
-                            </button>
-                        )}
-                        <button
-                            onClick={() => { setCreateType(createType1); setIsCreateModalOpen(true); }}
-                            className="px-4 py-2 text-sm font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-[var(--accent-main)] transition-all flex items-center gap-2"
-                        >
-                            <Plus size={16} /> {btn1Label}
-                        </button>
-                        {parentId !== 'system_notas' && (
-                            <button
-                                onClick={() => { setCreateType(createType2); setIsCreateModalOpen(true); }}
-                                className="px-4 py-2 text-sm font-bold bg-[var(--accent-soft)] text-[var(--accent-main)] rounded-lg hover:bg-[var(--accent-main)] hover:text-white transition-all flex items-center gap-2 shadow-sm"
-                            >
-                                <Folder size={16} /> {btn2Label}
-                            </button>
-                        )}
-                    </div>
-                </div>
+                </header>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {items.map(item => {

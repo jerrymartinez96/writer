@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2, Pencil, ChevronDown, Check, Type, Maximize2, MoveHorizontal, ListFilter } from 'lucide-react';
+import { Book, BookOpen, ChevronRight, Layers, FileText, ArrowLeft, Plus, Edit2, Pencil, ChevronDown, Check, Type, Maximize2, MoveHorizontal, ListFilter } from 'lucide-react';
 import Modal from './Modal';
 import ManuscriptOrganizerModal from './ManuscriptOrganizerModal';
 
@@ -240,37 +240,42 @@ const ManuscriptView = () => {
         content = (
             <div className="w-full h-full flex flex-col p-6 md:p-10 scrollbar-hide">
                 <div className="max-w-6xl mx-auto w-full animate-in fade-in duration-300">
-                    <button onClick={handleBack} className="flex items-center gap-2 text-sm font-bold text-[var(--text-muted)] hover:text-[var(--accent-main)] hover:bg-[var(--accent-soft)] px-3 py-1.5 rounded-lg transition-all mb-8 w-fit">
-                        <ArrowLeft size={16} /> Volver a Vista General
-                    </button>
-
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-8 md:mb-12 gap-4">
-                        <div className="flex-1">
-                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-main)] mb-2">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 py-4 border-b border-[var(--border-main)] mb-10">
+                        <div className="flex items-center gap-3">
+                            <button onClick={handleBack} className="flex items-center gap-2 text-xs font-bold text-[var(--text-muted)] hover:text-indigo-500 hover:bg-indigo-500/5 px-3 py-1.5 rounded-lg transition-all">
+                                <ArrowLeft size={14} /> Volver
+                            </button>
+                            <div className="h-4 w-px bg-[var(--border-main)] mx-1"></div>
+                            <div className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">
                                 Volumen {volLabels[vol.id]}
                             </div>
-                            <h1 className="text-3xl md:text-4xl lg:text-5xl font-serif font-black text-[var(--text-main)] leading-tight">{vol.title}</h1>
                         </div>
-                        <button
-                            onClick={handleReadFocus}
-                            className="bg-[var(--accent-main)] text-white hover:bg-indigo-600 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md mt-2 w-full sm:w-auto shrink-0"
-                        >
-                            <BookOpen size={18} /> <span className="sm:hidden md:inline">Leer en Modo Enfoque</span><span className="hidden sm:inline md:hidden">Leer</span>
-                        </button>
+                        
+                        <div className="flex flex-wrap items-center gap-3">
+                            <button
+                                onClick={handleReadFocus}
+                                className="px-4 py-2 text-xs font-bold bg-[var(--bg-app)] border border-indigo-500/30 text-indigo-500 rounded-lg hover:bg-indigo-500 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                            >
+                                <BookOpen size={14} /> Leer Volumen
+                            </button>
+                            <button
+                                onClick={() => setIsCreateModalOpen(true)}
+                                className="px-4 py-2 text-xs font-bold bg-[var(--accent-main)] text-white rounded-lg hover:bg-indigo-600 transition-all flex items-center gap-2 shadow-sm"
+                            >
+                                <Plus size={14} /> Añadir Capítulo
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex items-center gap-4">
-                            <h3 className="text-base md:text-lg font-bold text-[var(--text-main)] uppercase tracking-wider">Capítulos del Volumen</h3>
-                            <span className="text-xs md:text-sm text-[var(--text-muted)] font-bold">{volChapters.length} {volChapters.length === 1 ? 'capítulo' : 'capítulos'}</span>
-                        </div>
-                        <button
-                            onClick={() => setIsCreateModalOpen(true)}
-                            className="bg-[var(--accent-soft)] text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm w-full sm:w-auto"
-                        >
-                            <Plus size={16} /> Añadir Capítulo
-                        </button>
+                    <div className="mb-12">
+                        <h1 className="text-3xl md:text-5xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight break-words" style={{ textWrap: 'balance' }}>
+                            {vol.title}
+                        </h1>
+                        <p className="text-sm text-[var(--text-muted)] mt-4 font-medium flex items-center gap-2 uppercase tracking-widest">
+                            <Layers size={14} className="opacity-50" /> {volChapters.length} {volChapters.length === 1 ? 'Capítulo' : 'Capítulos'} en total
+                        </p>
                     </div>
+
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {volChapters.map(chap => {
@@ -325,25 +330,35 @@ const ManuscriptView = () => {
         content = (
             <div className="w-full h-full flex flex-col p-6 md:p-10 scrollbar-hide">
                 <div className="max-w-6xl mx-auto w-full animate-in fade-in duration-300">
-                    <div className="mb-8 md:mb-12 flex flex-col sm:flex-row sm:items-start justify-between gap-6">
-                        <div className="flex-1">
-                            <h1 className="text-3xl md:text-5xl font-black font-serif text-[var(--accent-main)] tracking-tight mb-2">Vista General</h1>
-                            <p className="text-sm md:text-base text-[var(--text-muted)] mt-2 font-medium">Visualiza tu obra en forma de tarjetas y accede al modo de lectura inmersivo.</p>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 py-4 border-b border-[var(--border-main)] mb-10">
+                        <div className="flex items-center gap-2 text-[var(--text-muted)]">
+                            <Book size={14} className="text-indigo-500" />
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Biblioteca del Autor</span>
                         </div>
-                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                        
+                        <div className="flex items-center gap-3">
                             <button
                                 onClick={() => setIsOrganizerOpen(true)}
-                                className="bg-[var(--bg-app)] text-[var(--text-main)] border border-[var(--border-main)] hover:border-[var(--accent-main)] px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm w-full sm:w-auto shrink-0"
+                                className="px-4 py-2 text-xs font-bold bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-indigo-500 transition-all flex items-center gap-2 shadow-sm"
                             >
-                                <ListFilter size={18} className="text-[var(--accent-main)]" /> Organizar
+                                <ListFilter size={14} className="text-indigo-500" /> Organizar
                             </button>
                             <button
                                 onClick={() => { setCreateMode('chapter'); setIsCreateModalOpen(true); }}
-                                className="bg-[var(--accent-main)] text-white hover:bg-indigo-600 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md w-full sm:w-auto shrink-0"
+                                className="px-4 py-2 text-xs font-bold bg-[var(--accent-main)] text-white rounded-lg hover:bg-indigo-600 transition-all flex items-center gap-2 shadow-sm"
                             >
-                                <Plus size={18} /> Nuevo Documento
+                                <Plus size={14} /> Nuevo Documento
                             </button>
                         </div>
+                    </div>
+
+                    <div className="mb-12">
+                        <h1 className="text-3xl md:text-5xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight">
+                            Vista General
+                        </h1>
+                        <p className="text-sm text-[var(--text-muted)] mt-3 font-medium max-w-2xl">
+                            Visualiza tu obra en forma de tarjetas y accede al modo de lectura inmersivo.
+                        </p>
                     </div>
 
                     {volumes.length > 0 && (
