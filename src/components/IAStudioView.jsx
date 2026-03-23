@@ -233,9 +233,6 @@ Responde únicamente con el bloque JSON, sin texto adicional.`;
         const lengthTxt = generationLength === 'short' ? '800 a 1000 palabras (Relato ágil)' : generationLength === 'medium' ? '1000 a 1500 palabras (Narrativa estándar)' : '1500 a 2000 palabras (Capítulo denso/épico)';
         const lengthPrompt = `LONGITUD OBJETIVO: ${lengthTxt}.`;
 
-        const filteredChars = selectedCharacters.length > 0 ? characters.filter(c => selectedCharacters.includes(c.id)) : characters;
-        const charactersXml = (includeCharacters && filteredChars.length > 0) ? filteredChars.map(c => `**${c.name}**\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') : "Sin personajes específicos pre-seleccionados.";
-
         const masterDocText = generateFullMasterDocContext();
         const systemPersona = "Actúa como un escritor y editor literario profesional de bestsellers. Tu objetivo es ayudar al autor a elevar la calidad de su obra, manteniendo la coherencia perfecta con el mundo, la trama y los personajes establecidos. Escribe con un estilo fluido, evocador y profesional.";
 
@@ -249,13 +246,9 @@ ${primaryObjective}
 ${chapterInstruction}
 
 <master_document>
-==== CONTEXTO INTEGRAL DEL PROYECTO (BIBLIA Y ESTRUCTURA) ====
+==== CONTEXTO INTEGRAL DEL PROYECTO (BIBLIA, PERSONAJES Y ESTRUCTURA) ====
 ${masterDocText}
 </master_document>
-
-<personajes_relevantes>
-${charactersXml}
-</personajes_relevantes>
 
 <directrices_especificas_del_autor>
 OBJETIVOS DE LA ESCENA: ${sceneGoals || 'Desarrollar la trama según la lógica del Master Doc.'}
@@ -267,7 +260,6 @@ Escribe la narración literaria completa a continuación de forma ininterrumpida
 
     const generateReviewPrompt = () => {
         const targetChapter = chapters?.find(c => String(c.id) === String(selectedReviewChapterId));
-        const charactersXml = (includeCharacters && characters.length > 0) ? characters.map(c => `**${c.name}**\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') : "Sin personajes específicos.";
         const masterDocText = generateFullMasterDocContext();
         
         let chaptersText = "";
@@ -299,13 +291,9 @@ Tu misión es realizar una autopsia literaria del texto buscando:
 4. **Potencial de Prosa:** Ritmo, redundancias y fuerza dramática.
 
 <master_document>
-==== BIBLIA Y ESTRUCTURA DEL MUNDO ====
+==== BIBLIA, PERSONAJES Y ESTRUCTURA DEL MUNDO ====
 ${masterDocText}
 </master_document>
-
-<personajes_relevantes>
-${charactersXml}
-</personajes_relevantes>
 
 <texto_del_manuscrito_para_analizar>
 ${chaptersText || 'No hay texto seleccionado para revisar. Proporciona un análisis general basado en el Master Doc si es posible.'}
@@ -369,8 +357,9 @@ Proporciona tus propuestas estratégicas para robustecer la Biblia del proyecto:
     const generateFullMasterDocContext = () => {
         return generateComprehensiveWorldContext(worldItems, includedSections, { 
             includeEstructura, 
-            includeNotasGenerales 
-        });
+            includeNotasGenerales,
+            includeCharacters
+        }, characters, selectedCharacters);
     };
 
     const weightStatus = useMemo(() => {

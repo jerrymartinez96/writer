@@ -123,7 +123,7 @@ const IALiveMode = ({
             total += generateBibliaContextForLive().length;
         }
         setPromptWeight(total);
-    }, [importText, liveInstructions, liveSelectedChapterId, worldItems, characters, liveTab]);
+    }, [importText, liveInstructions, liveSelectedChapterId, worldItems, characters, liveTab, includeCharacters, selectedCharacters, promptNotes, sceneGoals]);
 
     const weightStatus = useMemo(() => {
         const currentModel = availableModels.find(m => m.id === effectiveAISettings.selectedAiModel) || availableModels[0];
@@ -136,24 +136,11 @@ const IALiveMode = ({
     }, [promptWeight, effectiveAISettings.selectedAiModel, availableModels]);
 
     const generateBibliaContextForLive = () => {
-        const charactersXml = (includeCharacters && characters.length > 0) 
-            ? characters.map(c => `Nombre: ${c.name}\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') 
-            : "No se han proporcionado fichas de personajes.";
-        
-        const worldXml = generateComprehensiveWorldContext(worldItems, {}, { 
+        return generateComprehensiveWorldContext(worldItems, {}, { 
             includeEstructura: true, 
-            includeNotasGenerales: true 
-        });
-
-        return `
-<master_document>
-${worldXml}
-</master_document>
-
-<personajes_relevantes>
-${charactersXml}
-</personajes_relevantes>
-        `.trim();
+            includeNotasGenerales: true,
+            includeCharacters
+        }, characters, selectedCharacters);
     };
 
     const handleLiveRefine = async () => {
@@ -190,7 +177,9 @@ TARGET: ${targetChapter.title}
 
 Tu misión es transformar el texto original en una pieza de alta calidad literaria, optimizando la fluidez, el impacto emocional y la precisión del lenguaje, sin comprometer la voz del autor. Asegura la coherencia con el lore proporcionado.
 
+<master_document>
 ${bibliaContext}
+</master_document>
 
 <texto_original_a_perfeccionar>
 ${cleanText(targetChapter.content)}
@@ -248,7 +237,9 @@ OBJETIVO: ${targetChapter.title}
 
 Tu misión es analizar el texto del capítulo en busca de contradicciones, huecos de trama o inconsistencias de personajes, basándote estrictamente en el Master Doc.
 
+<master_document>
 ${bibliaContext}
+</master_document>
 
 <texto_del_capitulo_para_analizar>
 ${cleanText(targetChapter.content)}
@@ -585,7 +576,6 @@ No incluyas texto explicativo antes ni después del JSON.`;
             }
 
             const lengthTxt = generationLength === 'short' ? '800-1000 palabras' : generationLength === 'medium' ? '1000-1500 palabras' : '1500-2000 palabras';
-            const charactersXml = (includeCharacters && characters.length > 0) ? characters.map(c => `**${c.name}**\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`).join('\n---\n') : "Sin personajes específicos.";
             const bibliaContext = generateBibliaContextForLive();
 
             const prompt = `${systemPersona}
@@ -597,11 +587,9 @@ ${primaryObjective}
 
 ${chapterInstruction}
 
+<master_document>
 ${bibliaContext}
-
-<personajes_relevantes>
-${charactersXml}
-</personajes_relevantes>
+</master_document>
 
 <directrices_de_escena>
 OBJETIVOS: ${sceneGoals || 'Desarrollar la trama según la lógica del proyecto.'}

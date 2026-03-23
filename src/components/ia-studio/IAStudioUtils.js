@@ -51,12 +51,13 @@ export const computeChapterLabels = (chapters) => {
     });
     return labels;
 };
-export const generateComprehensiveWorldContext = (worldItems, includedSections = {}, flags = {}) => {
+export const generateComprehensiveWorldContext = (worldItems, includedSections = {}, flags = {}, characters = [], selectedCharacters = []) => {
     if (!worldItems) return '';
 
     const { 
         includeEstructura = true, 
-        includeNotasGenerales = true 
+        includeNotasGenerales = true,
+        includeCharacters = true
     } = flags;
 
     const renderTree = (parentId, depth = 0) => {
@@ -96,9 +97,24 @@ export const generateComprehensiveWorldContext = (worldItems, includedSections =
     const estructuraContent = includeEstructura ? renderTree('system_estructura') : '';
     const notasContent = includeNotasGenerales ? renderTree('system_notas') : '';
 
+    // Character Context
+    let charactersContent = '';
+    if (includeCharacters && characters.length > 0) {
+        const filteredChars = selectedCharacters.length > 0 
+            ? characters.filter(c => selectedCharacters.map(id => String(id)).includes(String(c.id))) 
+            : characters;
+            
+        if (filteredChars.length > 0) {
+            charactersContent = filteredChars
+                .map(c => `[PERSONAJE: ${c.name.toUpperCase()}]\nRol: ${c.role || 'No especificado'}\nDescripción: ${cleanText(c.description)}`)
+                .join('\n\n');
+        }
+    }
+
     return `
 ${estructuraContent ? `==== ESTRUCTURA DEL PROYECTO ====\n${estructuraContent}\n` : ''}
 ${worldContent ? `==== BIBLIA DEL MUNDO ====\n${worldContent}\n` : ''}
+${charactersContent ? `==== PERSONAJES RELEVANTES ====\n${charactersContent}\n` : ''}
 ${notasContent ? `==== NOTAS GENERALES ====\n${notasContent}\n` : ''}
     `.trim();
 };
