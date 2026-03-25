@@ -14,6 +14,7 @@ const IAStudioView = lazy(() => import('./components/IAStudioView'))
 const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
 const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
+const ForgeView = lazy(() => import('./components/ForgeView'))
 
 const LoadingScreen = () => (
   <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
@@ -185,6 +186,8 @@ function AppContent() {
         return <TrashView />;
       case 'manuscript':
         return <ManuscriptView />;
+      case 'forge':
+        return <ForgeView />;
       case 'editor':
       default:
         return activeChapter ? (
@@ -221,7 +224,7 @@ function AppContent() {
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
                   ? (activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'iaStudio' ? 'IA Studio' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'iaStudio' ? 'IA Studio' : activeView === 'manuscript' ? 'Vista General' : activeView === 'forge' ? 'La Forja' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}

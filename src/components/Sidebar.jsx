@@ -1,4 +1,4 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { useState, useEffect, useMemo } from 'react'
 import Modal from './Modal'
@@ -344,6 +344,17 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                             <Sparkles size={isSidebarCollapsed ? 18 : 14} />
                         </div>
                         {!isSidebarCollapsed && <span>IA Studio</span>}
+                    </button>
+
+                    <button
+                        onClick={() => handleSelectMobile(() => setActiveView('forge'))}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'forge' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        title="La Forja"
+                    >
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'forge' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-orange-500/10 text-orange-500'}`}>
+                            <AlertTriangle size={isSidebarCollapsed ? 18 : 14} className={activeView === 'forge' ? 'text-white' : 'text-orange-500'} />
+                        </div>
+                        {!isSidebarCollapsed && <span>La Forja</span>}
                     </button>
 
                     <button

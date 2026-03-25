@@ -16,7 +16,7 @@ export const AIService = {
         { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Gratis)", provider: "OpenRouter", context_length: 64000 },
         { id: "mistralai/mistral-7b-instruct:free", name: "Mistral 7B (Gratis)", provider: "OpenRouter", context_length: 32000 },
         // Direct Google AI Studio Models (Prefix: google_direct/)
-        { id: "google_direct/gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Lite (Google Directo)", provider: "Google", context_length: 1048576 },
+        { id: "google_direct/gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite (Google Directo)", provider: "Google", context_length: 1048576 },
         { id: "google_direct/gemini-3-flash", name: "Gemini 3 Flash (Google Directo)", provider: "Google", context_length: 1048576 },
         { id: "google_direct/gemini-2.5-flash", name: "Gemini 2.5 Flash (Google Directo)", provider: "Google", context_length: 1048576 }
     ],
@@ -29,10 +29,10 @@ export const AIService = {
             const response = await fetch("https://openrouter.ai/api/v1/models");
             if (!response.ok) throw new Error("Error fetching models");
             const data = await response.json();
-            
+
             const orModels = data.data
-                .filter(model => 
-                    parseFloat(model.pricing.prompt) === 0 && 
+                .filter(model =>
+                    parseFloat(model.pricing.prompt) === 0 &&
                     parseFloat(model.pricing.completion) === 0
                 )
                 .map(model => ({
@@ -41,7 +41,7 @@ export const AIService = {
                     provider: "OpenRouter",
                     context_length: model.context_length
                 }));
-            
+
             // Combine with direct models (which are always available if key is present)
             return [
                 ...this.MODELS.filter(m => m.id.startsWith('google_direct/')),
@@ -49,7 +49,7 @@ export const AIService = {
             ];
         } catch (error) {
             console.error("Error fetching free models:", error);
-            return this.MODELS; 
+            return this.MODELS;
         }
     },
 
@@ -148,6 +148,131 @@ export const AIService = {
         } catch (error) {
             console.error("AIService.sendGeminiMessage Error:", error);
             throw error;
+        }
+    },
+
+    /**
+     * Generates a streaming response from the AI
+     * @param {Array} messages - Array of message objects {role, content}
+     * @param {Object} settings - AI settings (apiKey, model, etc)
+     * @param {Function} onChunk - Callback for each text chunk
+     */
+    async generateStream(messages, settings, onChunk) {
+        const modelId = settings?.selectedAiModel || "google/gemini-2.0-flash-exp:free";
+        const isGoogleDirect = modelId.startsWith('google_direct/');
+        const apiKey = isGoogleDirect ? settings?.googleApiKey : settings?.openRouterKey;
+
+        if (!apiKey) {
+            throw new Error(`API Key de ${isGoogleDirect ? 'Google' : 'OpenRouter'} no configurada.`);
+        }
+
+        if (isGoogleDirect) {
+            const model = modelId.split('/')[1] + ":streamGenerateContent";
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?alt=sse&key=${apiKey}`;
+            
+            const payload = {
+                contents: messages.map(m => ({
+                    role: m.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: m.content }]
+                })),
+                generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 4000
+                }
+            };
+            
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error("❌ [AIService] Error de Google:", {
+                    status: response.status,
+                    statusText: response.statusText,
+                    modelId: modelId,
+                    details: errorData?.error?.message || "Sin detalles"
+                });
+                throw new Error(`Error en Google Gemini Stream (${response.status}): ${errorData?.error?.message || response.statusText}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // Keep incomplete line
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6).trim();
+                        if (!dataStr) continue;
+                        try {
+                            const data = JSON.parse(dataStr);
+                            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                            if (text) onChunk(text);
+                        } catch (e) {
+                            console.warn("Gemini SSE JSON parse error:", e);
+                        }
+                    }
+                }
+            }
+        } else {
+            // OpenRouter SSE Stream
+            const response = await fetch(OPENROUTER_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "HTTP-Referer": window.location.origin,
+                    "X-Title": "Writer IA Studio",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: modelId,
+                    messages: messages,
+                    stream: true,
+                    temperature: 0.7,
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`Error en OpenRouter Stream (${response.status}): ${errorData?.error?.message || 'Error desconocido'}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // Keep incomplete line
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6).trim();
+                        if (dataStr === '[DONE]' || !dataStr) continue;
+                        try {
+                            const data = JSON.parse(dataStr);
+                            const text = data.choices?.[0]?.delta?.content;
+                            if (text) onChunk(text);
+                        } catch (e) {
+                            console.warn("OpenRouter SSE JSON parse error:", e);
+                        }
+                    }
+                }
+            }
         }
     }
 };
