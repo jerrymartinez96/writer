@@ -56,16 +56,17 @@ class ExportService {
 
             if (worldItems.length > 0) {
                 content += `--- UNIVERSO Y NOTAS ---\n`;
-                
+
                 const renderItemsRecursive = (parentId, depth = 0) => {
                     const children = worldItems.filter(i => i.parentId === parentId);
                     if (children.length === 0) return '';
-                    
+
                     const indent = '  '.repeat(depth);
                     let text = '';
-                    
+
                     children.forEach(item => {
-                        text += `${indent}${depth === 0 ? '■ ' : '└─ '}${item.title}${item.isCategory ? ' [CARPETA]' : ''}${item.content ? `\n${indent}   ${item.content.replace(/\n/g, '\n' + indent + '   ')}` : ''}\n\n`;
+                        const cleanItemContent = item.content ? this.cleanContent(item.content) : '';
+                        text += `${indent}${depth === 0 ? '■ ' : '└─ '}${item.title}${item.isCategory ? ' [CARPETA]' : ''}${cleanItemContent ? `\n${indent}   ${cleanItemContent.replace(/\n/g, '\n' + indent + '   ')}` : ''}\n\n`;
                         text += renderItemsRecursive(item.id, depth + 1);
                     });
                     return text;
@@ -73,12 +74,20 @@ class ExportService {
 
                 const structureText = renderItemsRecursive('system_estructura');
                 if (structureText) content += `\n[ESTRUCTURA]\n${structureText}`;
-                
+
                 const notesText = renderItemsRecursive('system_notas');
                 if (notesText) content += `\n[NOTAS ADICIONALES]\n${notesText}`;
-                
-                const dynamicText = renderItemsRecursive(null);
-                if (dynamicText) content += `\n[SECCIONES DINÁMICAS]\n${dynamicText}`;
+
+                // Dynamic root sections (not the system ones)
+                const dynamicRoots = worldItems.filter(i => !i.parentId && i.id !== 'system_estructura' && i.id !== 'system_notas');
+                if (dynamicRoots.length > 0) {
+                    content += `\n[OTRAS SECCIONES]\n`;
+                    dynamicRoots.forEach(item => {
+                        const cleanItemContent = item.content ? this.cleanContent(item.content) : '';
+                        content += `■ ${item.title}${item.isCategory ? ' [CARPETA]' : ''}${cleanItemContent ? `\n   ${cleanItemContent.replace(/\n/g, '\n   ')}` : ''}\n\n`;
+                        content += renderItemsRecursive(item.id, 1);
+                    });
+                }
             }
         }
 
@@ -188,16 +197,23 @@ class ExportService {
                 doc.setFontSize(12);
                 doc.setFont("times", "normal");
 
-                // Exportar worldItems de forma plana pero corregida
-                worldItems.forEach(item => {
+                // Exportar worldItems (solo items con contenido o categorías raíz)
+                const renderableItems = worldItems.filter(i => !i.isCategory || !i.parentId);
+                renderableItems.forEach(item => {
                     if (y > 750) { doc.addPage(); y = 60; }
                     doc.setFont("times", "bold");
-                    doc.text(`${item.title}${item.isCategory ? ' [CARPETA]' : ''}`, margin, y);
+                    const prefix = item.isCategory ? '[SECCIÓN] ' : '';
+                    doc.text(`${prefix}${item.title}`, margin, y);
                     y += 15;
                     doc.setFont("times", "normal");
-                    const itemContent = doc.splitTextToSize(item.content || (item.isCategory ? 'Carpeta de contenido' : 'Sin contenido'), contentWidth);
-                    doc.text(itemContent, margin, y);
-                    y += (itemContent.length * 14) + 15;
+                    const rawContent = item.content ? this.cleanContent(item.content) : (item.isCategory ? '' : 'Sin contenido');
+                    if (rawContent) {
+                        const itemContent = doc.splitTextToSize(rawContent, contentWidth);
+                        doc.text(itemContent, margin, y);
+                        y += (itemContent.length * 14) + 15;
+                    } else {
+                        y += 10;
+                    }
                 });
             }
         }
@@ -294,10 +310,16 @@ class ExportService {
                 contentChildren.push(new Paragraph({ text: "Universo, Estructura y Notas", heading: HeadingLevel.HEADING_2, spacing: { before: 400 } }));
                 worldItems.forEach(item => {
                     contentChildren.push(new Paragraph({
-                        children: [new TextRun({ text: `${item.title}${item.isCategory ? ' [CARPETA]' : ''}`, bold: true })],
+                        children: [new TextRun({ text: `${item.isCategory ? '[SECCIÓN] ' : ''}${item.title}`, bold: true })],
                         spacing: { before: 200 }
                     }));
-                    contentChildren.push(new Paragraph({ text: item.content || (item.isCategory ? "Carpeta" : "Sin contenido") }));
+                    const cleanedContent = item.content ? this.cleanContent(item.content) : (item.isCategory ? '' : 'Sin contenido');
+                    if (cleanedContent) {
+                        const lines = cleanedContent.split('\n');
+                        lines.forEach(line => {
+                            contentChildren.push(new Paragraph({ children: [new TextRun({ text: line, size: 22 })], spacing: { after: 80 } }));
+                        });
+                    }
                 });
             }
         }

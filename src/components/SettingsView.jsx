@@ -5,6 +5,7 @@ import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Down
 import ExportService from '../services/ExportService';
 import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
+import { getChapters } from '../services/db';
 
 const SettingsView = () => {
     const { activeBook, updateBook, updateBookData: handleUpdateBookData, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
@@ -69,20 +70,34 @@ const SettingsView = () => {
         try {
             const includeMaster = exportScope === 'master' || exportScope === 'master_only';
             const includeManuscript = exportScope !== 'master_only';
-            
+
             let chaptersToExport = [];
-            if (includeManuscript) {
-                chaptersToExport = isGranular 
-                    ? chapters.filter(c => selectedChapters.includes(c.id))
-                    : chapters;
+            if (includeManuscript && activeBook) {
+                // CRITICAL FIX: Always load full chapter content from DB before exporting.
+                // The in-memory `chapters` state uses lazy loading — chapters only have content
+                // if the user has opened them individually. For export we need ALL content.
+                const allFullChapters = await getChapters(activeBook.id);
+                const activeChapters = allFullChapters.filter(c => !c.deletedAt);
+
+                if (isGranular) {
+                    chaptersToExport = activeChapters.filter(c => selectedChapters.includes(c.id));
+                } else {
+                    chaptersToExport = activeChapters;
+                }
+
+                // Sort by orderIndex to preserve the correct chapter order
+                chaptersToExport = [...chaptersToExport].sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
             }
 
+            // Filter out character folders (isCategory) — only export real character entries
+            const charactersToExport = characters.filter(c => !c.isCategory && !c.deletedAt);
+
             if (exportFormat === 'pdf') {
-                await ExportService.exportAsPDF(activeBook, chaptersToExport, includeMaster, characters, worldItems);
+                await ExportService.exportAsPDF(activeBook, chaptersToExport, includeMaster, charactersToExport, worldItems);
             } else if (exportFormat === 'docx') {
-                await ExportService.exportAsDOCX(activeBook, chaptersToExport, includeMaster, characters, worldItems);
+                await ExportService.exportAsDOCX(activeBook, chaptersToExport, includeMaster, charactersToExport, worldItems);
             } else {
-                await ExportService.exportAsTXT(activeBook, chaptersToExport, includeMaster, characters, worldItems);
+                await ExportService.exportAsTXT(activeBook, chaptersToExport, includeMaster, charactersToExport, worldItems);
             }
             toast.success(`¡Libro exportado como ${exportFormat.toUpperCase()}!`);
         } catch (error) {
