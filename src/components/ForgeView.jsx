@@ -4,7 +4,7 @@ import { useToast } from './Toast';
 import {
     Hammer, Sparkles, MessageSquare, Database, Plus, ChevronRight,
     Layers, Zap, Search, AlertTriangle, FileText, Bookmark, Users,
-    Package, HelpCircle, FolderPlus, Folder, ChevronDown, Mic, MicOff, PhoneOff
+    Package, HelpCircle, FolderPlus, Folder, ChevronDown, Mic, MicOff, PhoneOff, PhoneCall, RefreshCw
 } from 'lucide-react';
 import AIService from '../services/AIService';
 import { generateComprehensiveWorldContext } from './ia-studio/IAStudioUtils';
@@ -772,13 +772,22 @@ ${masterContext}
                                     disabled={isGenerating}
                                 />
 
-                                {liveState === LiveState.READY && (
+                                {liveState === LiveState.READY ? (
                                     <button
                                         onClick={disconnectLive}
                                         title="Desconectar Gemini Live"
                                         className="p-1.5 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
                                     >
                                         <PhoneOff size={13} />
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => connectLive(outputMode)}
+                                        title="Reconectar Gemini Live"
+                                        disabled={liveState === LiveState.CONNECTING || liveState === LiveState.CONFIGURING}
+                                        className={`p-1.5 transition-colors rounded-lg ${(liveState === LiveState.CONNECTING || liveState === LiveState.CONFIGURING) ? 'text-orange-500/50 cursor-not-allowed' : 'text-emerald-400 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer'}`}
+                                    >
+                                        {(liveState === LiveState.CONNECTING || liveState === LiveState.CONFIGURING) ? <RefreshCw className="animate-spin" size={13} /> : <PhoneCall size={13} />}
                                     </button>
                                 )}
                             </div>

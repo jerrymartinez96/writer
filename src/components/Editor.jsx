@@ -175,6 +175,7 @@ const Editor = () => {
     const charactersRef = useRef(characters);
     const activeChapterRef = useRef(activeChapter);
     const saveChapterContentRef = useRef(saveChapterContent);
+    const editorScrollRef = useRef(null);
 
     useEffect(() => {
         charactersRef.current = characters;
@@ -204,6 +205,14 @@ const Editor = () => {
     const activeIndex = activeChapter ? orderedChapters.findIndex(c => c.id === activeChapter.id) : -1;
     const prevChapter = activeIndex > 0 ? orderedChapters[activeIndex - 1] : null;
     const nextChapter = activeIndex >= 0 && activeIndex < orderedChapters.length - 1 ? orderedChapters[activeIndex + 1] : null;
+
+    // Navigate to a chapter and scroll the editor to the top
+    const handleChapterNavigation = useCallback((chapter) => {
+        selectChapter(chapter);
+        if (editorScrollRef.current) {
+            editorScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }, [selectChapter]);
 
     const activeChapterHeader = useMemo(() => {
         if (!activeChapter || !chapters) return null;
@@ -1071,8 +1080,8 @@ const Editor = () => {
                         <button onClick={() => setIsReadingSettingsModalOpen(true)} className="p-2 rounded-lg border border-[var(--border-main)] text-[var(--text-muted)]"><Settings size={16} /></button>
                     </div>
                     <div className="flex items-center gap-2">
-                        {prevChapter && <button onClick={() => selectChapter(prevChapter)} className="p-2 text-[var(--accent-main)]"><ChevronLeft size={20} /></button>}
-                        {nextChapter && <button onClick={() => selectChapter(nextChapter)} className="p-2 text-[var(--accent-main)]"><ChevronRight size={20} /></button>}
+                        {prevChapter && <button onClick={() => handleChapterNavigation(prevChapter)} className="p-2 text-[var(--accent-main)]"><ChevronLeft size={20} /></button>}
+                        {nextChapter && <button onClick={() => handleChapterNavigation(nextChapter)} className="p-2 text-[var(--accent-main)]"><ChevronRight size={20} /></button>}
                     </div>
                     <button onClick={() => setIsFocusMode(false)} className="px-4 py-2 rounded-lg border border-red-500/30 text-red-500 font-bold uppercase text-[10px]">Salir</button>
                 </div>
@@ -1080,7 +1089,7 @@ const Editor = () => {
 
             {/* Premium Buffering Overlay */}
 
-            <div className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'} ${isEditorLocked ? 'editor-locked-mode' : ''}`}>
+            <div ref={editorScrollRef} className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'} ${isEditorLocked ? 'editor-locked-mode' : ''}`}>
                 <div className={`min-h-full transition-all duration-500 mx-auto ${isFocusMode && readingWidth === 'full' ? 'w-full px-2' :
                     isFocusMode && readingWidth === 'xl' ? 'max-w-7xl' :
                         isFocusMode && readingWidth === 'lg' ? 'max-w-5xl' :
