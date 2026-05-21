@@ -10,11 +10,10 @@ import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2
 const Editor = lazy(() => import('./components/Editor'))
 const WorldView = lazy(() => import('./components/WorldView'))
 const SettingsView = lazy(() => import('./components/SettingsView'))
-const IAStudioView = lazy(() => import('./components/IAStudioView'))
 const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
 const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
-const ForgeView = lazy(() => import('./components/ForgeView'))
+const IAStudio = lazy(() => import('./components/ia-studio/IAStudio'))
 
 const LoadingScreen = () => (
   <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
@@ -27,7 +26,7 @@ const LoadingScreen = () => (
 );
 
 function AppContent() {
-  const { activeBook, activeChapter, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
+  const { activeBook, activeChapter, activeWorldDoc, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
   const [timeSinceSave, setTimeSinceSave] = useState('Recién');
 
   useEffect(() => {
@@ -176,21 +175,19 @@ function AppContent() {
 
   const renderActiveView = () => {
     switch (activeView) {
+      case 'ia-studio':
+        return <IAStudio />;
       case 'world':
         return <WorldView />;
       case 'settings':
         return <SettingsView />;
-      case 'iaStudio':
-        return <IAStudioView />;
       case 'trash':
         return <TrashView />;
       case 'manuscript':
         return <ManuscriptView />;
-      case 'forge':
-        return <ForgeView />;
       case 'editor':
       default:
-        return activeChapter ? (
+        return (activeChapter || activeWorldDoc) ? (
           <Editor />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-[var(--text-muted)] animate-in fade-in duration-1000">
@@ -223,8 +220,8 @@ function AppContent() {
               </h2>
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
-                  ? (activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'trash' ? 'Papelera' : activeView === 'iaStudio' ? 'IA Studio' : activeView === 'manuscript' ? 'Vista General' : activeView === 'forge' ? 'La Forja' : 'Ajustes del libro')}
+                  ? (activeWorldDoc?.title || activeChapter?.title || "Sin capítulo seleccionado")
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'ia-studio' ? 'IA Studio' : activeView === 'trash' ? 'Papelera' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}
@@ -321,12 +318,15 @@ function AppContent() {
   )
 }
 import { ToastProvider } from './components/Toast'
+import { IAStudioProvider } from './context/IAStudioContext'
 
 function App() {
   return (
     <ToastProvider>
       <DataProvider>
-        <AppContent />
+        <IAStudioProvider>
+          <AppContent />
+        </IAStudioProvider>
       </DataProvider>
     </ToastProvider>
   )

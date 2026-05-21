@@ -1,11 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
-import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, ArrowLeftRight, X, Copy } from 'lucide-react';
+import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, X, Copy, ChevronDown } from 'lucide-react';
 import ExportService from '../services/ExportService';
 import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
 import { getChapters } from '../services/db';
+
+const API_LABELS = {
+    openrouter: 'OpenRouter',
+    google_direct: 'Google Direct',
+    deepseek: 'DeepSeek Direct'
+};
 
 const SettingsView = () => {
     const { activeBook, updateBook, updateBookData: handleUpdateBookData, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
@@ -18,41 +24,89 @@ const SettingsView = () => {
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     
     // AI States
+    const [selectedApi, setSelectedApi] = useState(activeBook?.aiSettings?.selectedApi || 'openrouter');
     const [openRouterKey, setOpenRouterKey] = useState(activeBook?.aiSettings?.openRouterKey || '');
-    const [selectedModel, setSelectedModel] = useState(activeBook?.aiSettings?.selectedAiModel || 'google/gemini-2.0-flash-exp:free');
+    const [selectedModel, setSelectedModel] = useState(activeBook?.aiSettings?.selectedAiModel || '');
     const [googleApiKey, setGoogleApiKey] = useState(activeBook?.aiSettings?.googleApiKey || '');
+    const [deepseekApiKey, setDeepseekApiKey] = useState(activeBook?.aiSettings?.deepseekApiKey || '');
+    const [reasoningMode, setReasoningMode] = useState(activeBook?.aiSettings?.reasoningMode ?? false);
     const [showApiKey, setShowApiKey] = useState(false);
-    const [isModelsModalOpen, setIsModelsModalOpen] = useState(false);
+    const [availableModels, setAvailableModels] = useState([]);
     const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
     const [isSavingAI, setIsSavingAI] = useState(false);
-    const [availableModels, setAvailableModels] = useState(AIService.MODELS);
-    const [isLoadingModels, setIsLoadingModels] = useState(false);
-    const [modalProviderTab, setModalProviderTab] = useState('google');
     const hasLoadedProfile = useRef(false);
+    const [isModelOpen, setIsModelOpen] = useState(false);
+
+    // Derive filtered models based on selectedApi
+    const filteredModels = selectedApi === 'openrouter'
+        ? availableModels.filter(m => m.provider === 'OpenRouter')
+        : AIService.getModelsForProvider(selectedApi);
+
+    // Auto-set first model if none selected or if switching provider
+    useEffect(() => {
+        if (!selectedModel || selectedModel === '' || !filteredModels.find(m => m.id === selectedModel)) {
+            if (filteredModels.length > 0) {
+                setSelectedModel(filteredModels[0].id);
+            }
+        }
+    }, [selectedApi, availableModels]);
 
     // Sync state with activeBook and fetch models
     useEffect(() => {
-        if (activeBook?.aiSettings && !hasLoadedProfile.current) {
-            setOpenRouterKey(activeBook.aiSettings.openRouterKey || '');
-            setGoogleApiKey(activeBook.aiSettings.googleApiKey || '');
-            setSelectedModel(activeBook.aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free');
+        if (activeBook) {
+            setSelectedApi(activeBook.aiSettings?.selectedApi || 'openrouter');
+            setOpenRouterKey(activeBook.aiSettings?.openRouterKey || '');
+            setGoogleApiKey(activeBook.aiSettings?.googleApiKey || '');
+            setDeepseekApiKey(activeBook.aiSettings?.deepseekApiKey || '');
+            setSelectedModel(activeBook.aiSettings?.selectedAiModel || '');
+            setReasoningMode(activeBook.aiSettings?.reasoningMode ?? false);
+        }
+        if (activeBook) {
             hasLoadedProfile.current = true;
         }
         
         const fetchModels = async () => {
-            setIsLoadingModels(true);
             const models = await AIService.getFreeModels();
             setAvailableModels(models);
-            setIsLoadingModels(false);
         };
         
         fetchModels();
-    }, [profile]);
+    }, [profile, activeBook?.id]);
     
+    // Auto-save whenever any AI setting changes
+    const autoSaveRef = useRef(null);
+    useEffect(() => {
+        if (!hasLoadedProfile.current) return; // skip initial load
+        
+        if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+        autoSaveRef.current = setTimeout(async () => {
+            setIsSavingAI(true);
+            try {
+                await handleUpdateBookData({
+                    aiSettings: {
+                        selectedApi,
+                        openRouterKey,
+                        googleApiKey,
+                        deepseekApiKey,
+                        reasoningMode,
+                        selectedAiModel: selectedModel
+                    }
+                });
+            } catch (e) {
+                console.error("Auto-save AI settings error:", e);
+            } finally {
+                setIsSavingAI(false);
+            }
+        }, 800);
+        
+        return () => {
+            if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+        };
+    }, [selectedApi, openRouterKey, googleApiKey, deepseekApiKey, reasoningMode, selectedModel]);
     
     // Export States
-    const [exportFormat, setExportFormat] = useState('pdf'); // 'pdf' or 'txt'
-    const [exportScope, setExportScope] = useState('manuscript'); // 'manuscript', 'master', 'master_only'
+    const [exportFormat, setExportFormat] = useState('pdf');
+    const [exportScope, setExportScope] = useState('manuscript');
     const [isExporting, setIsExporting] = useState(false);
     const [isGranular, setIsGranular] = useState(false);
     const [selectedChapters, setSelectedChapters] = useState(chapters.map(c => c.id));
@@ -73,9 +127,6 @@ const SettingsView = () => {
 
             let chaptersToExport = [];
             if (includeManuscript && activeBook) {
-                // CRITICAL FIX: Always load full chapter content from DB before exporting.
-                // The in-memory `chapters` state uses lazy loading — chapters only have content
-                // if the user has opened them individually. For export we need ALL content.
                 const allFullChapters = await getChapters(activeBook.id);
                 const activeChapters = allFullChapters.filter(c => !c.deletedAt);
 
@@ -85,11 +136,9 @@ const SettingsView = () => {
                     chaptersToExport = activeChapters;
                 }
 
-                // Sort by orderIndex to preserve the correct chapter order
                 chaptersToExport = [...chaptersToExport].sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
             }
 
-            // Filter out character folders (isCategory) — only export real character entries
             const charactersToExport = characters.filter(c => !c.isCategory && !c.deletedAt);
 
             if (exportFormat === 'pdf') {
@@ -143,29 +192,7 @@ const SettingsView = () => {
         }
     };
 
-    const handleSaveAISettings = async () => {
-        setIsSavingAI(true);
-        try {
-            const aiSettings = { 
-                openRouterKey, 
-                googleApiKey,
-                selectedAiModel: selectedModel 
-            };
-            
-            // Save to active book (per-book)
-            await handleUpdateBookData({ aiSettings });
-            
-            // Also keep as global fallback if desired, but user asked for per-book
-            // updateProfile(aiSettings); 
-            
-            toast.success("¡Configuración de IA guardada para este libro!");
-        } catch (error) {
-            toast.error("Error al guardar ajustes de IA.");
-        } finally {
-            setIsSavingAI(false);
-        }
-    };
-
+    const selectedModelObj = filteredModels.find(m => m.id === selectedModel) || {};
 
     return (
         <div className="max-w-4xl mx-auto p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-32">
@@ -212,7 +239,7 @@ const SettingsView = () => {
                     </div>
                 </div>
 
-                {/* AI Configuration Section - Independent */}
+                {/* AI Configuration - UNIFIED FLOW */}
                 <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 p-8 rounded-[32px] shadow-sm relative overflow-hidden group">
                     <div className="absolute -top-20 -right-20 w-48 h-48 bg-indigo-500/10 blur-[80px] rounded-full group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
                     
@@ -223,79 +250,165 @@ const SettingsView = () => {
                                 Inteligencia (Este Libro)
                             </h3>
                             <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed">
-                                Configura las llaves de API específicas para este proyecto. Estos datos no afectarán a otros libros.
+                                Configura tu proveedor, API key y modelo. Todo se guarda automáticamente.
                             </p>
                         </div>
-     
 
-                        <div className="space-y-4 mb-8">
-                            <div className="flex items-center justify-between p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl">
-                                <div className="overflow-hidden">
-                                    <p className="text-[9px] font-black tracking-widest text-indigo-500 uppercase mb-1">Modelo Activo</p>
-                                    <p className="text-xs font-bold text-[var(--text-main)] truncate">
-                                        {availableModels.find(m => m.id === selectedModel)?.name || "Gemini 2.0 Flash"}
-                                    </p>
+                        <div className="space-y-5 my-6">
+                            {/* Step 1: Provider Selector */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-500 text-[9px] font-black flex items-center justify-center">1</span>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Proveedor</p>
                                 </div>
-                                <button 
-                                    onClick={() => setIsModelsModalOpen(true)}
-                                    className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all shadow-sm"
-                                >
-                                    <ArrowLeftRight size={16} />
-                                </button>
+                                <div className="flex gap-1.5 p-1 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl">
+                                    {[
+                                        { id: 'openrouter', label: 'OpenRouter', ico: '🔗' },
+                                        { id: 'google_direct', label: 'Google', ico: '🔵' },
+                                        { id: 'deepseek', label: 'DeepSeek', ico: '🧠' }
+                                    ].map(prov => (
+                                        <button
+                                            key={prov.id}
+                                            onClick={() => setSelectedApi(prov.id)}
+                                            className={`flex-1 py-2.5 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                                                selectedApi === prov.id
+                                                    ? 'bg-indigo-500 text-white shadow-sm'
+                                                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-app)]'
+                                            }`}
+                                        >
+                                            <span className="block text-lg mb-0.5">{prov.ico}</span>
+                                            {prov.label}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                            
-                            <div className="p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl flex items-center justify-between">
-                                <div className="flex-1 min-w-0 mr-4">
-                                    <p className="text-[9px] font-black tracking-widest text-indigo-500 uppercase mb-1">Cero Costo API</p>
-                                    <p className="text-xs font-mono text-[var(--text-muted)] truncate italic">
-                                        {openRouterKey ? "••••••••••••••••" : "No configurada"}
+
+                            {/* Step 2: API Key (only for selected provider) */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-500 text-[9px] font-black flex items-center justify-center">2</span>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                                        API Key de {API_LABELS[selectedApi]}
                                     </p>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => setShowApiKey(!showApiKey)}
-                                        className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-muted)]"
+                                <input
+                                    type="text"
+                                    value={
+                                        selectedApi === 'openrouter' ? openRouterKey :
+                                        selectedApi === 'google_direct' ? googleApiKey :
+                                        deepseekApiKey
+                                    }
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (selectedApi === 'openrouter') setOpenRouterKey(val);
+                                        else if (selectedApi === 'google_direct') setGoogleApiKey(val);
+                                        else setDeepseekApiKey(val);
+                                    }}
+                                    className="w-full bg-[var(--bg-app)] border border-indigo-500/30 rounded-xl px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                                    placeholder={
+                                        selectedApi === 'openrouter' ? 'sk-or-v1-...' :
+                                        selectedApi === 'google_direct' ? 'AIzaSy...' :
+                                        'sk-...'
+                                    }
+                                />
+                                <p className="text-[9px] text-[var(--text-muted)] mt-1 font-medium italic">
+                                    {selectedApi === 'openrouter' ? 'Tus modelos gratuitos de OpenRouter.' :
+                                     selectedApi === 'google_direct' ? 'Usa tu API key de Google AI Studio para acceso directo a Gemini.' :
+                                     'API key oficial de DeepSeek para acceso directo.'}
+                                </p>
+                            </div>
+
+                            {/* Step 3: Model Selector (filtered by provider) */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-500 text-[9px] font-black flex items-center justify-center">3</span>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Modelo</p>
+                                </div>
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setIsModelOpen(!isModelOpen)}
+                                        className="w-full flex items-center justify-between px-4 py-3 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl hover:border-indigo-500/50 transition-all"
                                     >
-                                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        <div className="text-left">
+                                            <p className="text-xs font-bold text-[var(--text-main)]">
+                                                {selectedModelObj?.name || 'Selecciona un modelo'}
+                                            </p>
+                                            {selectedModelObj?.context_length && (
+                                                <p className="text-[9px] text-[var(--text-muted)] font-medium">
+                                                    Contexto: {Math.round(selectedModelObj.context_length / 1000)}k
+                                                </p>
+                                            )}
+                                        </div>
+                                        <ChevronDown size={16} className={`text-[var(--text-muted)] transition-transform ${isModelOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {isModelOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-40" onClick={() => setIsModelOpen(false)}></div>
+                                            <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-56 overflow-y-auto">
+                                                {filteredModels.map(model => (
+                                                    <button
+                                                        key={model.id}
+                                                        onClick={() => { setSelectedModel(model.id); setIsModelOpen(false); }}
+                                                        className={`w-full text-left px-4 py-3 text-xs font-semibold transition-all hover:bg-[var(--accent-soft)] ${
+                                                            selectedModel === model.id
+                                                                ? 'bg-indigo-500/10 text-indigo-500'
+                                                                : 'text-[var(--text-main)]'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="truncate">{model.name}</span>
+                                                            {model.context_length && (
+                                                                <span className="text-[9px] text-[var(--text-muted)] ml-2 shrink-0">
+                                                                    {Math.round(model.context_length / 1000)}k
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                                {filteredModels.length === 0 && (
+                                                    <p className="px-4 py-6 text-xs text-[var(--text-muted)] text-center italic">
+                                                        No hay modelos disponibles para este proveedor.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Step 4: Reasoning Mode Toggle (solo DeepSeek) */}
+                            {selectedApi === 'deepseek' && (
+                                <div className="flex items-center justify-between px-4 py-3 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl">
+                                    <div>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Modo Razonamiento</p>
+                                        <p className="text-[9px] text-[var(--text-muted)] font-medium mt-0.5">
+                                            {reasoningMode ? 'El modelo pensará antes de responder (thinking mode)' : 'Respuestas directas sin razonamiento'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => setReasoningMode(!reasoningMode)}
+                                        className={`relative w-11 h-6 rounded-full transition-all duration-300 ${
+                                            reasoningMode ? 'bg-indigo-500' : 'bg-[var(--border-main)]'
+                                        }`}
+                                    >
+                                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${
+                                            reasoningMode ? 'left-[22px]' : 'left-0.5'
+                                        }`}></div>
                                     </button>
                                 </div>
-                            </div>
-                            
-                            {showApiKey && (
-                                <div className="animate-in slide-in-from-top-2 duration-300 space-y-4">
-                                    <div>
-                                        <p className="text-[9px] font-black tracking-widest text-[var(--accent-main)] uppercase mb-1">OpenRouter Key</p>
-                                        <input
-                                            type="text"
-                                            value={openRouterKey}
-                                            onChange={(e) => setOpenRouterKey(e.target.value)}
-                                            className="w-full bg-[var(--bg-app)] border border-indigo-500/30 rounded-xl px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-indigo-500/20 outline-none"
-                                            placeholder="sk-or-v1-..."
-                                        />
-                                    </div>
-                                    <div>
-                                        <p className="text-[9px] font-black tracking-widest text-emerald-500 uppercase mb-1">Google AI Studio Key</p>
-                                        <input
-                                            type="text"
-                                            value={googleApiKey}
-                                            onChange={(e) => setGoogleApiKey(e.target.value)}
-                                            className="w-full bg-[var(--bg-app)] border border-emerald-500/30 rounded-xl px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-emerald-500/20 outline-none"
-                                            placeholder="AIzaSy..."
-                                        />
-                                    </div>
-                                </div>
                             )}
+
                         </div>
 
-                        <div className="mt-auto">
-                            <button
-                                onClick={handleSaveAISettings}
-                                disabled={isSavingAI}
-                                className="w-full px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-3 disabled:opacity-50"
-                            >
-                                {isSavingAI ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                                Guardar Inteligencia
-                            </button>
+                        {/* Auto-save indicator */}
+                        <div className="mt-auto flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isSavingAI ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+                                <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                                    {isSavingAI ? 'Guardando...' : 'Auto-guardado ✓'}
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -540,86 +653,6 @@ const SettingsView = () => {
                                 <button onClick={() => setIsIdentityModalOpen(false)} className="px-6 py-3 text-[var(--text-muted)] font-black text-xs hover:text-[var(--text-main)]">Cancelar</button>
                                 <button onClick={handleSave} className="px-10 py-3 bg-[var(--accent-main)] text-white font-black rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all">Sellar Cambios</button>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* AI Models Modal */}
-            {isModelsModalOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsModelsModalOpen(false)}></div>
-                    <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between p-6 border-b border-[var(--border-main)]">
-                            <div>
-                                <h3 className="text-xl font-bold text-[var(--text-main)] font-serif italic">Catálogo de Modelos Gratuitos</h3>
-                                <p className="text-xs text-[var(--text-muted)] mt-1">Sincronizados en tiempo real desde OpenRouter.</p>
-                            </div>
-                            <button onClick={() => setIsModelsModalOpen(false)} className="p-2 rounded-xl hover:bg-[var(--bg-editor)] text-[var(--text-muted)] transition-colors"><X size={20} /></button>
-                        </div>
-                        
-                        <div className="flex-1 overflow-y-auto p-6 md:p-8 scrollbar-hide bg-[var(--bg-editor)]/30">
-                            {/* Tabs Switcher */}
-                            <div className="flex gap-2 p-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl mb-8">
-                                <button 
-                                    onClick={() => setModalProviderTab('google')}
-                                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalProviderTab === 'google' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]'}`}
-                                >
-                                    Google AI Studio
-                                </button>
-                                <button 
-                                    onClick={() => setModalProviderTab('openrouter')}
-                                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalProviderTab === 'openrouter' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-[var(--text-muted)] hover:bg-[var(--bg-editor)]'}`}
-                                >
-                                    OpenRouter (Gratis)
-                                </button>
-                            </div>
-
-                            {isLoadingModels ? (
-                                <div className="py-20 flex flex-col items-center justify-center text-[var(--text-muted)]">
-                                    <Loader2 size={32} className="animate-spin mb-4 text-indigo-500" />
-                                    <span className="text-xs uppercase font-black tracking-widest">Obteniendo lista oficial...</span>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {availableModels
-                                        .filter(m => modalProviderTab === 'google' ? m.provider === 'Google' : m.provider === 'OpenRouter')
-                                        .map(model => (
-                                        <button
-                                            key={model.id}
-                                            onClick={() => {
-                                                setSelectedModel(model.id);
-                                                setIsModelsModalOpen(false);
-                                            }}
-                                            className={`flex items-start gap-4 p-5 rounded-2xl border transition-all text-left group ${selectedModel === model.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-[var(--bg-app)] border-[var(--border-main)] hover:border-indigo-500/50'}`}
-                                        >
-                                            <div className="flex-1 overflow-hidden">
-                                                <div className={`text-sm font-black truncate mb-1 ${selectedModel === model.id ? 'text-white' : 'text-[var(--text-main)]'}`}>{model.name}</div>
-                                                <div className="flex items-center gap-3 mb-1">
-                                                    <div className={`text-[10px] uppercase font-bold tracking-[0.2em] ${selectedModel === model.id ? 'text-white/60' : 'text-[var(--text-muted)]'}`}>
-                                                        {model.provider}
-                                                    </div>
-                                                    {model.context_length && (
-                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${selectedModel === model.id ? 'bg-white/20 text-white' : 'bg-indigo-500/10 text-indigo-500'}`}>
-                                                            {Math.round(model.context_length / 1000)}k
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            {selectedModel === model.id ? (
-                                                <CheckSquare size={18} className="text-white shrink-0" />
-                                            ) : (
-                                                <Square size={18} className="text-[var(--text-muted)] opacity-30 group-hover:opacity-100 transition-opacity shrink-0" />
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-6 bg-[var(--bg-editor)] border-t border-[var(--border-main)] flex justify-between items-center">
-                            <p className="text-[10px] font-bold text-[var(--text-muted)] italic">* Solo se muestran modelos con costo 0.</p>
-                            <button onClick={() => setIsModelsModalOpen(false)} className="px-8 py-3 bg-[var(--accent-main)] text-white font-bold rounded-xl transition-all hover:scale-105 active:scale-95 shadow-lg">Cerrar</button>
                         </div>
                     </div>
                 </div>

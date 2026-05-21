@@ -1,6 +1,8 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target } from 'lucide-react';
 import { useData } from '../context/DataContext'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
+import { useIAStudioContext } from '../context/IAStudioContext'
+import { QUICK_ACTIONS } from './ia-studio/IAStudioUtils'
 import Modal from './Modal'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
@@ -105,8 +107,10 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const {
         books, activeBook, selectBook, createBook,
         chapters, activeChapter, selectChapter, createChapter, deleteChapter,
-        activeView, setActiveView, reorderChapters, setPromptStudioPreload, promptStudioPreload
+        activeView, setActiveView, reorderChapters,
+        activeWorldDoc, openWorldDoc, characters, worldItems,
     } = useData();
+    const { contextSelections, destinationDoc } = useIAStudioContext();
     const [isBooksOpen, setIsBooksOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [expandedVolumes, setExpandedVolumes] = useState({});
@@ -309,10 +313,10 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                 <div className={`p-4 border-b border-[var(--border-main)] flex flex-col gap-2 ${isSidebarCollapsed ? 'items-center' : ''}`}>
                     <button
                         onClick={() => handleSelectMobile(() => setActiveView('manuscript'))}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'manuscript' || activeView === 'editor' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'manuscript' || (activeView === 'editor' && activeChapter) ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
                         title="Manuscrito"
                     >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'manuscript' || activeView === 'editor' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'manuscript' || (activeView === 'editor' && activeChapter) ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-emerald-500/10 text-emerald-500'}`}>
                             <BookOpen size={isSidebarCollapsed ? 18 : 14} />
                         </div>
                         {!isSidebarCollapsed && <span>Manuscrito</span>}
@@ -326,35 +330,26 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 setActiveView('world');
                             }
                         })}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'world' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'world' || (activeView === 'editor' && activeWorldDoc) ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
                         title="Master Doc"
                     >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'world' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-indigo-500/10 text-indigo-500'}`}>
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'world' || (activeView === 'editor' && activeWorldDoc) ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-indigo-500/10 text-indigo-500'}`}>
                             <Globe size={isSidebarCollapsed ? 18 : 14} />
                         </div>
                         {!isSidebarCollapsed && <span>Master Doc</span>}
                     </button>
 
+
+
                     <button
-                        onClick={() => handleSelectMobile(() => setActiveView('iaStudio'))}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'iaStudio' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        onClick={() => handleSelectMobile(() => setActiveView('ia-studio'))}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'ia-studio' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
                         title="IA Studio"
                     >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'iaStudio' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-purple-500/10 text-purple-500'}`}>
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'ia-studio' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-purple-500/10 text-purple-500'}`}>
                             <Sparkles size={isSidebarCollapsed ? 18 : 14} />
                         </div>
                         {!isSidebarCollapsed && <span>IA Studio</span>}
-                    </button>
-
-                    <button
-                        onClick={() => handleSelectMobile(() => setActiveView('forge'))}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'forge' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
-                        title="La Forja"
-                    >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'forge' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-orange-500/10 text-orange-500'}`}>
-                            <AlertTriangle size={isSidebarCollapsed ? 18 : 14} className={activeView === 'forge' ? 'text-white' : 'text-orange-500'} />
-                        </div>
-                        {!isSidebarCollapsed && <span>La Forja</span>}
                     </button>
 
                     <button
@@ -382,7 +377,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
 
                 {/* Chapters List (Only shown in Manuscript/Editor modes and not collapsed) */}
                 <div className="flex-1 overflow-y-auto scrollbar-hide py-4 relative">
-                    {(activeView === 'manuscript' || activeView === 'editor') && !isSidebarCollapsed ? (
+                    {(activeView === 'manuscript' || (activeView === 'editor' && activeChapter)) && !isSidebarCollapsed ? (
                         <div className="px-4 space-y-6 animate-in fade-in duration-300">
                             <div>
                                 <div className="flex items-center justify-between mb-4 px-2">
@@ -468,15 +463,64 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 </div>
                             </div>
                         </div>
-                    ) : (
-                        <div className="px-4 py-8 flex flex-col items-center justify-center h-full text-[var(--text-muted)] opacity-50 text-center">
-                            {!isSidebarCollapsed && (
-                                <p className="text-xs font-bold uppercase tracking-widest mt-4">
-                                    Selecciona "Manuscrito" arriba para ver el índice
-                                </p>
-                            )}
+                    ) : (activeView === 'world' || (activeView === 'editor' && activeWorldDoc)) && !isSidebarCollapsed ? (
+                        <div className="px-4 py-4 space-y-2 animate-in fade-in duration-300">
+                            <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-[0.2em] px-2 mb-3">
+                                Secciones
+                            </div>
+                            {[
+                                { id: 'system_personajes', title: 'Personajes', Icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10', activeBg: 'bg-blue-500', border: 'border-l-blue-500' },
+                                { id: 'system_estructura', title: 'Estructura', Icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-500/10', activeBg: 'bg-indigo-500', border: 'border-l-indigo-500' },
+                                { id: 'system_core', title: 'Info General', Icon: Bookmark, color: 'text-orange-500', bg: 'bg-orange-500/10', activeBg: 'bg-orange-500', border: 'border-l-orange-500' },
+                            ].map(({ id, title, Icon, color, bg, activeBg, border }) => {
+                                const isActive = activeWorldDoc?.id === id && activeView === 'editor';
+                                return (
+                                    <button
+                                        key={id}
+                                        onClick={() => handleSelectMobile(() => openWorldDoc(id))}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-l-4 transition-all group ${
+                                            isActive
+                                                ? `${border} bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm`
+                                                : `border-l-transparent hover:bg-[var(--accent-soft)] text-[var(--text-main)]`
+                                        }`}
+                                    >
+                                        <div className={`shrink-0 p-1.5 rounded-md transition-all ${
+                                            isActive ? `${activeBg} text-white shadow-md` : `${bg} ${color}`
+                                        }`}>
+                                            <Icon size={14} />
+                                        </div>
+                                        <span className="text-sm font-medium truncate">{title}</span>
+                                        {isActive && <ChevronRight size={14} className="ml-auto text-[var(--accent-main)] shrink-0" />}
+                                    </button>
+                                );
+                            })}
                         </div>
-                    )}
+                    ) : activeView === 'ia-studio' && !isSidebarCollapsed ? (
+                        <div className="px-4 py-4 space-y-4 animate-in fade-in duration-300">
+                            {/* Contexto y Destino - Botón principal arriba */}
+                            <button
+                                onClick={() => window.dispatchEvent(new CustomEvent('open-context-modal'))}
+                                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gradient-to-r from-indigo-500/15 to-emerald-500/15 border border-indigo-500/10 text-indigo-600 hover:from-indigo-500/25 hover:to-emerald-500/25 transition-all text-[10px] font-black uppercase tracking-wider"
+                            >
+                                <BookOpen size={12} /> Contexto y Destino
+                            </button>
+
+                            {/* Mini resumen contexto */}
+                            {contextSelections && (contextSelections.chapterIds?.length > 0 || contextSelections.worldItemIds?.length > 0) && (
+                                <div className="px-3 py-2 bg-[var(--bg-editor)]/50 rounded-lg border border-[var(--border-main)]/30 -mt-2">
+                                    <p className="text-[9px] font-bold text-indigo-500">
+                                        {contextSelections.chapterIds?.length || 0} caps · {contextSelections.worldItemIds?.length || 0} master docs
+                                    </p>
+                                    {destinationDoc && (
+                                        <p className="text-[8px] text-[var(--text-muted)] mt-1 truncate">
+                                            → {destinationDoc.mode === 'auto' ? 'Auto' : destinationDoc.mode === 'new' ? 'Nuevo' : destinationDoc.docTitle}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                        </div>
+                    ) : null}
                 </div>
 
                 {/* Footer */}

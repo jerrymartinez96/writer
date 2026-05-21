@@ -1,22 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../context/DataContext';
-import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check, Sparkles } from 'lucide-react';
 import Modal from './Modal';
 import MasterDocOrganizerModal from './MasterDocOrganizerModal';
 import { useToast } from './Toast';
 import { uploadImageToCloudinary } from '../services/cloudinary';
-import { useEditor, EditorContent } from '@tiptap/react';
-import { BubbleMenu } from '@tiptap/react/menus';
-import StarterKit from '@tiptap/starter-kit';
-import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, List, ListOrdered, Quote, Heading1, Heading2, Heading3 } from 'lucide-react';
-
+import RichTextEditor from './RichTextEditor';
 const WorldView = () => {
     const {
         chapters, characters, worldItems,
         createCharacter, updateCharacter, deleteCharacter,
-        createWorldItem, updateWorldItem, deleteWorldItem
+        createWorldItem, updateWorldItem, deleteWorldItem,
+        openWorldDoc
     } = useData();
     const toast = useToast();
 
@@ -213,7 +209,7 @@ const WorldView = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
                 <div
-                    onClick={() => pushPath({ id: 'system_personajes', title: 'Personajes', type: 'system_personajes_list' })}
+                    onClick={() => openWorldDoc('system_personajes')}
                     className="group bg-[var(--bg-app)] border-l-4 border-l-blue-500 border border-[var(--border-main)] p-6 rounded-2xl hover:border-blue-500 cursor-pointer transition-all hover:shadow-lg shadow-sm"
                 >
                     <Users size={24} className="text-blue-500 mb-4" />
@@ -222,7 +218,7 @@ const WorldView = () => {
                 </div>
 
                 <div
-                    onClick={() => pushPath({ id: 'system_estructura', title: 'Estructura de Capítulos', type: 'system_estructura_list' })}
+                    onClick={() => openWorldDoc('system_estructura')}
                     className="group bg-[var(--bg-app)] border-l-4 border-l-indigo-500 border border-[var(--border-main)] p-6 rounded-2xl hover:border-indigo-500 cursor-pointer transition-all hover:shadow-lg shadow-sm"
                 >
                     <Layers size={24} className="text-indigo-500 mb-4" />
@@ -231,75 +227,13 @@ const WorldView = () => {
                 </div>
 
                 <div
-                    onClick={() => pushPath({ id: 'system_notas', title: 'Notas Adicionales', type: 'system_notas_list' })}
+                    onClick={() => openWorldDoc('system_core')}
                     className="group bg-[var(--bg-app)] border-l-4 border-l-orange-500 border border-[var(--border-main)] p-6 rounded-2xl hover:border-orange-500 cursor-pointer transition-all hover:shadow-lg shadow-sm"
                 >
                     <Bookmark size={24} className="text-orange-500 mb-4" />
-                    <h3 className="font-bold text-xl text-[var(--text-main)] mb-2">Notas Adicionales</h3>
-                    <p className="text-sm text-[var(--text-muted)]">Ideas sueltas, apuntes técnicos o detalles no categorizados.</p>
+                    <h3 className="font-bold text-xl text-[var(--text-main)] mb-2">Información General</h3>
+                    <p className="text-sm text-[var(--text-muted)]">Notas del libro, sinopsis, líneas temporales y documentación general.</p>
                 </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 border-b border-[var(--border-main)] pb-4 gap-4">
-                <h2 className="text-sm font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-2">
-                    <FileText size={16} className="text-[var(--accent-main)] shrink-0" />
-                    Secciones Dinámicas del Master Doc
-                </h2>
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={() => { setCreateType('master_card'); setIsCreateModalOpen(true); }}
-                        className="px-4 py-2 text-xs font-bold bg-[var(--bg-editor)] border border-[var(--border-main)] text-[var(--text-main)] rounded-lg hover:border-[var(--accent-main)] transition-all flex items-center gap-2"
-                    >
-                        <Plus size={14} /> Tarjeta
-                    </button>
-                    <button
-                        onClick={() => { setCreateType('master_category'); setIsCreateModalOpen(true); }}
-                        className="px-4 py-2 text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent-main)] rounded-lg hover:bg-[var(--accent-main)] hover:text-white transition-all flex items-center gap-2 shadow-sm"
-                    >
-                        <Folder size={14} /> Carpeta
-                    </button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {rootMasterCards.map(item => {
-                    const isEmpty = item.isCategory ? worldItems.filter(i => i.parentId === item.id).length === 0 : (!item.content || item.content.trim() === '');
-                    return (
-                        <div
-                            key={item.id}
-                            onClick={() => pushPath({ id: item.id, title: item.title, type: item.isCategory ? 'dynamic_list' : 'world_item_detail', data: item })}
-                            className={`group bg-[var(--bg-app)] border border-[var(--border-main)] p-4 rounded-xl hover:border-[var(--accent-main)] cursor-pointer transition-all flex flex-col shadow-sm h-28 overflow-hidden ${item.isCategory ? 'border-t-4 border-t-[var(--accent-main)]' : 'border-t-4 border-t-emerald-500'} ${isEmpty ? 'opacity-50 hover:opacity-100' : ''}`}
-                        >
-                            <div className="flex justify-between items-center mb-2 shrink-0">
-                                <span className="text-[9px] text-[var(--text-muted)] font-black uppercase tracking-widest">{item.isCategory ? 'Carpeta' : 'Tarjeta'}</span>
-                                <div className="text-[var(--text-muted)] flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setEditTarget({ id: item.id, title: item.title, type: 'worldItem' });
-                                            setEditTitle(item.title);
-                                            setIsEditModalOpen(true);
-                                        }}
-                                        className="p-1 hover:text-[var(--accent-main)] transition-colors"
-                                        title="Renombrar"
-                                    >
-                                        <Pencil size={12} />
-                                    </button>
-                                    <div className="flex items-center gap-1">
-                                        <span className="text-[10px] uppercase font-bold hidden sm:inline">Abrir</span>
-                                        <ChevronRight size={12} className="shrink-0" />
-                                    </div>
-                                </div>
-                            </div>
-                            <h3 className="font-bold text-sm leading-snug text-[var(--text-main)] line-clamp-3" title={item.title}>{item.title}</h3>
-                        </div>
-                    );
-                })}
-                {rootMasterCards.length === 0 && (
-                    <div className="col-span-full py-16 mt-4 text-center border-2 border-dashed border-[var(--border-main)] rounded-2xl text-[var(--text-muted)] opacity-70">
-                        Crea tu primera carpeta (Ej. "Sistema de Magia") o tarjeta aquí.
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -666,7 +600,8 @@ const WorldView = () => {
         };
 
         return (
-            <div className="animate-in slide-in-from-bottom-4 duration-300 pb-20">
+            <div className="flex flex-col gap-0 transition-all duration-300">
+                <div className="animate-in slide-in-from-bottom-4 duration-300 pb-20">
                 <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-4">
                     <div className="flex-1 w-full md:mr-4">
                         {isCharacter && (
@@ -687,37 +622,39 @@ const WorldView = () => {
                             {isCharacter ? realItem.name : realItem.title}
                         </h1>
                     </div>
-                    <div className="flex flex-wrap gap-2 shrink-0">
-                        <button
-                            onClick={() => {
-                                setEditTarget({ id: realItem.id, title: isCharacter ? realItem.name : realItem.title, type: isCharacter ? 'character' : 'worldItem' });
-                                setEditTitle(isCharacter ? realItem.name : realItem.title);
-                                setIsEditModalOpen(true);
-                            }}
-                            className="px-4 py-2 border border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--bg-editor)] hover:text-blue-500 rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
-                        >
-                            <Pencil size={16} /> <span className="hidden sm:inline">Editar Título</span>
-                        </button>
-                        <button
-                            onClick={() => {
-                                setItemToDelete({ id: realItem.id, title: isCharacter ? realItem.name : realItem.title, type: isCharacter ? 'character' : 'worldItem', pop: true });
-                            }}
-                            className="px-4 py-2 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
-                        >
-                            <Trash2 size={16} /> <span className="hidden sm:inline">Eliminar</span>
-                        </button>
-                    </div>
+                    {!realItem.id.startsWith('system_') && (
+                        <div className="flex flex-wrap gap-2 shrink-0">
+                            <button
+                                onClick={() => {
+                                    setEditTarget({ id: realItem.id, title: isCharacter ? realItem.name : realItem.title, type: isCharacter ? 'character' : 'worldItem' });
+                                    setEditTitle(isCharacter ? realItem.name : realItem.title);
+                                    setIsEditModalOpen(true);
+                                }}
+                                className="px-4 py-2 border border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--bg-editor)] hover:text-blue-500 rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
+                            >
+                                <Pencil size={16} /> <span className="hidden sm:inline">Editar Título</span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setItemToDelete({ id: realItem.id, title: isCharacter ? realItem.name : realItem.title, type: isCharacter ? 'character' : 'worldItem', pop: true });
+                                }}
+                                className="px-4 py-2 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition-all text-sm font-bold flex items-center gap-2 bg-[var(--bg-app)]"
+                            >
+                                <Trash2 size={16} /> <span className="hidden sm:inline">Eliminar</span>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className={`relative group/editor border border-[var(--border-main)] rounded-2xl mb-8 shadow-sm overflow-hidden bg-[var(--bg-app)] flex flex-col transition-all duration-500 ease-in-out ${isMaximized ? 'h-[85vh] shadow-2xl ring-1 ring-[var(--accent-main)]/30 border-[var(--accent-main)]' : 'h-[500px]'}`}>
-                    <textarea
-                        value={localContent}
-                        onChange={(e) => {
-                            setLocalContent(e.target.value);
+                    <RichTextEditor
+                        content={localContent}
+                        onChange={(html) => {
+                            setLocalContent(html);
                             setIsUnsaved(true);
                         }}
                         placeholder={`Describe los detalles, resúmenes profundos o reglas para ${isCharacter ? realItem.name : realItem.title}...`}
-                        className={`w-full flex-1 bg-transparent p-8 text-lg focus:outline-none resize-none transition-all leading-relaxed text-[var(--text-main)] custom-scrollbar`}
+                        className="w-full flex-1 p-8 text-lg"
                     />
                     
                     <div className="p-4 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/80 backdrop-blur-md flex items-center justify-between shrink-0">
@@ -796,6 +733,7 @@ const WorldView = () => {
                     )}
                 </div>
             </div>
+        </div>
         );
     };
 
@@ -825,7 +763,7 @@ const WorldView = () => {
                     {currentStep.type === 'root' && renderRoot()}
                     {currentStep.type === 'system_personajes_list' && renderCharacters(null)}
                     {currentStep.type === 'character_list' && renderCharacters(currentStep.id)}
-                    {currentStep.type === 'system_notas_list' && renderWorldItemList('system_notas', 'Notas')}
+                    {currentStep.type === 'system_notas_list' && renderWorldItemList('system_notas', 'Información General')}
                     {currentStep.type === 'system_estructura_list' && renderWorldItemList('system_estructura', 'Estructura')}
                     {currentStep.type === 'dynamic_list' && renderWorldItemList(currentStep.id, 'Carpeta')}
                     {(currentStep.type === 'character_detail' || currentStep.type === 'world_item_detail') && renderDetail()}

@@ -19,6 +19,7 @@ import {
     createWorldItem as createWorldItemApi,
     updateWorldItem as updateWorldItemApi,
     deleteWorldItem as deleteWorldItemApi,
+    setWorldItemWithId,
     getChapterSnapshots as getChapterSnapshotsApi,
     saveChapterSnapshot as saveChapterSnapshotApi,
     deleteAllChapterSnapshots as deleteAllSnapshotsApi,
@@ -48,11 +49,11 @@ export const DataProvider = ({ children }) => {
     const [activeBook, setActiveBook] = useState(null);
     const [chapters, setChapters] = useState([]);
     const [activeChapter, setActiveChapter] = useState(null);
+    const [activeWorldDoc, setActiveWorldDoc] = useState(null); // { id, title, content }
     const [characters, setCharacters] = useState([]);
     const [worldItems, setWorldItems] = useState([]);
     const [trashItems, setTrashItems] = useState([]);
     const [activeView, setActiveView] = useState('editor'); // 'editor', 'characters', 'world', 'settings'
-    const [promptStudioPreload, setPromptStudioPreload] = useState(null);
     const [loading, setLoading] = useState(true);
     const [lastSaved, setLastSaved] = useState(new Date());
     const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
@@ -247,8 +248,33 @@ export const DataProvider = ({ children }) => {
 
             // Load World Items
             const allWorldItems = await getWorld(book.id);
-            const fetchedWorldItems = allWorldItems.filter(i => !i.deletedAt);
+            let fetchedWorldItems = allWorldItems.filter(i => !i.deletedAt);
             const trashWorlds = allWorldItems.filter(i => i.deletedAt).map(c => ({ ...c, collectionType: 'world' }));
+
+            // Ensure the three system documents exist
+            const systemIds = ['system_personajes', 'system_estructura', 'system_core'];
+            const updatedFetchedItems = [...fetchedWorldItems];
+            for (const sysId of systemIds) {
+                const existing = fetchedWorldItems.find(item => item.id === sysId);
+                if (!existing) {
+                    const defaultTitle = sysId === 'system_personajes' ? 'Personajes' : sysId === 'system_estructura' ? 'Estructura de Capítulos' : 'Información General';
+                    const defaultItem = {
+                        title: defaultTitle,
+                        content: '',
+                        images: [],
+                        parentId: null,
+                        isCategory: false
+                    };
+                    try {
+                        await setWorldItemWithId(book.id, sysId, defaultItem);
+                        const newSysItem = { id: sysId, ...defaultItem };
+                        updatedFetchedItems.push(newSysItem);
+                    } catch (err) {
+                        console.error(`Failed to auto-initialize system item ${sysId}`, err);
+                    }
+                }
+            }
+            fetchedWorldItems = updatedFetchedItems;
             setWorldItems(fetchedWorldItems);
 
             setTrashItems([...trashChaps, ...trashChars, ...trashWorlds]);
@@ -479,6 +505,7 @@ export const DataProvider = ({ children }) => {
         }
         
         setActiveChapter(chapterToActivate);
+        setActiveWorldDoc(null); // Clear any active world doc when selecting a chapter
         
         if (chapterToActivate) {
             lastCloudContentRef.current[chapterToActivate.id] = chapterToActivate.content;
@@ -538,6 +565,40 @@ export const DataProvider = ({ children }) => {
             console.error("Failed to delete character", error);
         }
     };
+
+    // --- World Doc Mode (Master Doc sections opened in Editor) ---
+    const openWorldDoc = async (docId) => {
+        await flushAllSaves();
+        const item = worldItems.find(w => w.id === docId);
+        if (!item) return;
+        setActiveChapter(null);
+        setActiveWorldDoc({ id: item.id, title: item.title, content: item.content || '' });
+        setActiveView('editor');
+    };
+
+    const saveWorldDocContent = useCallback((html) => {
+        if (!activeWorldDoc) return;
+        setActiveWorldDoc(prev => ({ ...prev, content: html }));
+        setWorldItems(prev => prev.map(item => item.id === activeWorldDoc.id ? { ...item, content: html } : item));
+        const saveKey = `worlddoc_${activeWorldDoc.id}`;
+        if (pendingSaves.current[saveKey]) {
+            clearTimeout(pendingSaves.current[saveKey].timeoutId);
+        }
+        const docId = activeWorldDoc.id;
+        const bookId = activeBook?.id;
+        const fn = async () => {
+            delete pendingSaves.current[saveKey];
+            try {
+                if (bookId) await updateWorldItemApi(bookId, docId, { content: html });
+            } catch (error) {
+                console.error('Failed to save world doc content', error);
+            }
+        };
+        pendingSaves.current[saveKey] = {
+            timeoutId: setTimeout(fn, 1500),
+            fn
+        };
+    }, [activeWorldDoc, activeBook]);
 
     // --- World Management ---
     const handleCreateWorldItem = async (itemData) => {
@@ -814,6 +875,9 @@ export const DataProvider = ({ children }) => {
         activeBook,
         chapters,
         activeChapter,
+        activeWorldDoc,
+        openWorldDoc,
+        saveWorldDocContent,
         characters,
         worldItems,
         trashItems,
@@ -841,8 +905,6 @@ export const DataProvider = ({ children }) => {
         deleteWorldItem: handleDeleteWorldItem,
         restoreTrashItem: handleRestoreTrashItem,
         permanentlyDeleteTrashItem: handlePermanentlyDeleteTrashItem,
-        promptStudioPreload,
-        setPromptStudioPreload,
         reorderChapters: handleReorderChapters,
         reorderWorldItems: handleReorderWorldItems,
         finalizeChapterCleanup,

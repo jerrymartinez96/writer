@@ -1,7 +1,8 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, BookMarked, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers } from 'lucide-react'
 import confetti from 'canvas-confetti'
+import { uploadImageToCloudinary } from '../services/cloudinary'
 import { Mark, mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
 import HistoryModal from './HistoryModal'
@@ -17,6 +18,7 @@ import PremiumNarrator from './PremiumNarrator';
 import NarratorSelector from './NarratorSelector';
 import PremiumPlayer from './PremiumPlayer';
 import FinalizeModal from './FinalizeModal'
+
 
 const CharacterMention = Mark.create({
     name: 'characterMention',
@@ -113,15 +115,17 @@ const GhostMention = Mark.create({
 })
 
 
-
-
 const Editor = () => {
     const {
         chapters, activeChapter, saveChapterContent, characters, updateChapter,
-        activeView, selectChapter, setActiveView, setPromptStudioPreload,
+        activeView, selectChapter, setActiveView,
         finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot,
-        activeBook, profile
+        activeBook, profile,
+        worldItems, updateCharacter, createCharacter, deleteCharacter,
+        updateWorldItem, createWorldItem, deleteWorldItem,
+        activeWorldDoc, saveWorldDocContent
     } = useData();
+    const isWorldDocMode = !!activeWorldDoc && !activeChapter;
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
     const [readingFont, setReadingFont] = useState('font-[Arial,sans-serif]');
@@ -167,6 +171,7 @@ const Editor = () => {
     const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
     const [isFormattingModalOpen, setIsFormattingModalOpen] = useState(false);
     
+
     // Phase 4: Selection & Metrics
     const [selectionMetrics, setSelectionMetrics] = useState({ words: 0, chars: 0, show: false });
     const [totalWordCount, setTotalWordCount] = useState(0);
@@ -540,18 +545,7 @@ const Editor = () => {
         }
     };
 
-    const handleSendToIAStudio = () => {
-        if (!viewingNote || !activeChapter) return;
-        const instructions = `FRAGMENTO DEL TEXTO A REFINAR:\n"${viewingNote.highlightedText}"\n\nNOTA DEL AUTOR:\n${viewingNote.noteText}`;
-        setPromptStudioPreload({
-            tab: 'refine',
-            chapterId: activeChapter.id,
-            instructions
-        });
-        setActiveView('iaStudio');
-        setIsViewNoteModalOpen(false);
-        setViewingNote(null);
-    };
+
 
     const editor = useEditor({
         extensions: [
@@ -649,7 +643,11 @@ const Editor = () => {
         },
         onUpdate: ({ editor }) => {
             const html = editor.getHTML();
-            saveChapterContentRef.current(html);
+            if (isWorldDocMode) {
+                saveWorldDocContent(html);
+            } else {
+                saveChapterContentRef.current(html);
+            }
 
             // Update total word count
             const text = editor.getText();
@@ -716,19 +714,25 @@ const Editor = () => {
         }
     })
 
-    // Whenever the active chapter changes (from sidebar), we reset editor content
+    // Whenever the active chapter or world doc changes, reset editor content
     useEffect(() => {
-        if (editor && activeChapter) {
+        if (!editor) return;
+        if (isWorldDocMode && activeWorldDoc) {
+            const currentHtml = editor.getHTML();
+            if (currentHtml !== activeWorldDoc.content) {
+                editor.commands.setContent(activeWorldDoc.content || '', false);
+                const text = editor.getText();
+                setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
+            }
+        } else if (activeChapter) {
             const currentHtml = editor.getHTML();
             if (currentHtml !== activeChapter.content) {
                 editor.commands.setContent(activeChapter.content || '', false);
-                
-                // Also update word count after setting content
                 const text = editor.getText();
                 setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
             }
         }
-    }, [activeChapter?.id, activeChapter?.lastSyncToken, editor]);
+    }, [activeChapter?.id, activeChapter?.lastSyncToken, activeWorldDoc?.id, editor]);
 
     // Handle Editable state (Focus Mode + Real-time Lock + Finalized Status)
     useEffect(() => {
@@ -802,6 +806,7 @@ const Editor = () => {
 
 
 
+
     return (
         <div className={`flex flex-col bg-[var(--bg-editor)] overflow-hidden transition-all duration-300 ${isFocusMode ? 'fixed inset-0 z-50' : 'w-full h-full'}`}>
             {/* Multi-device Presence Banner */}
@@ -833,12 +838,13 @@ const Editor = () => {
                 <div className="border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0 px-3 py-2 md:px-6">
                     {/* Mobile Only: Simplified row based on user image */}
                     <div className="flex md:hidden items-center justify-between gap-3">
-                        <button
-                            onClick={() => setIsChapterInfoModalOpen(true)}
-                            className="w-10 h-10 flex items-center justify-center rounded-full border border-[var(--border-main)] text-[var(--accent-main)] bg-[var(--bg-app)]"
-                        >
-                            <Info size={18} />
-                        </button>
+                        
+                    <button
+                        onClick={() => setIsChapterInfoModalOpen(true)}
+                        className="w-10 h-10 flex items-center justify-center rounded-full border border-[var(--border-main)] text-[var(--accent-main)] bg-[var(--bg-app)]"
+                    >
+                        <Info size={18} />
+                    </button>
 
                         {activeChapter && (
                             <div className="flex-1 flex items-center gap-2 px-3 h-10 rounded-full border border-[var(--border-main)] bg-[var(--bg-editor)]">
@@ -898,13 +904,14 @@ const Editor = () => {
                                 <BookOpen size={20} />
                             </button>
 
-                            <button
-                                onClick={() => setIsChapterInfoModalOpen(true)}
-                                className="w-11 h-11 rounded-xl text-[var(--text-muted)] border border-[var(--border-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] transition-all shadow-sm flex items-center justify-center"
-                                title="Información del Capítulo"
-                            >
-                                <Info size={20} />
-                            </button>
+                            
+                                <button
+                                    onClick={() => setIsChapterInfoModalOpen(true)}
+                                    className="w-11 h-11 rounded-xl text-[var(--text-muted)] border border-[var(--border-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] transition-all shadow-sm flex items-center justify-center"
+                                    title="Información del Capítulo"
+                                >
+                                    <Info size={20} />
+                                </button>
                         </div>
 
                         {/* Center Group */}
@@ -1020,6 +1027,16 @@ const Editor = () => {
                                         <div className="fixed inset-0 z-40" onClick={() => setIsDesktopMoreOpen(false)}></div>
                                         <div className="absolute right-0 mt-3 w-64 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200">
                                             <div className="p-1.5 space-y-1">
+                                                <button onClick={() => { setActiveView('ia-studio'); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left">
+                                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-600 text-white flex items-center justify-center group-hover:from-purple-600 group-hover:to-indigo-700 transition-all">
+                                                        <Sparkles size={16} />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[11px] font-black uppercase tracking-widest">IA Studio</span>
+                                                        <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Chat con Inteligencia Artificial</span>
+                                                    </div>
+                                                </button>
+
                                                 <button onClick={() => { setIsDetectionModeModalOpen(true); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left">
                                                     <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition-all">
                                                         <ScanSearch size={16} />
@@ -1080,8 +1097,8 @@ const Editor = () => {
                         <button onClick={() => setIsReadingSettingsModalOpen(true)} className="p-2 rounded-lg border border-[var(--border-main)] text-[var(--text-muted)]"><Settings size={16} /></button>
                     </div>
                     <div className="flex items-center gap-2">
-                        {prevChapter && <button onClick={() => handleChapterNavigation(prevChapter)} className="p-2 text-[var(--accent-main)]"><ChevronLeft size={20} /></button>}
-                        {nextChapter && <button onClick={() => handleChapterNavigation(nextChapter)} className="p-2 text-[var(--accent-main)]"><ChevronRight size={20} /></button>}
+                        {!isWorldDocMode && prevChapter && <button onClick={() => handleChapterNavigation(prevChapter)} className="p-2 text-[var(--accent-main)]"><ChevronLeft size={20} /></button>}
+                        {!isWorldDocMode && nextChapter && <button onClick={() => handleChapterNavigation(nextChapter)} className="p-2 text-[var(--accent-main)]"><ChevronRight size={20} /></button>}
                     </div>
                     <button onClick={() => setIsFocusMode(false)} className="px-4 py-2 rounded-lg border border-red-500/30 text-red-500 font-bold uppercase text-[10px]">Salir</button>
                 </div>
@@ -1089,77 +1106,80 @@ const Editor = () => {
 
             {/* Premium Buffering Overlay */}
 
-            <div ref={editorScrollRef} className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'} ${isEditorLocked ? 'editor-locked-mode' : ''}`}>
-                <div className={`min-h-full transition-all duration-500 mx-auto ${isFocusMode && readingWidth === 'full' ? 'w-full px-2' :
-                    isFocusMode && readingWidth === 'xl' ? 'max-w-7xl' :
-                        isFocusMode && readingWidth === 'lg' ? 'max-w-5xl' :
-                            isFocusMode && readingWidth === 'sm' ? 'max-w-xl' :
-                                'max-w-3xl'
-                    }`}>
-                    {editor && (
-                        <BubbleMenu 
-                            editor={editor} 
-                            pluginKey="bubbleMenuSelection"
-                            shouldShow={({ state, from, to }) => {
-                                const isReadOnlyStatus = activeChapterRef.current?.status === 'Completado' || activeChapterRef.current?.status === 'Finalizado';
-                                const isReadOnlyMode = isReadOnlyStatus || isFocusMode;
-                                return from !== to && !state.selection.empty && !isReadOnlyMode;
-                            }}
-                            className="flex items-center gap-1 bg-[var(--bg-app)]/80 backdrop-blur-xl border border-white/20 p-1.5 rounded-2xl shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200 z-[9999]"
-                        >
-                            <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                                <button
-                                    onClick={() => editor.chain().focus().toggleBold().run()}
-                                    className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('bold') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                    title="Negrita"
-                                >
-                                    <span className="font-bold text-sm">B</span>
-                                </button>
-                                <button
-                                    onClick={() => editor.chain().focus().toggleItalic().run()}
-                                    className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('italic') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                    title="Cursiva"
-                                >
-                                    <span className="italic font-serif text-sm">I</span>
-                                </button>
-                            </div>
-
-                            <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                                {[1, 2, 3].map(level => (
-                                    <button
-                                        key={level}
-                                        onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
-                                        className={`w-9 h-9 flex items-center justify-center rounded-xl text-[10px] font-black transition-all ${editor.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                        title={`Título ${level}`}
-                                    >
-                                        H{level}
-                                    </button>
-                                ))}
-                            </div>
-
-                            <button
-                                onClick={() => {
-                                    const { from, to } = editor.state.selection;
-                                    const text = editor.state.doc.textBetween(from, to, ' ');
-                                    navigator.clipboard.writeText(text);
-                                    toast.success('¡Copiado!');
+            <div className="flex-grow flex overflow-hidden relative w-full h-full">
+                <div ref={editorScrollRef} className={`flex-1 overflow-y-auto px-4 pt-8 pb-8 md:px-20 md:pt-24 md:pb-8 scrollbar-hide transition-all duration-300 ${isFocusMode ? 'editor-focus-mode ' + readingFont : 'font-[Arial,sans-serif]'} ${isEditorLocked ? 'editor-locked-mode' : ''}`}>
+                    <div className={`min-h-full transition-all duration-500 mx-auto ${isFocusMode && readingWidth === 'full' ? 'w-full px-2' :
+                        isFocusMode && readingWidth === 'xl' ? 'max-w-7xl' :
+                            isFocusMode && readingWidth === 'lg' ? 'max-w-5xl' :
+                                isFocusMode && readingWidth === 'sm' ? 'max-w-xl' :
+                                    'max-w-3xl'
+                        }`}>
+                        {editor && (
+                            <BubbleMenu 
+                                editor={editor} 
+                                pluginKey="bubbleMenuSelection"
+                                shouldShow={({ state, from, to }) => {
+                                    const isReadOnlyStatus = activeChapterRef.current?.status === 'Completado' || activeChapterRef.current?.status === 'Finalizado';
+                                    const isReadOnlyMode = isReadOnlyStatus || isFocusMode;
+                                    return from !== to && !state.selection.empty && !isReadOnlyMode;
                                 }}
-                                className="w-9 h-9 flex items-center justify-center rounded-xl text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all ml-0.5"
-                                title="Copiar Selección"
+                                className="flex items-center gap-1 bg-[var(--bg-app)]/80 backdrop-blur-xl border border-white/20 p-1.5 rounded-2xl shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200 z-[9999]"
                             >
-                                <Copy size={16} />
-                            </button>
-                        </BubbleMenu>
-                    )}
-                    {editor && <EditorContent editor={editor} className={`min-h-full cursor-text ${isEditorLocked ? 'pointer-events-none select-none' : ''}`} onClick={() => !isEditorLocked && editor.commands.focus()} />}
+                                <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
+                                    <button
+                                        onClick={() => editor.chain().focus().toggleBold().run()}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('bold') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                        title="Negrita"
+                                    >
+                                        <span className="font-bold text-sm">B</span>
+                                    </button>
+                                    <button
+                                        onClick={() => editor.chain().focus().toggleItalic().run()}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('italic') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                        title="Cursiva"
+                                    >
+                                        <span className="italic font-serif text-sm">I</span>
+                                    </button>
+                                </div>
+
+                                <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
+                                    {[1, 2, 3].map(level => (
+                                        <button
+                                            key={level}
+                                            onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
+                                            className={`w-9 h-9 flex items-center justify-center rounded-xl text-[10px] font-black transition-all ${editor.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
+                                            title={`Título ${level}`}
+                                        >
+                                            H{level}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        const { from, to } = editor.state.selection;
+                                        const text = editor.state.doc.textBetween(from, to, ' ');
+                                        navigator.clipboard.writeText(text);
+                                        toast.success('¡Copiado!');
+                                    }}
+                                    className="w-9 h-9 flex items-center justify-center rounded-xl text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all ml-0.5"
+                                    title="Copiar Selección"
+                                >
+                                    <Copy size={16} />
+                                </button>
+                            </BubbleMenu>
+                        )}
+                        {editor && <EditorContent editor={editor} className={`min-h-full cursor-text ${isEditorLocked ? 'pointer-events-none select-none' : ''}`} onClick={() => !isEditorLocked && editor.commands.focus()} />}
+                    </div>
                 </div>
+
             </div>
 
             {/* Phase 4: Selection Toast */}
             {selectionMetrics.show && (
                 <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="bg-[var(--bg-app)]/90 backdrop-blur-2xl border border-indigo-500/30 rounded-2xl p-2 px-4 shadow-2xl flex items-center gap-6 ring-1 ring-indigo-500/20">
-                        <div className="flex items-center gap-4 border-r border-[var(--border-main)] pr-6">
+                        <div className="flex items-center gap-4">
                             <div className="flex flex-col">
                                 <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest leading-none mb-1">Selección</span>
                                 <div className="flex items-center gap-3">
@@ -1169,23 +1189,6 @@ const Editor = () => {
                                 </div>
                             </div>
                         </div>
-
-                        <button
-                            onClick={() => {
-                                const { from, to } = editor.state.selection;
-                                const text = editor.state.doc.textBetween(from, to, ' ');
-                                setPromptStudioPreload({
-                                    tab: 'refine',
-                                    chapterId: activeChapter.id,
-                                    instructions: `FRAGMENTO SELECCIONADO PARA REFINAR:\n"${text}"`
-                                });
-                                setActiveView('iaStudio');
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-600/20 active:scale-95 group"
-                        >
-                            <Sparkles size={14} className="group-hover:rotate-12 transition-transform" />
-                            Refinar IA
-                        </button>
 
                         <button 
                             onClick={() => {
@@ -1661,36 +1664,21 @@ const Editor = () => {
 
                         {/* Action Buttons */}
                         {!isEditingNote && (
-                            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-6 border-t border-[var(--border-main)]">
-                                {/* Bridge to Prompt Studio — the KEY feature */}
+                            <div className="flex justify-end gap-2 pt-6 border-t border-[var(--border-main)]">
                                 <button
-                                    onClick={handleSendToIAStudio}
-                                    className="w-full sm:w-auto group relative px-5 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 flex items-center justify-center gap-2 overflow-hidden active:scale-95"
+                                    onClick={() => setIsEditingNote(true)}
+                                    className="px-4 py-2.5 border border-[var(--border-main)] rounded-xl font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent-main)] transition-all flex items-center justify-center gap-2 text-sm"
                                 >
-                                    <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                                    <span className="relative z-10 flex items-center gap-2">
-                                        <Sparkles size={18} />
-                                        ✨ Refinar con IA en IA Studio
-                                    </span>
+                                    <Pencil size={14} />
+                                    Editar Nota
                                 </button>
-                                <p className="text-[10px] text-[var(--text-muted)] text-center uppercase tracking-widest">Enviará el fragmento y la nota al modo Refinado del IA Studio</p>
-
-                                <div className="flex gap-2 pt-1">
-                                    <button
-                                        onClick={() => setIsEditingNote(true)}
-                                        className="flex-1 px-4 py-2.5 border border-[var(--border-main)] rounded-xl font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent-main)] transition-all flex items-center justify-center gap-2 text-sm"
-                                    >
-                                        <Pencil size={14} />
-                                        Editar Nota
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteNote(viewingNote.noteId)}
-                                        className="flex-1 px-4 py-2.5 border border-red-500/30 rounded-xl font-bold text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 transition-all flex items-center justify-center gap-2 text-sm"
-                                    >
-                                        <Trash2 size={14} />
-                                        Eliminar Nota
-                                    </button>
-                                </div>
+                                <button
+                                    onClick={() => handleDeleteNote(viewingNote.noteId)}
+                                    className="px-4 py-2.5 border border-red-500/30 rounded-xl font-bold text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 transition-all flex items-center justify-center gap-2 text-sm"
+                                >
+                                    <Trash2 size={14} />
+                                    Eliminar Nota
+                                </button>
                             </div>
                         )}
                     </div>
@@ -1813,6 +1801,8 @@ const Editor = () => {
                                 <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Control</span>
                             </div>
                         </button>
+
+                        {/* Master Doc Button Removed */}
 
                         <button
                             onClick={() => { setIsReadingSettingsModalOpen(true); setIsMobileMenuOpen(false); }}

@@ -593,6 +593,25 @@ export const updateWorldItem = async (bookId, itemId, updateData) => {
     }
 };
 
+export const setWorldItemWithId = async (bookId, itemId, itemData) => {
+    try {
+        const bookRef = doc(db, BOOKS_COLLECTION, bookId);
+        const itemRef = doc(bookRef, WORLD_COLLECTION, itemId);
+        await setDoc(itemRef, {
+            ...itemData,
+            images: itemData.images || [],
+            parentId: itemData.parentId || null,
+            isCategory: itemData.isCategory || false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+        return { id: itemId, ...itemData, images: itemData.images || [], parentId: itemData.parentId || null, isCategory: itemData.isCategory || false };
+    } catch (error) {
+        console.error("Error setting world item with ID: ", error);
+        throw error;
+    }
+};
+
 export const deleteWorldItem = async (bookId, itemId) => {
     try {
         const itemRef = doc(db, BOOKS_COLLECTION, bookId.toString(), WORLD_COLLECTION, itemId.toString());
