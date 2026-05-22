@@ -39,6 +39,34 @@ const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) =>
     return await fetchFn();
 };
 
+/**
+ * The JSON schema that the AI should return for structured responses.
+ * Used for Gemini responseSchema and as documentation in system prompts.
+ */
+export const AI_RESPONSE_SCHEMA = {
+    type: "object",
+    properties: {
+        type: {
+            type: "string",
+            enum: ["content", "analysis", "suggestion"],
+            description: "Type of response: 'content' for HTML to apply to a document, 'analysis' for text analysis, 'suggestion' for creative ideas"
+        },
+        html: {
+            type: "string",
+            description: "HTML content for the document (only when type is 'content')"
+        },
+        text: {
+            type: "string",
+            description: "Markdown text for analysis or suggestions (only when type is 'analysis' or 'suggestion')"
+        },
+        title: {
+            type: "string",
+            description: "Suggested title (only when creating a new document)"
+        }
+    },
+    required: ["type"]
+};
+
 export const AIService = {
     /**
      * Models available (fallback)
@@ -117,7 +145,7 @@ export const AIService = {
     },
 
     /**
-     * Sends a prompt to OpenRouter or Google Directly
+     * Sends a prompt to OpenRouter or Google Directly (non-streaming, single prompt)
      */
     async sendMessage(prompt, apiKey, options = {}) {
         const modelId = options.model || "google/gemini-2.0-flash-exp:free";
@@ -148,7 +176,7 @@ export const AIService = {
                         model: modelId,
                         messages: [{ role: "user", content: prompt }],
                         temperature: temperature,
-                        max_tokens: options.max_tokens || 4000,
+                        max_tokens: options.max_tokens || 8192,
                     })
                 });
             });
@@ -167,7 +195,7 @@ export const AIService = {
     },
 
     /**
-     * Direct call to Google AI Studio (Gemini) API
+     * Direct call to Google AI Studio (Gemini) API (non-streaming)
      */
     async sendGeminiMessage(prompt, apiKey, model, options = {}) {
         if (!apiKey) {
@@ -184,7 +212,7 @@ export const AIService = {
                     contents: [{ parts: [{ text: prompt }] }],
                     generationConfig: {
                         temperature: options.temperature ?? 0.7,
-                        maxOutputTokens: options.max_tokens || 4000,
+                        maxOutputTokens: options.max_tokens || 8192,
                     }
                 })
             });
@@ -208,12 +236,14 @@ export const AIService = {
     /**
      * Generates a streaming response from the AI (supports OpenRouter, Google Direct, DeepSeek Direct)
      * @param {Array} messages - Array of message objects {role, content}
-     * @param {Object} settings - AI settings (apiKey, model, etc)
+     * @param {Object} settings - AI settings (apiKey, model, temperature, useJsonMode, etc)
      * @param {Function} onChunk - Callback for each text chunk
      */
     async generateStream(messages, settings, onChunk) {
         const modelId = settings?.selectedAiModel || "google/gemini-2.0-flash-exp:free";
         const selectedApi = settings?.selectedApi || 'openrouter';
+        const temperature = settings?.temperature ?? 0.7;
+        const useJsonMode = settings?.useJsonMode ?? false;
 
         if (selectedApi === 'deepseek') {
             // DeepSeek Direct SSE Stream
@@ -224,9 +254,14 @@ export const AIService = {
                 model: modelId,
                 messages: messages,
                 stream: true,
-                temperature: 0.7,
-                max_tokens: 4000
+                temperature: temperature,
+                max_tokens: 32768
             };
+
+            // Enable JSON mode if requested
+            if (useJsonMode) {
+                body.response_format = { type: "json_object" };
+            }
 
             // Enable reasoning (thinking) mode for DeepSeek V4 if configured
             if (settings?.reasoningMode) {
@@ -239,7 +274,8 @@ export const AIService = {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: settings?.signal
             });
 
             if (!response.ok) {
@@ -284,25 +320,44 @@ export const AIService = {
         }
 
         if (isGoogleDirect) {
-            // Google Direct SSE Stream
+            // Google Direct SSE Stream — with optional JSON mode via responseMimeType
             const model = modelId.split('/')[1] + ":streamGenerateContent";
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?alt=sse&key=${apiKey}`;
 
-            const payload = {
-                contents: messages.map(m => ({
-                    role: m.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: m.content }]
-                })),
-                generationConfig: {
-                    temperature: 0.7,
-                    maxOutputTokens: 4000
-                }
+            const generationConfig = {
+                temperature: temperature,
+                maxOutputTokens: 32768
             };
+
+            // Enable JSON mode for Gemini if requested
+            if (useJsonMode) {
+                generationConfig.responseMimeType = "application/json";
+                generationConfig.responseSchema = AI_RESPONSE_SCHEMA;
+            }
+
+            const payload = {
+                contents: messages
+                    .filter(m => m.role !== 'system')
+                    .map(m => ({
+                        role: m.role === 'assistant' ? 'model' : 'user',
+                        parts: [{ text: m.content }]
+                    })),
+                generationConfig
+            };
+
+            // Inject system prompt as systemInstruction for Gemini
+            const systemMsg = messages.find(m => m.role === 'system');
+            if (systemMsg) {
+                payload.systemInstruction = {
+                    parts: [{ text: systemMsg.content }]
+                };
+            }
 
             const response = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: settings?.signal
             });
 
             if (!response.ok) {
@@ -344,6 +399,19 @@ export const AIService = {
             }
         } else {
             // OpenRouter SSE Stream (with retry on rate-limit)
+            // Some OpenRouter models support response_format; pass it when useJsonMode is true
+            const body = {
+                model: modelId,
+                messages: messages,
+                stream: true,
+                temperature: temperature,
+                max_tokens: 32768,
+            };
+
+            if (useJsonMode) {
+                body.response_format = { type: "json_object" };
+            }
+
             const response = await retryOnRateLimit(async () => {
                 return await fetch(OPENROUTER_URL, {
                     method: "POST",
@@ -353,12 +421,8 @@ export const AIService = {
                         "X-Title": "Writer IA Studio",
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({
-                        model: modelId,
-                        messages: messages,
-                        stream: true,
-                        temperature: 0.7,
-                    })
+                    body: JSON.stringify(body),
+                    signal: settings?.signal
                 });
             });
 

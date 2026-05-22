@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { useIAStudioContext } from '../context/IAStudioContext'
 import { QUICK_ACTIONS } from './ia-studio/IAStudioUtils'
 import Modal from './Modal'
+import ConfirmModal from './ConfirmModal'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -110,7 +111,26 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         activeView, setActiveView, reorderChapters,
         activeWorldDoc, openWorldDoc, characters, worldItems,
     } = useData();
-    const { contextSelections, destinationDoc } = useIAStudioContext();
+    const { 
+        contextSelections, 
+        destinationDoc,
+        sessions,
+        activeSession,
+        switchSession,
+        newSession,
+        deleteSession,
+        renameSession
+    } = useIAStudioContext();
+
+    const [renamingSessionId, setRenamingSessionId] = useState(null);
+    const [renameSessionValue, setRenameSessionValue] = useState('');
+
+    const handleRenameConfirm = (sessionId) => {
+        if (renameSessionValue.trim()) {
+            renameSession(sessionId, renameSessionValue.trim());
+        }
+        setRenamingSessionId(null);
+    };
     const [isBooksOpen, setIsBooksOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [expandedVolumes, setExpandedVolumes] = useState({});
@@ -133,6 +153,8 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const [selectedVolumeId, setSelectedVolumeId] = useState('');
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [chapterToDelete, setChapterToDelete] = useState(null);
+    const [isDeleteSessionModalOpen, setIsDeleteSessionModalOpen] = useState(false);
+    const [sessionToDelete, setSessionToDelete] = useState(null);
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -496,29 +518,136 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                             })}
                         </div>
                     ) : activeView === 'ia-studio' && !isSidebarCollapsed ? (
-                        <div className="px-4 py-4 space-y-4 animate-in fade-in duration-300">
+                        <div className="px-4 py-4 space-y-4 flex flex-col h-full min-h-0 animate-in fade-in duration-300">
                             {/* Contexto y Destino - Botón principal arriba */}
                             <button
                                 onClick={() => window.dispatchEvent(new CustomEvent('open-context-modal'))}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gradient-to-r from-indigo-500/15 to-emerald-500/15 border border-indigo-500/10 text-indigo-600 hover:from-indigo-500/25 hover:to-emerald-500/25 transition-all text-[10px] font-black uppercase tracking-wider"
+                                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 text-indigo-500 hover:from-indigo-500/20 hover:to-purple-500/20 transition-all text-[10px] font-black uppercase tracking-wider shrink-0 shadow-sm"
                             >
-                                <BookOpen size={12} /> Contexto y Destino
+                                <Sparkles size={12} className="text-indigo-500" /> Contexto y Destino
                             </button>
 
                             {/* Mini resumen contexto */}
                             {contextSelections && (contextSelections.chapterIds?.length > 0 || contextSelections.worldItemIds?.length > 0) && (
-                                <div className="px-3 py-2 bg-[var(--bg-editor)]/50 rounded-lg border border-[var(--border-main)]/30 -mt-2">
-                                    <p className="text-[9px] font-bold text-indigo-500">
+                                <div className="px-3 py-2 bg-[var(--bg-editor)]/40 rounded-xl border border-[var(--border-main)]/35 -mt-2 shrink-0">
+                                    <p className="text-[9px] font-bold text-indigo-500 flex items-center gap-1">
+                                        <span className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse"></span>
                                         {contextSelections.chapterIds?.length || 0} caps · {contextSelections.worldItemIds?.length || 0} master docs
                                     </p>
                                     {destinationDoc && (
-                                        <p className="text-[8px] text-[var(--text-muted)] mt-1 truncate">
-                                            → {destinationDoc.mode === 'auto' ? 'Auto' : destinationDoc.mode === 'new' ? 'Nuevo' : destinationDoc.docTitle}
+                                        <p className="text-[8px] text-[var(--text-muted)] mt-1 truncate pl-1.5 border-l border-[var(--border-main)]/30">
+                                            → {destinationDoc.mode === 'auto' ? 'Auto (IA decide)' : destinationDoc.mode === 'new' ? 'Nuevo Doc' : destinationDoc.docTitle}
                                         </p>
                                     )}
                                 </div>
                             )}
 
+                            {/* Separator and Sessions list */}
+                            <div className="border-t border-[var(--border-main)]/30 pt-3 flex-1 flex flex-col min-h-0">
+                                <div className="flex items-center justify-between px-1 mb-2 shrink-0">
+                                    <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">
+                                        Conversaciones
+                                    </div>
+                                    <button
+                                        onClick={newSession}
+                                        className="w-6 h-6 flex items-center justify-center bg-[var(--accent-soft)] text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white rounded-lg transition-all shadow-sm shrink-0"
+                                        title="Nueva conversación"
+                                    >
+                                        <Plus size={14} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-1.5 overflow-y-auto pr-1 scrollbar-hide flex-1 pb-4">
+                                    {(!sessions || sessions.length === 0) ? (
+                                        <div className="text-xs text-[var(--text-muted)] italic py-6 text-center bg-[var(--accent-soft)]/10 rounded-xl border border-dashed border-[var(--border-main)]/50">
+                                            No hay conversaciones
+                                        </div>
+                                    ) : (
+                                        sessions.map(s => {
+                                            const isActive = s.id === activeSession?.id;
+                                            const isRenaming = renamingSessionId === s.id;
+
+                                            return (
+                                                <div 
+                                                    key={s.id} 
+                                                    className={`group relative rounded-xl transition-all border ${
+                                                        isActive 
+                                                            ? 'bg-[var(--accent-soft)] border-[var(--accent-main)]/20 text-[var(--accent-main)] shadow-sm' 
+                                                            : 'bg-[var(--bg-editor)]/30 border-transparent hover:bg-[var(--accent-soft)]/20'
+                                                    }`}
+                                                >
+                                                    {isRenaming ? (
+                                                        <div className="px-2 py-1.5 flex items-center gap-1.5">
+                                                            <input 
+                                                                autoFocus 
+                                                                value={renameSessionValue} 
+                                                                onChange={(e) => setRenameSessionValue(e.target.value)}
+                                                                onKeyDown={(e) => { 
+                                                                    if (e.key === 'Enter') handleRenameConfirm(s.id); 
+                                                                    if (e.key === 'Escape') setRenamingSessionId(null); 
+                                                                }}
+                                                                className="flex-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-lg px-2 py-1 text-xs text-[var(--text-main)] focus:outline-none focus:border-[var(--accent-main)]" 
+                                                            />
+                                                            <button 
+                                                                onClick={() => handleRenameConfirm(s.id)} 
+                                                                className="p-1 rounded-lg text-emerald-500 hover:bg-emerald-500/10 shrink-0"
+                                                            >
+                                                                <Check size={12} />
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => setRenamingSessionId(null)} 
+                                                                className="p-1 rounded-lg text-[var(--text-muted)] hover:bg-[var(--accent-soft)] shrink-0"
+                                                            >
+                                                                <X size={12} />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center justify-between px-3 py-2">
+                                                            <button 
+                                                                onClick={() => handleSelectMobile(() => switchSession(s.id))} 
+                                                                className="flex-1 flex flex-col text-left min-w-0 pr-10"
+                                                            >
+                                                                <span className={`text-[12px] truncate leading-tight ${isActive ? 'font-black text-[var(--accent-main)]' : 'font-semibold text-[var(--text-main)]'}`}>
+                                                                    {s.name}
+                                                                </span>
+                                                                <span className="text-[9px] text-[var(--text-muted)] opacity-60 mt-0.5 font-medium">
+                                                                    {s.messages?.length || 0} mensajes
+                                                                </span>
+                                                            </button>
+
+                                                            {/* Actions container - absolute positioned on right */}
+                                                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-gradient-to-l from-[var(--bg-app)] pl-2 rounded-r-xl h-full">
+                                                                <button 
+                                                                    onClick={(e) => { 
+                                                                        e.stopPropagation(); 
+                                                                        setRenamingSessionId(s.id); 
+                                                                        setRenameSessionValue(s.name); 
+                                                                    }}
+                                                                    className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 transition-all shrink-0"
+                                                                    title="Renombrar conversación"
+                                                                >
+                                                                    <Edit2 size={11} />
+                                                                </button>
+                                                                <button 
+                                                                    onClick={(e) => { 
+                                                                        e.stopPropagation(); 
+                                                                        setSessionToDelete(s);
+                                                                        setIsDeleteSessionModalOpen(true);
+                                                                    }}
+                                                                    className="p-1 rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-all shrink-0"
+                                                                    title="Eliminar conversación"
+                                                                >
+                                                                    <Trash2 size={11} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     ) : null}
                 </div>
@@ -738,6 +867,24 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                     </div>
                 </div>
             </Modal>
+
+            <ConfirmModal
+                isOpen={isDeleteSessionModalOpen}
+                onClose={() => {
+                    setIsDeleteSessionModalOpen(false);
+                    setSessionToDelete(null);
+                }}
+                onConfirm={() => {
+                    if (sessionToDelete) {
+                        deleteSession(sessionToDelete.id);
+                    }
+                }}
+                title="¿Eliminar Conversación?"
+                message={`¿Estás seguro de que quieres eliminar la conversación "${sessionToDelete?.name || ''}"? Esta acción no se puede deshacer y perderás el historial de mensajes.`}
+                confirmText="Sí, Eliminar"
+                cancelText="Cancelar"
+                type="danger"
+            />
         </>
     )
 }

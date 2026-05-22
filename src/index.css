@@ -476,3 +476,143 @@ body {
   font-size: 0.95rem;
   opacity: 0.6;
 }
+
+/* Shimmer Skeleton Animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+/* ============================================
+   IA Studio — Markdown Message Renderer
+   ============================================ */
+
+.ia-markdown {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: var(--text-main);
+}
+
+.ia-markdown p {
+  margin-bottom: 0.75em;
+}
+
+.ia-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.ia-markdown h1,
+.ia-markdown h2,
+.ia-markdown h3,
+.ia-markdown h4 {
+  font-weight: 800;
+  color: var(--text-main);
+  margin-top: 1.25em;
+  margin-bottom: 0.4em;
+  letter-spacing: -0.02em;
+}
+
+.ia-markdown h1 { font-size: 1.25em; }
+.ia-markdown h2 { font-size: 1.1em; border-bottom: 1px solid var(--border-main); padding-bottom: 0.2em; }
+.ia-markdown h3 { font-size: 1em; }
+
+.ia-markdown strong,
+.ia-markdown b {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ia-markdown em,
+.ia-markdown i {
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.ia-markdown ul,
+.ia-markdown ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.ia-markdown ul {
+  list-style-type: disc;
+}
+
+.ia-markdown ol {
+  list-style-type: decimal;
+}
+
+.ia-markdown li {
+  margin-bottom: 0.3em;
+}
+
+.ia-markdown li::marker {
+  color: var(--accent-main);
+}
+
+.ia-markdown blockquote {
+  border-left: 3px solid var(--accent-main);
+  margin: 0.75em 0;
+  padding: 0.4em 0.75em;
+  background: var(--accent-soft);
+  border-radius: 0 0.5rem 0.5rem 0;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.ia-markdown code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85em;
+  background: var(--border-main);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  opacity: 0.9;
+}
+
+.ia-markdown pre {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.ia-markdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.8em;
+}
+
+.ia-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-main);
+  margin: 1em 0;
+  opacity: 0.5;
+}
+
+.ia-markdown a {
+  color: var(--accent-main);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Error variant — red tint */
+.ia-markdown--error {
+  color: #ef4444;
+  opacity: 0.9;
+}
+
+.ia-markdown--error strong {
+  color: #ef4444;
+}
+

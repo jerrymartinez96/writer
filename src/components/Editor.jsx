@@ -549,7 +549,19 @@ const Editor = () => {
 
     const editor = useEditor({
         extensions: [
-            StarterKit,
+            StarterKit.configure({
+                bold: false,
+                italic: false,
+                heading: false,
+                strike: false,
+                code: false,
+                blockquote: false,
+                bulletList: false,
+                orderedList: false,
+                listItem: false,
+                codeBlock: false,
+                horizontalRule: false,
+            }),
             CharacterMention,
             InlineNote,
             GhostMention,
@@ -888,15 +900,6 @@ const Editor = () => {
                         {/* Left Group */}
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={() => setIsFormattingModalOpen(true)}
-                                className="h-11 px-4 rounded-xl text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white transition-all shadow-sm flex items-center gap-2 border border-[var(--border-main)]"
-                                title="Formato y Estilos"
-                            >
-                                <Pencil size={18} />
-                                <span className="text-base font-black leading-none pb-0.5">A</span>
-                            </button>
-
-                            <button
                                 onClick={() => setIsFocusMode(true)}
                                 className="w-11 h-11 rounded-xl text-[var(--text-muted)] border border-[var(--border-main)] hover:border-[var(--accent-main)] hover:text-[var(--accent-main)] transition-all shadow-sm flex items-center justify-center"
                                 title="Modo Lectura / Foco"
@@ -1123,38 +1126,8 @@ const Editor = () => {
                                     const isReadOnlyMode = isReadOnlyStatus || isFocusMode;
                                     return from !== to && !state.selection.empty && !isReadOnlyMode;
                                 }}
-                                className="flex items-center gap-1 bg-[var(--bg-app)]/80 backdrop-blur-xl border border-white/20 p-1.5 rounded-2xl shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200 z-[9999]"
+                                className="flex items-center gap-1.5 bg-[var(--bg-app)]/85 backdrop-blur-2xl border border-white/10 p-1.5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-indigo-500/10 shadow-indigo-950/20 z-[9999]"
                             >
-                                <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                                    <button
-                                        onClick={() => editor.chain().focus().toggleBold().run()}
-                                        className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('bold') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                        title="Negrita"
-                                    >
-                                        <span className="font-bold text-sm">B</span>
-                                    </button>
-                                    <button
-                                        onClick={() => editor.chain().focus().toggleItalic().run()}
-                                        className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${editor.isActive('italic') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                        title="Cursiva"
-                                    >
-                                        <span className="italic font-serif text-sm">I</span>
-                                    </button>
-                                </div>
-
-                                <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                                    {[1, 2, 3].map(level => (
-                                        <button
-                                            key={level}
-                                            onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
-                                            className={`w-9 h-9 flex items-center justify-center rounded-xl text-[10px] font-black transition-all ${editor.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                            title={`Título ${level}`}
-                                        >
-                                            H{level}
-                                        </button>
-                                    ))}
-                                </div>
-
                                 <button
                                     onClick={() => {
                                         const { from, to } = editor.state.selection;
@@ -1162,10 +1135,11 @@ const Editor = () => {
                                         navigator.clipboard.writeText(text);
                                         toast.success('¡Copiado!');
                                     }}
-                                    className="w-9 h-9 flex items-center justify-center rounded-xl text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all ml-0.5"
+                                    className="h-10 px-4 flex items-center justify-center rounded-xl bg-[var(--accent-main)]/10 text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all duration-300 gap-2 font-black text-[10px] uppercase tracking-[0.15em] hover:scale-[1.03] active:scale-95 shadow-sm active:shadow-none cursor-pointer"
                                     title="Copiar Selección"
                                 >
-                                    <Copy size={16} />
+                                    <Copy size={13} className="transition-transform group-hover:scale-110" />
+                                    <span className="pr-0.5 leading-none">Copiar</span>
                                 </button>
                             </BubbleMenu>
                         )}
@@ -1428,77 +1402,6 @@ const Editor = () => {
                 editor={editor}
             />
 
-            {/* Formatting Hub Modal */}
-            <Modal isOpen={isFormattingModalOpen} onClose={() => setIsFormattingModalOpen(false)} title="Opciones de Formato">
-                <div className="p-8 space-y-8 font-sans">
-                    {/* Headings & Text Styles */}
-                    <div className="space-y-4">
-                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Estilos de Jerarquía</label>
-                        <div className="grid grid-cols-3 gap-3">
-                            {[1, 2, 3].map(level => (
-                                <button
-                                    key={level}
-                                    onClick={() => {
-                                        editor?.chain().focus().toggleHeading({ level }).run();
-                                        setIsFormattingModalOpen(false);
-                                    }}
-                                    className={`p-5 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 ${editor?.isActive('heading', { level }) ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
-                                >
-                                    <span className="text-2xl font-black">H{level}</span>
-                                    <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Nivel {level}</span>
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => {
-                                    editor?.chain().focus().setParagraph().run();
-                                    setIsFormattingModalOpen(false);
-                                }}
-                                className={`p-4 rounded-2xl border transition-all flex flex-col items-center justify-center gap-1 col-span-3 ${editor?.isActive('paragraph') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
-                            >
-                                <span className="text-sm font-black uppercase tracking-widest leading-none">Párrafo Estándar</span>
-                                <span className="text-[9px] font-medium opacity-60">Texto normal del manuscrito</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Basic Formatting */}
-                    <div className="space-y-4">
-                        <label className="block text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">Énfasis de Texto</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={() => editor?.chain().focus().toggleBold().run()}
-                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('bold') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
-                            >
-                                <span className="text-2xl font-black">B</span>
-                                <span className="text-xs font-black uppercase tracking-widest">Negrita</span>
-                            </button>
-                            <button
-                                onClick={() => editor?.chain().focus().toggleItalic().run()}
-                                className={`p-4 rounded-2xl border transition-all flex items-center justify-between px-6 ${editor?.isActive('italic') ? 'bg-[var(--accent-main)] border-[var(--accent-main)] text-white shadow-lg' : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-main)] hover:border-[var(--accent-main)]/50'}`}
-                            >
-                                <span className="text-2xl italic font-serif">I</span>
-                                <span className="text-xs font-black uppercase tracking-widest">Cursiva</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Cleanup */}
-                    <div className="pt-6 border-t border-[var(--border-main)]">
-                        <button
-                            onClick={() => {
-                                editor?.chain().focus().unsetAllMarks().run();
-                                editor?.chain().focus().clearNodes().run();
-                                setIsFormattingModalOpen(false);
-                                toast.info("Formato limpiado.");
-                            }}
-                            className="w-full py-4 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 border border-red-500/10 hover:border-red-500 shadow-sm"
-                        >
-                            <Trash2 size={16} />
-                            Limpiar Todo el Formato
-                        </button>
-                    </div>
-                </div>
-            </Modal>
 
             {/* Settings Reading Modal */}
             <Modal isOpen={isReadingSettingsModalOpen} onClose={() => setIsReadingSettingsModalOpen(false)} title="Configuración de Lectura">
@@ -1759,23 +1662,9 @@ const Editor = () => {
                 bookId={activeBook?.id}
             />
 
-            {/* Mobile Actions Modal */}
             <Modal isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} title="Herramientas del Editor">
                 <div className="p-8 space-y-10 bg-indigo-500/[0.01]">
                     <div className="grid grid-cols-2 gap-4">
-                        <button
-                            onClick={() => { setIsFormattingModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 group"
-                        >
-                            <div className="w-14 h-14 rounded-[20px] bg-indigo-100 text-indigo-600 flex items-center justify-center transition-transform group-hover:scale-110">
-                                <Pencil size={28} />
-                            </div>
-                            <div className="text-center">
-                                <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">Formato</span>
-                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Tipografía</span>
-                            </div>
-                        </button>
-
                         <button
                             onClick={() => { setIsDetectionModeModalOpen(true); setIsMobileMenuOpen(false); }}
                             className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-emerald-500/5 group"
@@ -1806,14 +1695,14 @@ const Editor = () => {
 
                         <button
                             onClick={() => { setIsReadingSettingsModalOpen(true); setIsMobileMenuOpen(false); }}
-                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-orange-500/5 group"
+                            className="p-8 rounded-[32px] bg-[var(--bg-editor)] border border-[var(--border-main)] flex flex-col items-center gap-4 active:scale-95 transition-all shadow-sm hover:shadow-xl hover:shadow-orange-500/5 group col-span-2 flex-row justify-center gap-8"
                         >
                             <div className="w-14 h-14 rounded-[20px] bg-orange-100 text-orange-600 flex items-center justify-center transition-transform group-hover:scale-110">
                                 <Sliders size={28} />
                             </div>
-                            <div className="text-center">
+                            <div className="text-left">
                                 <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-main)]">Lectura</span>
-                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Ajustes</span>
+                                <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase tracking-widest opacity-60">Ajustes del Visualizador</span>
                             </div>
                         </button>
                     </div>

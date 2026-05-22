@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Check, FileText, Globe, BookOpen, Layers, User, Bookmark, Users, X, ChevronRight, Target } from 'lucide-react';
-import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS } from './IAStudioUtils';
+import { Check, FileText, Globe, BookOpen, Layers, User, Bookmark, Users, X, ChevronRight, Target, AlertTriangle, Zap } from 'lucide-react';
+import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS, estimateContextWeight } from './IAStudioUtils';
 import { useIAStudioContext } from '../../context/IAStudioContext';
 
 const IAStudioContextPanel = ({
@@ -186,6 +186,23 @@ const IAStudioContextPanel = ({
                         </span>
                     </div>
 
+                    {/* Heavy context warning */}
+                    {(() => {
+                        const weight = estimateContextWeight(chapters, selectedChapterIds, worldItems, selectedWorldItemIds);
+                        if (!weight.isHeavy) return null;
+                        return (
+                            <div className="flex items-start gap-2 px-3 py-2 mb-2 rounded-lg bg-amber-500/5 border border-amber-500/20 animate-in fade-in duration-200">
+                                <AlertTriangle size={10} className="text-amber-500 shrink-0 mt-0.5" />
+                                <div className="min-w-0">
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-amber-500 leading-tight">Contexto Pesado</p>
+                                    <p className="text-[8px] text-[var(--text-muted)] opacity-70 leading-tight mt-0.5">
+                                        ~{(weight.estimatedTokens / 1000).toFixed(1)}k tokens. Usa el botón "Comprimir" en el chat.
+                                    </p>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {/* Volumes */}
                     {volumes.map(vol => {
                         const volChapters = getChaptersByParent(vol.id);
@@ -208,9 +225,16 @@ const IAStudioContextPanel = ({
                                             type="checkbox"
                                             checked={isSelected(ch.id)}
                                             onChange={() => toggleChapter(ch.id)}
-                                            className="w-3.5 h-3.5 rounded border-[var(--border-main)] text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+                                            className="hidden"
                                         />
-                                        <div className="w-1.5 h-1.5 rounded-full shrink-0 ${getStatusColor(ch.status)}" />
+                                        <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center shrink-0 ${
+                                            isSelected(ch.id) 
+                                                ? 'bg-indigo-600 border-indigo-600 text-white scale-110 shadow-md shadow-indigo-600/10' 
+                                                : 'border-[var(--border-main)] bg-[var(--bg-app)]'
+                                        }`}>
+                                            {isSelected(ch.id) && <Check size={10} strokeWidth={4} />}
+                                        </div>
+                                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${getStatusColor(ch.status)}`} />
                                         <span className="text-[11px] text-[var(--text-main)] truncate flex-1">
                                             {ch.title || 'Sin título'}
                                         </span>
@@ -227,8 +251,15 @@ const IAStudioContextPanel = ({
                                 type="checkbox"
                                 checked={isSelected(ch.id)}
                                 onChange={() => toggleChapter(ch.id)}
-                                className="w-3.5 h-3.5 rounded border-[var(--border-main)] text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+                                className="hidden"
                             />
+                            <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center shrink-0 ${
+                                isSelected(ch.id) 
+                                    ? 'bg-indigo-600 border-indigo-600 text-white scale-110 shadow-md shadow-indigo-600/10' 
+                                    : 'border-[var(--border-main)] bg-[var(--bg-app)]'
+                            }`}>
+                                {isSelected(ch.id) && <Check size={10} strokeWidth={4} />}
+                            </div>
                             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${getStatusColor(ch.status)}`} />
                             <span className="text-[11px] text-[var(--text-main)] truncate flex-1">
                                 {ch.title || 'Sin título'}
@@ -272,8 +303,15 @@ const IAStudioContextPanel = ({
                                     type="checkbox"
                                     checked={isWorldSelected(wid)}
                                     onChange={() => toggleWorldItem(wid)}
-                                    className="w-3.5 h-3.5 rounded border-[var(--border-main)] text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+                                    className="hidden"
                                 />
+                                <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center shrink-0 ${
+                                    isWorldSelected(wid) 
+                                        ? 'bg-indigo-600 border-indigo-600 text-white scale-110 shadow-md shadow-indigo-600/10' 
+                                        : 'border-[var(--border-main)] bg-[var(--bg-app)]'
+                                }`}>
+                                    {isWorldSelected(wid) && <Check size={10} strokeWidth={4} />}
+                                </div>
                                 <Icon size={11} className="text-indigo-500/60 shrink-0" />
                                 <span className="text-[11px] text-[var(--text-main)] truncate flex-1">
                                     {label}
@@ -289,8 +327,15 @@ const IAStudioContextPanel = ({
                                 type="checkbox"
                                 checked={isWorldSelected(w.id)}
                                 onChange={() => toggleWorldItem(w.id)}
-                                className="w-3.5 h-3.5 rounded border-[var(--border-main)] text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+                                className="hidden"
                             />
+                            <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center shrink-0 ${
+                                isWorldSelected(w.id) 
+                                    ? 'bg-indigo-600 border-indigo-600 text-white scale-110 shadow-md shadow-indigo-600/10' 
+                                    : 'border-[var(--border-main)] bg-[var(--bg-app)]'
+                                }`}>
+                                    {isWorldSelected(w.id) && <Check size={10} strokeWidth={4} />}
+                                </div>
                             <FileText size={11} className="text-[var(--text-muted)] shrink-0" />
                             <span className="text-[11px] text-[var(--text-main)] truncate flex-1">
                                 {w.title || 'Sin título'}

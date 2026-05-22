@@ -11,7 +11,19 @@ const RichTextEditor = ({ content, onChange, onBlur, placeholder = 'Escribe aquÃ
     
     const editor = useEditor({
         extensions: [
-            StarterKit,
+            StarterKit.configure({
+                bold: false,
+                italic: false,
+                heading: false,
+                strike: false,
+                code: false,
+                blockquote: false,
+                bulletList: false,
+                orderedList: false,
+                listItem: false,
+                codeBlock: false,
+                horizontalRule: false,
+            }),
             Placeholder.configure({
                 placeholder,
             }),
@@ -63,41 +75,8 @@ const RichTextEditor = ({ content, onChange, onBlur, placeholder = 'Escribe aquÃ
                     shouldShow={({ state, from, to }) => {
                         return from !== to && !state.selection.empty && isEditable;
                     }}
-                    className="flex items-center gap-1 bg-[var(--bg-app)]/80 backdrop-blur-xl border border-white/20 p-1.5 rounded-2xl shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200 z-[9999]"
+                    className="flex items-center gap-1.5 bg-[var(--bg-app)]/85 backdrop-blur-2xl border border-white/10 p-1.5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-indigo-500/10 shadow-indigo-950/20 z-[9999]"
                 >
-                    <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                        <button
-                            type="button"
-                            onClick={() => editor.chain().focus().toggleBold().run()}
-                            className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all ${editor.isActive('bold') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                            title="Negrita"
-                        >
-                            <span className="font-bold text-sm">B</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => editor.chain().focus().toggleItalic().run()}
-                            className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all ${editor.isActive('italic') ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                            title="Cursiva"
-                        >
-                            <span className="italic font-serif text-sm">I</span>
-                        </button>
-                    </div>
-
-                    <div className="flex items-center gap-0.5 px-1 border-r border-white/10 mr-1">
-                        {[1, 2, 3].map(level => (
-                            <button
-                                type="button"
-                                key={level}
-                                onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
-                                className={`w-8 h-8 flex items-center justify-center rounded-xl text-[10px] font-black transition-all ${editor.isActive('heading', { level }) ? 'bg-[var(--accent-main)] text-white' : 'text-[var(--text-main)] hover:bg-white/10'}`}
-                                title={`TÃ­tulo ${level}`}
-                            >
-                                H{level}
-                            </button>
-                        ))}
-                    </div>
-
                     <button
                         type="button"
                         onClick={() => {
@@ -106,10 +85,11 @@ const RichTextEditor = ({ content, onChange, onBlur, placeholder = 'Escribe aquÃ
                             navigator.clipboard.writeText(text);
                             toast.success('Â¡Copiado!');
                         }}
-                        className="w-8 h-8 flex items-center justify-center rounded-xl text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all ml-0.5"
+                        className="h-10 px-4 flex items-center justify-center rounded-xl bg-[var(--accent-main)]/10 text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white transition-all duration-300 gap-2 font-black text-[10px] uppercase tracking-[0.15em] hover:scale-[1.03] active:scale-95 shadow-sm active:shadow-none cursor-pointer"
                         title="Copiar SelecciÃ³n"
                     >
-                        <Copy size={14} />
+                        <Copy size={13} className="transition-transform group-hover:scale-110" />
+                        <span className="pr-0.5 leading-none">Copiar</span>
                     </button>
                 </BubbleMenu>
             )}

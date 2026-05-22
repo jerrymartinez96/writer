@@ -61,6 +61,15 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Listen for mobile sidebar trigger
+  useEffect(() => {
+    const handleOpenMobileSidebar = () => {
+      setIsMobileMenuOpen(true);
+    };
+    window.addEventListener('open-mobile-sidebar', handleOpenMobileSidebar);
+    return () => window.removeEventListener('open-mobile-sidebar', handleOpenMobileSidebar);
+  }, []);
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);

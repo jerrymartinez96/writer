@@ -30,6 +30,8 @@ const SettingsView = () => {
     const [googleApiKey, setGoogleApiKey] = useState(activeBook?.aiSettings?.googleApiKey || '');
     const [deepseekApiKey, setDeepseekApiKey] = useState(activeBook?.aiSettings?.deepseekApiKey || '');
     const [reasoningMode, setReasoningMode] = useState(activeBook?.aiSettings?.reasoningMode ?? false);
+    const [inputTokenCost, setInputTokenCost] = useState(activeBook?.aiSettings?.inputTokenCost ?? 0.075);
+    const [outputTokenCost, setOutputTokenCost] = useState(activeBook?.aiSettings?.outputTokenCost ?? 0.15);
     const [showApiKey, setShowApiKey] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
@@ -60,6 +62,8 @@ const SettingsView = () => {
             setDeepseekApiKey(activeBook.aiSettings?.deepseekApiKey || '');
             setSelectedModel(activeBook.aiSettings?.selectedAiModel || '');
             setReasoningMode(activeBook.aiSettings?.reasoningMode ?? false);
+            setInputTokenCost(activeBook.aiSettings?.inputTokenCost ?? 0.075);
+            setOutputTokenCost(activeBook.aiSettings?.outputTokenCost ?? 0.15);
         }
         if (activeBook) {
             hasLoadedProfile.current = true;
@@ -89,7 +93,9 @@ const SettingsView = () => {
                         googleApiKey,
                         deepseekApiKey,
                         reasoningMode,
-                        selectedAiModel: selectedModel
+                        selectedAiModel: selectedModel,
+                        inputTokenCost,
+                        outputTokenCost
                     }
                 });
             } catch (e) {
@@ -102,7 +108,7 @@ const SettingsView = () => {
         return () => {
             if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
         };
-    }, [selectedApi, openRouterKey, googleApiKey, deepseekApiKey, reasoningMode, selectedModel]);
+    }, [selectedApi, openRouterKey, googleApiKey, deepseekApiKey, reasoningMode, selectedModel, inputTokenCost, outputTokenCost]);
     
     // Export States
     const [exportFormat, setExportFormat] = useState('pdf');
@@ -377,11 +383,51 @@ const SettingsView = () => {
                                 </div>
                             </div>
 
-                            {/* Step 4: Reasoning Mode Toggle (solo DeepSeek) */}
+                            {/* Step 4: Token Rates */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-500 text-[9px] font-black flex items-center justify-center">4</span>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Tarifas de Tokens (USD por 1M tkn)</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 bg-[var(--bg-app)] border border-[var(--border-main)] p-3 rounded-xl">
+                                    <div>
+                                        <label className="text-[8px] text-[var(--text-muted)] font-black uppercase tracking-[0.1em] block mb-1">Entrada (Input)</label>
+                                        <input
+                                            type="number"
+                                            step="0.00001"
+                                            min="0"
+                                            value={inputTokenCost}
+                                            onChange={(e) => setInputTokenCost(parseFloat(e.target.value) || 0)}
+                                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500/20 outline-none font-semibold text-[var(--text-main)]"
+                                            placeholder="0.075"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[8px] text-[var(--text-muted)] font-black uppercase tracking-[0.1em] block mb-1">Salida (Output)</label>
+                                        <input
+                                            type="number"
+                                            step="0.00001"
+                                            min="0"
+                                            value={outputTokenCost}
+                                            onChange={(e) => setOutputTokenCost(parseFloat(e.target.value) || 0)}
+                                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500/20 outline-none font-semibold text-[var(--text-main)]"
+                                            placeholder="0.15"
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-[8px] text-[var(--text-muted)] mt-1 font-medium italic pl-1">
+                                    Por defecto: Gemini 2.0 Flash ($0.075 entrada / $0.15 salida).
+                                </p>
+                            </div>
+
+                            {/* Step 5: Reasoning Mode Toggle (solo DeepSeek) */}
                             {selectedApi === 'deepseek' && (
                                 <div className="flex items-center justify-between px-4 py-3 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl">
                                     <div>
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Modo Razonamiento</p>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-500 text-[9px] font-black flex items-center justify-center">5</span>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Modo Razonamiento</p>
+                                        </div>
                                         <p className="text-[9px] text-[var(--text-muted)] font-medium mt-0.5">
                                             {reasoningMode ? 'El modelo pensará antes de responder (thinking mode)' : 'Respuestas directas sin razonamiento'}
                                         </p>

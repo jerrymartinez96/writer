@@ -244,6 +244,19 @@ export const exportSessionAsText = (sessionId) => {
 };
 
 /**
+ * Elimina los últimos dos mensajes de una sesión (para regenerar)
+ */
+export const deleteLastTwoMessages = (sessionId) => {
+    const store = getStore();
+    const session = store.sessions.find(s => s.id === sessionId);
+    if (session && session.messages.length >= 2) {
+        session.messages = session.messages.slice(0, -2);
+        session.updatedAt = Date.now();
+        saveStore(store);
+    }
+};
+
+/**
  * Obtiene el conteo de sesiones activas
  */
 export const getActiveSessionCount = () => {
@@ -269,6 +282,7 @@ export default {
     updateSessionDestination,
     addMessage,
     updateLastAssistantMessage,
+    deleteLastTwoMessages,
     exportSessionAsText,
     getActiveSessionCount,
     hasSessions,
