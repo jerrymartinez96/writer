@@ -67,14 +67,15 @@ const IAStudio = () => {
         setMessages,
         setSessions,
         setActiveSession,
-        newSession
+        newSession,
+        compressContext,
+        setCompressContext
     } = useIAStudioContext();
 
     const [isLoading, setIsLoading] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
     const [selectedAction, setSelectedAction] = useState('personalizado');
-    const [compressContext, setCompressContext] = useState(false);
 
     // Modo sección: acumulación de secciones generadas
     const [sectionMode, setSectionMode] = useState(false);
@@ -107,13 +108,6 @@ const IAStudio = () => {
         const openCtx = () => setShowContextModal(true);
         window.addEventListener('open-context-modal', openCtx);
         return () => window.removeEventListener('open-context-modal', openCtx);
-    }, []);
-
-    // Listen for compress context toggle
-    useEffect(() => {
-        const handler = (e) => setCompressContext(e.detail);
-        window.addEventListener('ia-studio-compress-context', handler);
-        return () => window.removeEventListener('ia-studio-compress-context', handler);
     }, []);
 
     // Listen for fragment updates (from IAStudioChat)
@@ -685,7 +679,7 @@ const IAStudio = () => {
 
 
     return (
-        <div className="h-full flex bg-[var(--bg-app)]">
+        <div className="h-full flex bg-[var(--bg-app)] overflow-hidden">
             <IAStudioChat
                 messages={messages}
                 onSend={handleSend}
@@ -712,11 +706,13 @@ const IAStudio = () => {
                 onCancelStream={handleCancelStream}
                 onRegenerate={handleRegenerate}
                 compressContext={compressContext}
+                onToggleCompress={() => setCompressContext(prev => !prev)}
                 activeFragment={activeFragment}
                 sectionMode={sectionMode}
                 sectionConfig={sectionConfig}
                 currentSectionIndex={currentSectionIndex}
                 accumulatedSections={accumulatedSections}
+                destinationDoc={destinationDoc}
             />
 
             {/* Diff Modal */}

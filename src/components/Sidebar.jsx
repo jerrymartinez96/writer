@@ -1,8 +1,8 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Zap } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { useState, useMemo } from 'react'
 import { useIAStudioContext } from '../context/IAStudioContext'
-import { QUICK_ACTIONS } from './ia-studio/IAStudioUtils'
+import { QUICK_ACTIONS, buildContextFromSelections, estimateContextWeight } from './ia-studio/IAStudioUtils'
 import Modal from './Modal'
 import ConfirmModal from './ConfirmModal'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -119,7 +119,10 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         switchSession,
         newSession,
         deleteSession,
-        renameSession
+        renameSession,
+        messages = [],
+        compressContext = false,
+        setCompressContext
     } = useIAStudioContext();
 
     const [renamingSessionId, setRenamingSessionId] = useState(null);
@@ -155,6 +158,48 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const [chapterToDelete, setChapterToDelete] = useState(null);
     const [isDeleteSessionModalOpen, setIsDeleteSessionModalOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState(null);
+
+    // Calculate Token Statistics
+    const selectedChapterIds = contextSelections?.chapterIds || [];
+    const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+
+    const contextText = buildContextFromSelections(
+        activeBook,
+        chapters,
+        selectedChapterIds,
+        characters,
+        worldItems,
+        selectedWorldItemIds,
+        compressContext
+    );
+
+    const contextWeight = estimateContextWeight(
+        chapters || [],
+        selectedChapterIds,
+        worldItems || [],
+        selectedWorldItemIds
+    );
+    const contextCharCount = contextText.length;
+    const contextTokens = Math.ceil(contextCharCount / 4.2);
+    
+    const messagesCharCount = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
+    const messagesTokens = Math.ceil(messagesCharCount / 4.2);
+    const totalInputTokens = contextTokens + messagesTokens;
+
+    const assistantCharCount = messages
+        .filter(m => m.role === 'assistant')
+        .reduce((sum, m) => sum + (m.content || '').length, 0);
+    const outputTokens = Math.ceil(assistantCharCount / 4.2);
+
+    // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
+    const aiSettings = activeBook?.aiSettings || {};
+    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
+    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
+    const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
+
+    const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
+    const outputCost = (outputTokens / 1000000) * outputTokenCost;
+    const totalCost = inputCost + outputCost;
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -519,31 +564,8 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                         </div>
                     ) : activeView === 'ia-studio' && !isSidebarCollapsed ? (
                         <div className="px-4 py-4 space-y-4 flex flex-col h-full min-h-0 animate-in fade-in duration-300">
-                            {/* Contexto y Destino - Botón principal arriba */}
-                            <button
-                                onClick={() => window.dispatchEvent(new CustomEvent('open-context-modal'))}
-                                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 text-indigo-500 hover:from-indigo-500/20 hover:to-purple-500/20 transition-all text-[10px] font-black uppercase tracking-wider shrink-0 shadow-sm"
-                            >
-                                <Sparkles size={12} className="text-indigo-500" /> Contexto y Destino
-                            </button>
-
-                            {/* Mini resumen contexto */}
-                            {contextSelections && (contextSelections.chapterIds?.length > 0 || contextSelections.worldItemIds?.length > 0) && (
-                                <div className="px-3 py-2 bg-[var(--bg-editor)]/40 rounded-xl border border-[var(--border-main)]/35 -mt-2 shrink-0">
-                                    <p className="text-[9px] font-bold text-indigo-500 flex items-center gap-1">
-                                        <span className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse"></span>
-                                        {contextSelections.chapterIds?.length || 0} caps · {contextSelections.worldItemIds?.length || 0} master docs
-                                    </p>
-                                    {destinationDoc && (
-                                        <p className="text-[8px] text-[var(--text-muted)] mt-1 truncate pl-1.5 border-l border-[var(--border-main)]/30">
-                                            → {destinationDoc.mode === 'auto' ? 'Auto (IA decide)' : destinationDoc.mode === 'new' ? 'Nuevo Doc' : destinationDoc.docTitle}
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
                             {/* Separator and Sessions list */}
-                            <div className="border-t border-[var(--border-main)]/30 pt-3 flex-1 flex flex-col min-h-0">
+                            <div className="flex-1 flex flex-col min-h-0">
                                 <div className="flex items-center justify-between px-1 mb-2 shrink-0">
                                     <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">
                                         Conversaciones
@@ -648,12 +670,80 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     )}
                                 </div>
                             </div>
+
+                            {/* Pinned Stats Widget */}
+                            <div className="pt-3 border-t border-[var(--border-main)]/30 shrink-0">
+                                {/* <div className="flex items-center gap-1.5 mb-2 px-1">
+                                    <Zap size={12} className="text-indigo-500" />
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                                        Estadísticas y Costos
+                                    </span>
+                                </div> */}
+                                
+                                <div className="space-y-2 bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/40 rounded-xl p-2.5 shadow-sm">
+                                    {/* Context Stat */}
+                                    <div className="flex items-center justify-between text-[10px]">
+                                        <span className="text-[var(--text-muted)] flex items-center gap-1">
+                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
+                                            Contexto:
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
+                                                {(contextTokens / 1000).toFixed(1)} k
+                                            </span>
+                                            {contextWeight.isHeavy && (
+                                                <button
+                                                    onClick={() => setCompressContext(prev => !prev)}
+                                                    title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
+                                                    className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[7px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                                                        compressContext
+                                                            ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
+                                                            : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                                                    }`}
+                                                >
+                                                    <Zap size={6} />
+                                                    {compressContext ? 'Resumido' : 'Comprimir'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Chat Stat */}
+                                    <div className="flex items-center justify-between text-[10px]">
+                                        <span className="text-[var(--text-muted)]">Conversación:</span>
+                                        <span className="text-[var(--text-main)] font-semibold">
+                                            {(messagesTokens / 1000).toFixed(1)} k 
+                                        </span>
+                                    </div>
+
+                                    {/* Total Stat */}
+                                    <div className="flex items-center justify-between text-[10px]">
+                                        <span className="text-[var(--text-muted)]">Tokens Totales:</span>
+                                        <span className="text-[var(--text-main)] font-bold">
+                                            {(totalInputTokens + outputTokens).toLocaleString()} k
+                                        </span>
+                                    </div>
+
+                                    {/* Dynamic Cost Estimate */}
+                                    <div className="flex items-center justify-between pt-1 text-[10px]">
+                                        <span className="text-[var(--text-muted)] truncate max-w-[120px]" title={selectedModel}>
+                                            Costo Estimado:
+                                        </span>
+                                        <span 
+                                            className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-black tracking-wider shrink-0 cursor-help"
+                                            title={`Tarifas:\nEntrada: $${inputTokenCost}/1M tokens\nSalida: $${outputTokenCost}/1M tokens`}
+                                        >
+                                            ${totalCost < 0.0001 && totalCost > 0 ? '<$0.0001' : totalCost.toFixed(5)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     ) : null}
                 </div>
 
                 {/* Footer */}
-                {!isSidebarCollapsed && (
+                {!isSidebarCollapsed && activeView !== 'ia-studio' && (
                     <div className="p-4 px-6 border-t border-[var(--border-main)] flex flex-col gap-2 bg-[var(--bg-app)]/50 shrink-0">
                         <div className="flex justify-between items-center text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                             <span className="w-full text-center">{activeView === 'editor' ? (activeChapter?.content?.replace(/<[^>]*>?/gm, '').split(/\s+/).filter(word => word.length > 0).length || 0) : '—'} palabras</span>

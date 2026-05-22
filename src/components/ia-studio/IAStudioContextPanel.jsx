@@ -1,19 +1,61 @@
 import React, { useState, useMemo } from 'react';
 import { Check, FileText, Globe, BookOpen, Layers, User, Bookmark, Users, X, ChevronRight, Target, AlertTriangle, Zap } from 'lucide-react';
-import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS, estimateContextWeight } from './IAStudioUtils';
+import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS, estimateContextWeight, buildContextFromSelections } from './IAStudioUtils';
 import { useIAStudioContext } from '../../context/IAStudioContext';
 
 const IAStudioContextPanel = ({
     chapters = [],
     worldItems = [],
     characters = [],
+    activeBook = null,
+    compressContext = false,
+    onToggleCompress = null,
 }) => {
-    const { contextSelections, destinationDoc, onContextChange, onDestinationChange } = useIAStudioContext();
+    const { contextSelections, destinationDoc, onContextChange, onDestinationChange, messages = [] } = useIAStudioContext();
     const [showQuickSelect, setShowQuickSelect] = useState(false);
     const [showDestDropdown, setShowDestDropdown] = useState(false);
 
     const selectedChapterIds = contextSelections?.chapterIds || [];
     const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+
+    // Calculate Token Statistics
+    const contextText = buildContextFromSelections(
+        activeBook,
+        chapters,
+        selectedChapterIds,
+        characters,
+        worldItems,
+        selectedWorldItemIds,
+        compressContext
+    );
+
+    const contextWeight = estimateContextWeight(
+        chapters || [],
+        selectedChapterIds,
+        worldItems || [],
+        selectedWorldItemIds
+    );
+    const contextCharCount = contextText.length;
+    const contextTokens = Math.ceil(contextCharCount / 4.2);
+    
+    const messagesCharCount = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
+    const messagesTokens = Math.ceil(messagesCharCount / 4.2);
+    const totalInputTokens = contextTokens + messagesTokens;
+
+    const assistantCharCount = messages
+        .filter(m => m.role === 'assistant')
+        .reduce((sum, m) => sum + (m.content || '').length, 0);
+    const outputTokens = Math.ceil(assistantCharCount / 4.2);
+
+    // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
+    const aiSettings = activeBook?.aiSettings || {};
+    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
+    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
+    const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
+
+    const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
+    const outputCost = (outputTokens / 1000000) * outputTokenCost;
+    const totalCost = inputCost + outputCost;
 
     // Volúmenes y capítulos ordenados
     const volumes = useMemo(() =>
@@ -144,7 +186,9 @@ const IAStudioContextPanel = ({
     const [expandedVolumes, setExpandedVolumes] = useState({});
 
     return (
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-2">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden h-full">
+            {/* Scrollable list content */}
+            <div className="flex-1 overflow-y-auto scrollbar-hide px-2 pb-2">
                 {/* Quick Select */}
                 <div className="p-3 border-b border-[var(--border-main)]/50">
                     <div className="relative">
@@ -413,6 +457,75 @@ const IAStudioContextPanel = ({
                     </div>
                 </div>
             </div>
+
+            {/* Pinned Stats Widget */}
+            <div className="p-3 border-t border-[var(--border-main)]/50 bg-[var(--bg-editor)]/30 shrink-0">
+                <div className="flex items-center gap-1.5 mb-2 px-1">
+                    <Zap size={12} className="text-indigo-500" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                        Estadísticas y Costos
+                    </span>
+                </div>
+                
+                <div className="space-y-2 bg-[var(--bg-app)]/40 border border-[var(--border-main)]/40 rounded-xl p-2.5 shadow-sm">
+                    {/* Context Stat */}
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-[var(--text-muted)] flex items-center gap-1">
+                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
+                            Contexto:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                            <span className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
+                                {(contextTokens / 1000).toFixed(1)}k <span className="text-[8px] opacity-60 font-normal">tkn</span>
+                            </span>
+                            {contextWeight.isHeavy && onToggleCompress && (
+                                <button
+                                    onClick={onToggleCompress}
+                                    title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
+                                    className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[7px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                                        compressContext
+                                            ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
+                                            : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                                    }`}
+                                >
+                                    <Zap size={6} />
+                                    {compressContext ? 'Resumido' : 'Comprimir'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Chat Stat */}
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-[var(--text-muted)]">Conversación:</span>
+                        <span className="text-[var(--text-main)] font-semibold">
+                            {(messagesTokens / 1000).toFixed(1)}k <span className="text-[8px] opacity-60 font-normal">tkn</span>
+                        </span>
+                    </div>
+
+                    {/* Total Stat */}
+                    <div className="flex items-center justify-between text-[10px] border-b border-[var(--border-main)]/20 pb-2">
+                        <span className="text-[var(--text-muted)]">Total:</span>
+                        <span className="text-[var(--text-main)] font-bold">
+                            {(totalInputTokens + outputTokens).toLocaleString()} <span className="text-[8px] opacity-60 font-normal">tkn</span>
+                        </span>
+                    </div>
+
+                    {/* Dynamic Cost Estimate */}
+                    <div className="flex items-center justify-between pt-1 text-[10px]">
+                        <span className="text-[var(--text-muted)] truncate max-w-[130px]" title={selectedModel}>
+                            Costo ({selectedModel?.split('/').pop()?.split(':')?.[0] || 'Gemini 2.0'}):
+                        </span>
+                        <span 
+                            className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-black tracking-wider shrink-0 cursor-help"
+                            title={`Tarifas:\nEntrada: $${inputTokenCost}/1M tokens\nSalida: $${outputTokenCost}/1M tokens`}
+                        >
+                            ${totalCost < 0.0001 && totalCost > 0 ? '<$0.0001' : totalCost.toFixed(5)}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 };
 

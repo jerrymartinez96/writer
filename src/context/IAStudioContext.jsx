@@ -6,6 +6,7 @@ const IAStudioContext = createContext(null);
 export const IAStudioProvider = ({ children }) => {
     const [contextSelections, setContextSelections] = useState({ chapterIds: [], worldItemIds: [] });
     const [destinationDoc, setDestinationDoc] = useState({ mode: 'auto', docId: null, docType: 'chapter', docTitle: '' });
+    const [compressContext, setCompressContext] = useState(false);
     
     // Sessions state
     const [sessions, setSessions] = useState([]);
@@ -147,6 +148,8 @@ export const IAStudioProvider = ({ children }) => {
             newSession,
             deleteSession,
             renameSession,
+            compressContext,
+            setCompressContext,
         }}>
             {children}
         </IAStudioContext.Provider>

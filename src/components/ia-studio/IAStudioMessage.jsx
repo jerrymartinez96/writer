@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp } from 'lucide-react';
 
 /**
  * Renders the content of an assistant message based on its responseType.
@@ -83,6 +83,9 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
     const isStreaming = message.isStreaming;
     const responseType = message.responseType || 'analysis';
     const [copied, setCopied] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isExpandable, setIsExpandable] = useState(false);
+    const contentRef = useRef(null);
 
     // Determine if this message has applicable content (to show diff button)
     const hasApplicableContent = !isUser && !isStreaming && responseType === 'content';
@@ -93,6 +96,18 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
         if (responseType === 'suggestion') return Lightbulb;
         return Bot;
     }, [responseType]);
+
+    // Measure element scrollHeight to see if it exceeds ~10 lines (240px)
+    useEffect(() => {
+        if (!isStreaming && contentRef.current) {
+            const height = contentRef.current.scrollHeight;
+            if (height > 240) {
+                setIsExpandable(true);
+            } else {
+                setIsExpandable(false);
+            }
+        }
+    }, [message.content, isStreaming]);
 
     const handleCopy = () => {
         if (!message.content) return;
@@ -143,11 +158,50 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
                         </button>
                     )}
 
-                    <MessageContent
-                        content={message.content}
-                        responseType={responseType}
-                        isStreaming={isStreaming}
-                    />
+                    <div
+                        ref={contentRef}
+                        style={!isExpanded && isExpandable ? { maxHeight: '240px', overflow: 'hidden' } : {}}
+                        className="relative transition-all duration-300"
+                    >
+                        <MessageContent
+                            content={message.content}
+                            responseType={responseType}
+                            isStreaming={isStreaming}
+                        />
+
+                        {/* Gradient Fade-out Mask */}
+                        {!isExpanded && isExpandable && (
+                            <div className={`absolute bottom-0 left-0 right-0 h-16 pointer-events-none bg-gradient-to-t ${
+                                isUser 
+                                    ? 'from-[var(--accent-main)] to-transparent' 
+                                    : 'from-[var(--bg-editor)] to-transparent'
+                            }`} />
+                        )}
+                    </div>
+
+                    {/* Expand/Collapse Button */}
+                    {isExpandable && (
+                        <button
+                            onClick={() => setIsExpanded(!isExpanded)}
+                            className={`w-full text-center mt-2.5 pt-2 border-t text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                isUser 
+                                    ? 'text-white/80 hover:text-white border-white/10' 
+                                    : 'text-indigo-500 hover:text-indigo-600 border-[var(--border-main)]/40'
+                            }`}
+                        >
+                            {isExpanded ? (
+                                <>
+                                    <span>Contraer</span>
+                                    <ChevronUp size={11} strokeWidth={3} />
+                                </>
+                            ) : (
+                                <>
+                                    <span>Expandir</span>
+                                    <ChevronDown size={11} strokeWidth={3} />
+                                </>
+                            )}
+                        </button>
+                    )}
                 </div>
 
                 {/* Actions for assistant messages */}

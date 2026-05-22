@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import IAStudioMessage from './IAStudioMessage';
-import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target } from 'lucide-react';
 import { buildContextFromSelections, estimateContextWeight, HEAVY_CONTEXT_THRESHOLD } from './IAStudioUtils';
 import { AIService } from '../../services/AIService';
 
@@ -34,11 +34,13 @@ const IAStudioChat = ({
     onRegenerate,
     // New props
     compressContext = false,
+    onToggleCompress = null,
     activeFragment = '',
     sectionMode = false,
     sectionConfig = null,
     currentSectionIndex = 1,
     accumulatedSections = [],
+    destinationDoc = null,
 }) => {
     const [inputValue, setInputValue] = useState('');
     const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -78,6 +80,12 @@ const IAStudioChat = ({
 
     const selectedChapterIds = contextSelections?.chapterIds || [];
     const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+
+    const currentDestLabel = () => {
+        if (destinationDoc?.mode === 'auto') return 'Automático (La IA decide)';
+        if (destinationDoc?.mode === 'new') return 'Crear nuevo capítulo';
+        return destinationDoc?.docTitle || 'Documento específico';
+    };
 
     // Contextual Prompts Generator
     const getContextualPrompts = () => {
@@ -259,7 +267,9 @@ const IAStudioChat = ({
 
     // Sync compress context toggle
     const handleToggleCompress = () => {
-        window.dispatchEvent(new CustomEvent('ia-studio-compress-context', { detail: !compressContext }));
+        if (onToggleCompress) {
+            onToggleCompress();
+        }
     };
 
     // Start section mode
@@ -296,14 +306,7 @@ const IAStudioChat = ({
         }
     };
 
-    // Construct Context Objects for Pills
-    const selectedChapterObjs = selectedChapterIds
-        .map(id => chapters?.find(c => c.id === id))
-        .filter(Boolean);
 
-    const selectedWorldItemObjs = selectedWorldItemIds
-        .map(id => worldItems?.find(w => w.id === id) || characters?.find(c => c.id === id))
-        .filter(Boolean);
 
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-app)]">
@@ -315,98 +318,81 @@ const IAStudioChat = ({
                     </div>
                     <div className="min-w-0 animate-in fade-in duration-300">
                         <h2 className="text-sm font-black text-[var(--text-main)]">IA Studio</h2>
-                        <div className="flex items-center gap-1.5 mt-0.5 relative">
-                            <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none">
-                                {API_LABELS[selectedApi] || selectedApi}
-                            </span>
-                            
-                            {/* Model Quick Switcher Dropdown */}
-                            <button
-                                onClick={() => setShowModelDropdown(!showModelDropdown)}
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[var(--accent-soft)]/50 text-[8px] font-black text-[var(--text-muted)] hover:text-[var(--text-main)] transition-all shrink-0"
-                                title="Cambiar modelo activo"
-                            >
-                                <span className="truncate max-w-[140px]">
-                                    {selectedModelName}
-                                </span>
-                                <ChevronDown size={8} className="opacity-70" />
-                            </button>
-
-                            {showModelDropdown && (
-                                <>
-                                    <div className="fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
-                                    <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-xl z-45 overflow-hidden animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-200 p-1.5 space-y-0.5">
-                                        <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1">
-                                            Modelos de {API_LABELS[selectedApi] || selectedApi}
-                                        </div>
-                                        <div className="max-h-60 overflow-y-auto space-y-0.5">
-                                            {filteredModels.map(model => {
-                                                const isSelected = model.id === selectedModel;
-                                                return (
-                                                    <button
-                                                        key={model.id}
-                                                        onClick={() => handleModelSelect(model.id)}
-                                                        className={`w-full text-left px-2.5 py-2 text-[10px] transition-all flex items-center justify-between rounded-xl ${
-                                                            isSelected
-                                                                ? 'bg-indigo-500/10 text-indigo-500 font-bold'
-                                                                : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'
-                                                        }`}
-                                                    >
-                                                        <div className="min-w-0 pr-2">
-                                                            <span className="block truncate font-semibold">{model.name}</span>
-                                                            {model.context_length && (
-                                                                <span className="block text-[7px] text-[var(--text-muted)] opacity-60 mt-0.5">
-                                                                    Contexto: {(model.context_length / 1000).toFixed(0)}k tokens
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        {isSelected && (
-                                                            <Check size={10} className="text-indigo-500 shrink-0" strokeWidth={3} />
-                                                        )}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* Context button */}
-                    {/* <button
+                    {/* Model Quick Switcher Dropdown */}
+                    <div className="relative shrink-0">
+                        <button
+                            onClick={() => setShowModelDropdown(!showModelDropdown)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] text-[11px] font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--border-main)]/80 transition-all shadow-sm"
+                            title="Cambiar modelo activo"
+                        >
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none shrink-0">
+                                {API_LABELS[selectedApi] || selectedApi}
+                            </span>
+                            <span className="truncate max-w-[80px] sm:max-w-[140px] font-medium text-[var(--text-main)]">
+                                {selectedModelName}
+                            </span>
+                            <ChevronDown size={12} className="opacity-70 text-[var(--text-muted)] shrink-0" />
+                        </button>
+                        
+                        {showModelDropdown && (
+                            <>
+                                <div className="fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
+                                <div className="absolute top-full right-0 mt-1.5 w-64 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-xl z-45 overflow-hidden animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-200 p-1.5 space-y-0.5">
+                                    <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1">
+                                        Modelos de {API_LABELS[selectedApi] || selectedApi}
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto space-y-0.5">
+                                        {filteredModels.map(model => {
+                                            const isSelected = model.id === selectedModel;
+                                            return (
+                                                <button
+                                                    key={model.id}
+                                                    onClick={() => handleModelSelect(model.id)}
+                                                    className={`w-full text-left px-2.5 py-2 text-[10px] transition-all flex items-center justify-between rounded-xl ${
+                                                        isSelected
+                                                            ? 'bg-indigo-500/10 text-indigo-500 font-bold'
+                                                            : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'
+                                                    }`}
+                                                >
+                                                    <div className="min-w-0 pr-2">
+                                                        <span className="block truncate font-semibold">{model.name}</span>
+                                                        {model.context_length && (
+                                                            <span className="block text-[7px] text-[var(--text-muted)] opacity-60 mt-0.5">
+                                                                Contexto: {(model.context_length / 1000).toFixed(0)}k tokens
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {isSelected && (
+                                                        <Check size={10} className="text-indigo-500 shrink-0" strokeWidth={3} />
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Contexto y Destino button */}
+                    <button
                         onClick={onOpenContext}
-                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-indigo-500 hover:bg-indigo-500/10 transition-all"
-                        title="Contexto y Destino"
+                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-[11px] font-bold text-indigo-500 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition-all shadow-sm shrink-0"
+                        title="Configurar Contexto y Destino"
                     >
-                        <Sparkles size={12} /> <span className="hidden sm:inline">Contexto y Destino</span>
-                    </button> */}
-
-                    {/* New chat button */}
-                    {/* <button
-                        onClick={onNewChat}
-                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-purple-500 hover:bg-purple-500/10 transition-all"
-                        title="Nueva conversación"
-                    >
-                        <Plus size={12} /> <span className="hidden sm:inline">Nuevo</span>
-                    </button> */}
-
-                    {/* Sessions button */}
-                    {/* <button
-                        onClick={onOpenSessions}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-indigo-500 hover:bg-indigo-500/10 transition-all"
-                        title="Ver conversaciones guardadas"
-                    >
-                        <FolderClosed size={16} />
-                    </button> */}
+                        <Sparkles size={12} className="text-indigo-500" />
+                        <span className="hidden sm:inline">Contexto y Destino</span>
+                    </button>
 
                     {/* Export button */}
                     {messages.length > 0 && onExport && (
                         <button
                             onClick={onExport}
-                            className="w-8 h-8 rounded-xl flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all shrink-0"
                             title="Exportar conversación"
                         >
                             <Download size={16} />
@@ -477,7 +463,7 @@ const IAStudioChat = ({
                 <div className="max-w-3xl mx-auto space-y-3">
                     
                     {/* Stats Bar */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-2 text-[10px] text-[var(--text-muted)] opacity-85 border-b border-[var(--border-main)]/25 pb-2.5">
+                    <div className="flex md:hidden flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-2 text-[10px] text-[var(--text-muted)] opacity-85 border-b border-[var(--border-main)]/25 pb-2.5">
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 w-full sm:w-auto">
                             <span className="flex items-center gap-1">
                                 <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
@@ -652,44 +638,26 @@ const IAStudioChat = ({
                             </button>
                         </div>
                     )}
-                    {(selectedChapterObjs.length > 0 || selectedWorldItemObjs.length > 0) && (
-                        <div className="flex flex-wrap items-center gap-1.5 px-2 py-1 max-h-24 overflow-y-auto">
-                            <span className="text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 mr-1.5 shrink-0">
-                                Contexto Activo:
-                            </span>
-                            {selectedChapterObjs.map(chapter => (
-                                <div 
-                                    key={chapter.id} 
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-bold text-indigo-500 select-none animate-in fade-in zoom-in-95 duration-200 shadow-sm"
-                                >
-                                    <span>📖 {chapter.title}</span>
-                                    <button 
-                                        onClick={() => onRemoveContextItem && onRemoveContextItem('chapter', chapter.id)}
-                                        className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-indigo-500/20 text-indigo-500 hover:text-indigo-600 transition-colors shrink-0"
-                                        title="Eliminar de contexto"
-                                    >
-                                        <X size={8} strokeWidth={3} />
-                                    </button>
-                                </div>
-                            ))}
-                            {selectedWorldItemObjs.map(item => (
-                                <div 
-                                    key={item.id} 
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[9px] font-bold text-purple-500 select-none animate-in fade-in zoom-in-95 duration-200 shadow-sm"
-                                >
-                                    <span>✨ {item.name || item.title}</span>
-                                    <button 
-                                        onClick={() => onRemoveContextItem && onRemoveContextItem('worldItem', item.id)}
-                                        className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-purple-500/20 text-purple-500 hover:text-purple-600 transition-colors shrink-0"
-                                        title="Eliminar de contexto"
-                                    >
-                                        <X size={8} strokeWidth={3} />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
- 
+
+                    {/* Summary Bar */}
+                    <div className="text-[10px] text-[var(--text-muted)] font-medium flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 px-1">
+                        <span className="flex items-center gap-1">
+                            <BookOpen size={11} className="text-indigo-500" /> 
+                            Contexto: 
+                            <strong className="text-indigo-600 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/15">
+                                {selectedChapterIds.length + selectedWorldItemIds.length} elem
+                            </strong>
+                        </span>
+                        <span className="opacity-30 hidden xs:inline">·</span>
+                        <span className="flex items-center gap-1">
+                            <Target size={11} className="text-emerald-500" /> 
+                            Destino: 
+                            <strong className="text-emerald-600 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/15 truncate max-w-[150px]" title={currentDestLabel()}>
+                                {destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Crear Nuevo' : destinationDoc?.docTitle || 'Manual'}
+                            </strong>
+                        </span>
+                    </div>
+
                     {/* Input + Send (unified, fused, responsive) */}
                     <div className="flex items-center gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-3 pr-4 py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
                         {/* Action Selector - Custom Dropdown */}
