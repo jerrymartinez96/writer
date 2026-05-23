@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 
 /**
  * Renders the content of an assistant message based on its responseType.
@@ -78,14 +78,34 @@ const MessageContent = ({ content, responseType, isStreaming }) => {
     return <div className="whitespace-pre-wrap">{content}</div>;
 };
 
-const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
+const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }) => {
     const isUser = message.role === 'user';
     const isStreaming = message.isStreaming;
     const responseType = message.responseType || 'analysis';
     const [copied, setCopied] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [isExpandable, setIsExpandable] = useState(false);
+    const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const contentRef = useRef(null);
+    const deleteTimeoutRef = useRef(null);
+
+    // Auto-reset delete confirmation after 3 seconds
+    useEffect(() => {
+        if (showConfirmDelete) {
+            deleteTimeoutRef.current = setTimeout(() => {
+                setShowConfirmDelete(false);
+            }, 3000);
+        } else {
+            if (deleteTimeoutRef.current) {
+                clearTimeout(deleteTimeoutRef.current);
+            }
+        }
+        return () => {
+            if (deleteTimeoutRef.current) {
+                clearTimeout(deleteTimeoutRef.current);
+            }
+        };
+    }, [showConfirmDelete]);
 
     // Determine if this message has applicable content (to show diff button)
     const hasApplicableContent = !isUser && !isStreaming && responseType === 'content';
@@ -204,6 +224,34 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
                     )}
                 </div>
 
+                {/* Actions for user messages */}
+                {isUser && !isStreaming && (
+                    <div className="flex items-center justify-end gap-2 mt-1.5 px-1 animate-in fade-in duration-200">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (showConfirmDelete) {
+                                    onDelete();
+                                    window.dispatchEvent(new CustomEvent('ia-toast', {
+                                        detail: { message: '🗑️ Mensaje eliminado.', type: 'success' }
+                                    }));
+                                } else {
+                                    setShowConfirmDelete(true);
+                                }
+                            }}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 duration-200 ${
+                                showConfirmDelete
+                                    ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                                    : 'text-rose-500/70 hover:text-rose-500 hover:bg-rose-500/10'
+                            }`}
+                            title={showConfirmDelete ? "Confirmar eliminación" : "Eliminar mensaje"}
+                        >
+                            <Trash2 size={12} className={showConfirmDelete ? 'animate-bounce' : ''} />
+                            <span>{showConfirmDelete ? '¿Seguro?' : 'Eliminar'}</span>
+                        </button>
+                    </div>
+                )}
+
                 {/* Actions for assistant messages */}
                 {!isUser && !isStreaming && message.content && (
                     <div className="flex items-center gap-2 mt-1.5 px-1">
@@ -246,6 +294,30 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, isLast }) => {
                                 <span>Regenerar</span>
                             </button>
                         )}
+
+                        {/* Delete Button */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (showConfirmDelete) {
+                                    onDelete();
+                                    window.dispatchEvent(new CustomEvent('ia-toast', {
+                                        detail: { message: '🗑️ Mensaje de IA eliminado.', type: 'success' }
+                                    }));
+                                } else {
+                                    setShowConfirmDelete(true);
+                                }
+                            }}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 duration-200 ml-auto ${
+                                showConfirmDelete
+                                    ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                                    : 'text-rose-500/70 hover:text-rose-500 hover:bg-rose-500/10'
+                            }`}
+                            title={showConfirmDelete ? "Confirmar eliminación" : "Eliminar mensaje"}
+                        >
+                            <Trash2 size={12} className={showConfirmDelete ? 'animate-bounce' : ''} />
+                            <span>{showConfirmDelete ? '¿Seguro?' : 'Eliminar'}</span>
+                        </button>
                     </div>
                 )}
             </div>

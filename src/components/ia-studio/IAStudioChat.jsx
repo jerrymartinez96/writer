@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import IAStudioMessage from './IAStudioMessage';
-import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Trash2, MessageSquare } from 'lucide-react';
+import Modal from '../Modal';
 import { buildContextFromSelections, estimateContextWeight, HEAVY_CONTEXT_THRESHOLD } from './IAStudioUtils';
 import { AIService } from '../../services/AIService';
 
@@ -32,6 +33,10 @@ const IAStudioChat = ({
     onRemoveContextItem,
     onCancelStream,
     onRegenerate,
+    onDeleteMessage,
+    activeSession = null,
+    onRenameSession = null,
+    onDeleteSession = null,
     // New props
     compressContext = false,
     onToggleCompress = null,
@@ -50,6 +55,14 @@ const IAStudioChat = ({
     const [showSectionSetup, setShowSectionSetup] = useState(false);
     const [sectionSetupTotal, setSectionSetupTotal] = useState(3);
     const [sectionDescriptions, setSectionDescriptions] = useState(['', '', '']);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [editSessionName, setEditSessionName] = useState('');
+
+    useEffect(() => {
+        if (activeSession) {
+            setEditSessionName(activeSession.name || '');
+        }
+    }, [activeSession]);
     
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
@@ -313,12 +326,22 @@ const IAStudioChat = ({
             {/* Header */}
             <div className="flex items-center justify-between px-4 lg:px-6 py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md shrink-0">
-                        <Sparkles size={18} className="text-white" />
-                    </div>
-                    <div className="min-w-0 animate-in fade-in duration-300">
-                        <h2 className="text-sm font-black text-[var(--text-main)]">IA Studio</h2>
-                    </div>
+                    <button
+                        onClick={() => setShowSettingsModal(true)}
+                        className="group flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)]/75 hover:bg-[var(--accent-soft)] hover:border-indigo-500/30 transition-all shadow-sm active:scale-[0.98] text-left min-w-0"
+                        title="Ajustes de la conversación"
+                    >
+                        <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-600/10 border border-indigo-500/20 group-hover:from-indigo-500 group-hover:to-purple-600 flex items-center justify-center shadow-sm shrink-0 transition-all duration-300">
+                            <Sparkles size={14} className="text-indigo-500 group-hover:text-white transition-colors duration-300" />
+                        </div>
+                        <div className="min-w-0">
+                            <span className="block text-[8px] font-black uppercase tracking-wider text-[var(--text-muted)] opacity-60 leading-none">IA Studio</span>
+                            <span className="block text-xs font-black text-[var(--text-main)] truncate max-w-[120px] sm:max-w-[200px] mt-0.5 group-hover:text-indigo-500 transition-colors leading-tight">
+                                {activeSession?.name || 'Conversación'}
+                            </span>
+                        </div>
+                        <ChevronDown size={12} className="text-[var(--text-muted)] opacity-70 shrink-0 group-hover:text-indigo-500 transition-colors" />
+                    </button>
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
@@ -450,6 +473,7 @@ const IAStudioChat = ({
                                 message={msg}
                                 onShowDiff={onShowDiff}
                                 onRegenerate={onRegenerate}
+                                onDelete={() => onDeleteMessage && onDeleteMessage(msg.id)}
                                 isLast={i === messages.length - 1}
                             />
                         ))
@@ -747,6 +771,102 @@ const IAStudioChat = ({
                     </p>
                 </div>
             </div>
+
+            {/* Conversation Settings Modal */}
+            <Modal
+                isOpen={showSettingsModal}
+                onClose={() => setShowSettingsModal(false)}
+                title="Ajustes de Conversación"
+                size="md"
+            >
+                <div className="p-6 space-y-6 font-sans">
+                    {/* Rename Field */}
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500">
+                            Nombre del Chat
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={editSessionName}
+                                onChange={(e) => setEditSessionName(e.target.value)}
+                                className="flex-1 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-sm text-[var(--text-main)] outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all leading-relaxed"
+                                placeholder="Ej. Lluvia de ideas..."
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && editSessionName.trim()) {
+                                        onRenameSession(activeSession.id, editSessionName.trim());
+                                        window.dispatchEvent(new CustomEvent('ia-toast', {
+                                            detail: { message: '✏️ Conversación renombrada.', type: 'success' }
+                                        }));
+                                    }
+                                }}
+                            />
+                            <button
+                                onClick={() => {
+                                    if (editSessionName.trim()) {
+                                        onRenameSession(activeSession.id, editSessionName.trim());
+                                        window.dispatchEvent(new CustomEvent('ia-toast', {
+                                            detail: { message: '✏️ Conversación renombrada.', type: 'success' }
+                                        }));
+                                    }
+                                }}
+                                disabled={!editSessionName.trim() || editSessionName.trim() === activeSession?.name}
+                                className="px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-[0.97] shadow-lg shadow-indigo-600/10 shrink-0 cursor-pointer"
+                            >
+                                Guardar
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Stats Summary */}
+                    <div className="bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/50 rounded-2xl p-4 space-y-2.5 shadow-sm text-xs">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 mb-1 border-b border-[var(--border-main)]/30 pb-1.5">
+                            Estadísticas del Chat
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-[var(--text-main)]">
+                            <span className="text-[var(--text-muted)]">Fecha de creación:</span>
+                            <span className="font-semibold">
+                                {activeSession ? new Date(activeSession.createdAt).toLocaleString() : '—'}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-[var(--text-main)]">
+                            <span className="text-[var(--text-muted)]">Mensajes en este chat:</span>
+                            <span className="font-bold text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-lg border border-indigo-500/10">
+                                {activeSession?.messages?.length || 0}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Danger Zone */}
+                    <div className="pt-4 border-t border-[var(--border-main)]/40 space-y-3">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-rose-500 flex items-center gap-1.5">
+                            <AlertTriangle size={12} /> Zona de Peligro
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-rose-500/[0.02] border border-rose-500/15 rounded-2xl">
+                            <div className="space-y-0.5">
+                                <h4 className="text-xs font-bold text-[var(--text-main)]">Eliminar conversación</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] opacity-70">
+                                    Esta acción eliminará de forma irreversible todo el historial de este chat.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    if (confirm('¿Estás seguro de que quieres eliminar esta conversación permanentemente?')) {
+                                        onDeleteSession(activeSession.id);
+                                        setShowSettingsModal(false);
+                                        window.dispatchEvent(new CustomEvent('ia-toast', {
+                                            detail: { message: '🗑️ Conversación eliminada.', type: 'success' }
+                                        }));
+                                    }
+                                }}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.97] shadow-lg shadow-rose-600/15 text-center cursor-pointer shrink-0"
+                            >
+                                Eliminar Chat
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 };

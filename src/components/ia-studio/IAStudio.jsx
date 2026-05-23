@@ -15,6 +15,7 @@ import {
     plainTextToHtml,
     smartMergePartialResponse,
     applyPatch,
+    SYSTEM_WORLD_ITEM_IDS,
 } from './IAStudioUtils';
 
 import { AIService } from '../../services/AIService';
@@ -68,8 +69,11 @@ const IAStudio = () => {
         setSessions,
         setActiveSession,
         newSession,
+        deleteSession,
+        renameSession,
         compressContext,
-        setCompressContext
+        setCompressContext,
+        deleteMessage
     } = useIAStudioContext();
 
     const [isLoading, setIsLoading] = useState(false);
@@ -135,6 +139,34 @@ const IAStudio = () => {
         window.addEventListener('ia-studio-section-mode', handler);
         return () => window.removeEventListener('ia-studio-section-mode', handler);
     }, []);
+
+    // Automatically select all chapters and world items by default for new/empty context selections
+    useEffect(() => {
+        if ((chapters && chapters.length > 0) || (worldItems && worldItems.length > 0)) {
+            const hasChapters = chapters && chapters.length > 0;
+            const hasWorldItems = worldItems && worldItems.length > 0;
+
+            if (contextSelections && !contextSelections.hasBeenInitialized) {
+                const allChapterIds = hasChapters
+                    ? chapters.filter(c => !c.isVolume).map(c => c.id)
+                    : [];
+
+                const customWorldItemIds = hasWorldItems
+                    ? worldItems.filter(w => !SYSTEM_WORLD_ITEM_IDS.includes(w.id)).map(w => w.id)
+                    : [];
+                const allWorldItemIds = [
+                    ...SYSTEM_WORLD_ITEM_IDS,
+                    ...customWorldItemIds
+                ];
+
+                onContextChange({
+                    chapterIds: allChapterIds,
+                    worldItemIds: allWorldItemIds,
+                    hasBeenInitialized: true
+                });
+            }
+        }
+    }, [chapters, worldItems, contextSelections, onContextChange]);
 
     // Show diff - supports multiple document blocks
     const handleShowDiff = useCallback((parsedBlocks) => {
@@ -683,6 +715,10 @@ const IAStudio = () => {
             <IAStudioChat
                 messages={messages}
                 onSend={handleSend}
+                onDeleteMessage={deleteMessage}
+                activeSession={activeSession}
+                onRenameSession={renameSession}
+                onDeleteSession={deleteSession}
                 onShowDiff={(content) => {
                     const parsed = parseDestinationsFromResponse(content, destinationDoc, chapters, worldItems);
                     handleShowDiff(parsed);

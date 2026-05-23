@@ -132,6 +132,15 @@ export const IAStudioProvider = ({ children }) => {
         }
     }, [destinationDoc]);
 
+    // Delete a specific message
+    const deleteMessage = useCallback((messageId) => {
+        if (activeSession) {
+            SessionManager.deleteMessage(activeSession.id, messageId);
+            setMessages(prev => prev.filter(m => m.id !== messageId));
+            setSessions(SessionManager.getSessions());
+        }
+    }, [activeSession]);
+
     return (
         <IAStudioContext.Provider value={{
             contextSelections,
@@ -150,6 +159,7 @@ export const IAStudioProvider = ({ children }) => {
             renameSession,
             compressContext,
             setCompressContext,
+            deleteMessage,
         }}>
             {children}
         </IAStudioContext.Provider>

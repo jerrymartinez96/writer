@@ -116,8 +116,8 @@ export const renameSession = (sessionId, newName) => {
  */
 export const getSessions = () => {
     const store = getStore();
-    // Ordenar por updatedAt descendente
-    return store.sessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // Ordenar por createdAt descendente
+    return store.sessions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 };
 
 /**
@@ -257,6 +257,19 @@ export const deleteLastTwoMessages = (sessionId) => {
 };
 
 /**
+ * Elimina un mensaje específico de una sesión por su ID
+ */
+export const deleteMessage = (sessionId, messageId) => {
+    const store = getStore();
+    const session = store.sessions.find(s => s.id === sessionId);
+    if (session) {
+        session.messages = session.messages.filter(m => m.id !== messageId);
+        session.updatedAt = Date.now();
+        saveStore(store);
+    }
+};
+
+/**
  * Obtiene el conteo de sesiones activas
  */
 export const getActiveSessionCount = () => {
@@ -283,6 +296,7 @@ export default {
     addMessage,
     updateLastAssistantMessage,
     deleteLastTwoMessages,
+    deleteMessage,
     exportSessionAsText,
     getActiveSessionCount,
     hasSessions,
