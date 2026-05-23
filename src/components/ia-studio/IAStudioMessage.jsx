@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2, Film } from 'lucide-react';
 
 /**
  * Renders the content of an assistant message based on its responseType.
@@ -107,6 +107,31 @@ const MessageContent = ({ content, responseType, isStreaming }) => {
         );
     }
 
+    // Scene response — show a scene ready indicator
+    if (responseType === 'scene') {
+        return (
+            <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0 mt-0.5 animate-pulse">
+                    <Film size={14} className="text-sky-500" />
+                </div>
+                <div>
+                    <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">
+                        Escena generada
+                    </p>
+                    {content && (
+                        <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed line-clamp-3 opacity-70">
+                            {content}
+                        </p>
+                    )}
+                    <p className="text-[10px] font-black uppercase tracking-widest text-sky-500 mt-2 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                        Haz clic en "Ver Cambios" para revisar e integrar al manuscrito
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     // Analysis or suggestion — render with plain text
     if (responseType === 'analysis' || responseType === 'suggestion') {
         return (
@@ -158,12 +183,13 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }
     }, [showConfirmDelete]);
 
     // Determine if this message has applicable content (to show diff button)
-    const hasApplicableContent = !isUser && !isStreaming && (responseType === 'content' || responseType === 'patch' || responseType === 'section');
+    const hasApplicableContent = !isUser && !isStreaming && (responseType === 'content' || responseType === 'patch' || responseType === 'section' || responseType === 'scene');
 
     // Determine icon for the response type
     const ResponseTypeIcon = useMemo(() => {
         if (responseType === 'analysis') return Search;
         if (responseType === 'suggestion') return Lightbulb;
+        if (responseType === 'scene') return Film;
         return Bot;
     }, [responseType]);
 

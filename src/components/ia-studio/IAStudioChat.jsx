@@ -1,9 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import IAStudioMessage from './IAStudioMessage';
-import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Trash2, MessageSquare } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Trash2, MessageSquare, Users, Plus, ChevronRight, RefreshCw, Loader2, ArrowLeft } from 'lucide-react';
 import Modal from '../Modal';
 import { buildContextFromSelections, estimateContextWeight, HEAVY_CONTEXT_THRESHOLD } from './IAStudioUtils';
 import { AIService } from '../../services/AIService';
+import { useData } from '../../context/DataContext';
+import { 
+    FOCUSES, 
+    extractJSON, 
+    parseCharactersFromMarkers,
+    buildDetectionPrompt, 
+    buildNameProposalsPrompt, 
+    buildCharacterSuggestionsPrompt, 
+    buildChatQuestionsPrompt, 
+    buildAnswerSuggestionsPrompt, 
+    buildSynthesisPrompt 
+} from './CharacterChatPrompts';
 
 const API_LABELS = {
     openrouter: 'OpenRouter',
@@ -58,6 +70,25 @@ const IAStudioChat = ({
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [editSessionName, setEditSessionName] = useState('');
 
+    // Conversational Character Creator State
+    const { profile, updateWorldItem } = useData();
+    const [charFlow, setCharFlow] = useState(null);
+    const [nameSuggestionLoading, setNameSuggestionLoading] = useState(false);
+    const [nameProposals, setNameProposals] = useState([]);
+    const [questionsLoading, setQuestionsLoading] = useState(false);
+    const [suggestionsLoading, setSuggestionsLoading] = useState({});
+    const [answerSuggestions, setAnswerSuggestions] = useState({});
+    const [selectedFocus, setSelectedFocus] = useState('general');
+    const [suggestedCharacters, setSuggestedCharacters] = useState([]);
+    const [suggestLoading, setSuggestLoading] = useState(false);
+    const [addedSuggestions, setAddedSuggestions] = useState({});
+    const [customNameInput, setCustomNameInput] = useState('');
+    const [customIdeaInput, setCustomIdeaInput] = useState('');
+    const [charAnswerInput, setCharAnswerInput] = useState('');
+
+    const apiSelected = selectedApi;
+    const modelSelected = selectedModel;
+
     useEffect(() => {
         if (activeSession) {
             setEditSessionName(activeSession.name || '');
@@ -102,6 +133,34 @@ const IAStudioChat = ({
 
     // Contextual Prompts Generator
     const getContextualPrompts = () => {
+        if (selectedAction === 'escena') {
+            return [
+                {
+                    icon: '🎬',
+                    text: 'Planificar siguiente escena',
+                    prompt: 'Ayúdame a planificar la siguiente escena de este capítulo. Proponme ideas para el conflicto principal y el gancho final.'
+                },
+                {
+                    icon: '💬',
+                    text: 'Definir diálogos de la escena',
+                    prompt: '¿Qué interacciones y diálogos crees que deberían ocurrir en esta escena basándote en las fichas de los personajes seleccionados?'
+                },
+                {
+                    icon: '🔍',
+                    text: 'Proponer ideas de ambientación',
+                    prompt: 'Dame ideas sensoriales y de ambientación para situar la escena que estamos planificando.'
+                },
+                {
+                    icon: '💡',
+                    text: 'Preguntas guía para enfocar',
+                    prompt: 'Hazme preguntas estratégicas sobre la escena actual para ayudarme a enfocar los objetivos del capítulo.'
+                }
+            ];
+        }
+
+        const selectedChapterIds = contextSelections?.chapterIds || [];
+        const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+
         const selectedChaptersCount = selectedChapterIds.length;
         const selectedWorldItemsCount = selectedWorldItemIds.length;
 
@@ -319,6 +378,830 @@ const IAStudioChat = ({
         }
     };
 
+    const getLocalApiKey = () => {
+        if (apiSelected === 'google_direct') {
+            return activeBook?.aiSettings?.googleApiKey || profile?.googleApiKey || localStorage.getItem('googleApiKey');
+        }
+        if (apiSelected === 'deepseek') {
+            return activeBook?.aiSettings?.deepseekApiKey || profile?.deepseekApiKey || localStorage.getItem('deepseekApiKey');
+        }
+        return activeBook?.aiSettings?.openRouterKey || profile?.openRouterKey || localStorage.getItem('openRouterKey');
+    };
+
+    const getBookContext = () => {
+        const bookTitle = activeBook?.title || 'Mi Novela';
+        const generalInfo = worldItems?.find(w => w.id === 'system_core')?.content || '';
+        const cleanInfo = generalInfo.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        return `Título del libro: ${bookTitle}\nInformación General y Sinopsis: ${cleanInfo.substring(0, 1500)}`;
+    };
+
+    const startCreateFlow = () => {
+        setCustomNameInput('');
+        setCustomIdeaInput('');
+        setNameProposals([]);
+        setCharFlow({
+            mode: 'create',
+            step: 'config',
+            characterName: '',
+            initialIdea: '',
+            questions: [],
+            currentQuestionIndex: 0,
+            answers: [],
+            loading: false,
+            generatedProfile: ''
+        });
+    };
+
+    const suggestNames = async (option) => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, configura tu API Key en Ajustes antes de continuar.', type: 'error' }
+            }));
+            return;
+        }
+        setNameSuggestionLoading(true);
+        try {
+            const prompt = buildNameProposalsPrompt(getBookContext(), option);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const list = extractJSON(response) || [];
+            setNameProposals(list);
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al generar sugerencias de nombres.', type: 'error' }
+            }));
+        } finally {
+            setNameSuggestionLoading(false);
+        }
+    };
+
+    const selectName = (name) => {
+        setCharFlow(prev => ({ ...prev, characterName: name, step: 'interview_init' }));
+    };
+
+    const startInterview = async (name, idea = '') => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, configura tu API Key en Ajustes antes de continuar.', type: 'error' }
+            }));
+            return;
+        }
+        setQuestionsLoading(true);
+        const charName = name || charFlow?.characterName || customNameInput;
+        const charIdea = idea || charFlow?.initialIdea || customIdeaInput;
+        
+        setCharFlow(prev => ({ 
+            ...prev, 
+            characterName: charName, 
+            initialIdea: charIdea, 
+            step: 'interview_loading' 
+        }));
+
+        try {
+            const isRefining = charFlow?.mode === 'refine';
+            const existingProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
+            const prompt = buildChatQuestionsPrompt(charName, selectedFocus, isRefining ? existingProfile : charIdea, isRefining);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const qs = extractJSON(response) || [];
+            
+            setCharFlow(prev => ({
+                ...prev,
+                questions: qs,
+                currentQuestionIndex: 0,
+                answers: Array(qs.length).fill(''),
+                step: 'interview_questions'
+            }));
+            setCharAnswerInput('');
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al generar las preguntas de la entrevista.', type: 'error' }
+            }));
+            setCharFlow(prev => ({ ...prev, step: 'config' }));
+        } finally {
+            setQuestionsLoading(false);
+        }
+    };
+
+    const getAnswerSuggestions = async (qIdx) => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) return;
+        setSuggestionsLoading(prev => ({ ...prev, [qIdx]: true }));
+        try {
+            const charName = charFlow?.characterName;
+            const question = charFlow?.questions[qIdx];
+            const prompt = buildAnswerSuggestionsPrompt(charName, selectedFocus, question);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const list = extractJSON(response) || [];
+            setAnswerSuggestions(prev => ({ ...prev, [qIdx]: list }));
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setSuggestionsLoading(prev => ({ ...prev, [qIdx]: false }));
+        }
+    };
+
+    const chooseSuggestion = (qIdx, text) => {
+        setCharAnswerInput(text);
+    };
+
+    const nextQuestion = () => {
+        const idx = charFlow.currentQuestionIndex;
+        const currentAnswer = charAnswerInput.trim();
+        if (!currentAnswer) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, escribe una respuesta o selecciona una idea.', type: 'warning' }
+            }));
+            return;
+        }
+
+        const newAnswers = [...charFlow.answers];
+        newAnswers[idx] = currentAnswer;
+
+        if (idx < charFlow.questions.length - 1) {
+            setCharFlow(prev => ({
+                ...prev,
+                answers: newAnswers,
+                currentQuestionIndex: idx + 1
+            }));
+            setCharAnswerInput('');
+        } else {
+            synthesizeProfile(newAnswers);
+        }
+    };
+
+    const convertMarkdownToHtml = (markdown) => {
+        if (!markdown) return '';
+        let html = markdown;
+        html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/^\*\s+(.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.+?<\/li>)+/gs, '<ul>$&</ul>');
+        
+        const paragraphs = html.split(/\n\n+/).map(p => {
+            const trimmed = p.trim();
+            if (!trimmed) return '';
+            if (trimmed.startsWith('<h') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<ul')) return trimmed;
+            return `<p>${trimmed.replace(/\n/g, '<br/>')}</p>`;
+        });
+        return paragraphs.filter(p => p).join('\n');
+    };
+
+    const synthesizeProfile = async (completedAnswers) => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) return;
+        setCharFlow(prev => ({ ...prev, answers: completedAnswers, step: 'synthesizing_loading' }));
+        try {
+            const isRefining = charFlow.mode === 'refine';
+            const charName = charFlow.characterName;
+            const qaList = charFlow.questions.map((q, i) => ({ question: q, answer: completedAnswers[i] }));
+            const existingProfile = isRefining ? charFlow.selectedCharacter?.fragment_exacto : '';
+            const prompt = buildSynthesisPrompt(charName, selectedFocus, qaList, existingProfile);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            
+            setCharFlow(prev => ({
+                ...prev,
+                generatedProfile: convertMarkdownToHtml(response),
+                step: 'preview'
+            }));
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al sintetizar el perfil del personaje.', type: 'error' }
+            }));
+            setCharFlow(prev => ({ ...prev, step: 'interview_questions' }));
+        }
+    };
+
+    const saveToDocument = () => {
+        try {
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const isRefining = charFlow.mode === 'refine';
+            let newContent = '';
+
+            if (isRefining) {
+                const originalFragment = charFlow.selectedCharacter?.fragment_exacto;
+                if (docContent.includes(originalFragment)) {
+                    newContent = docContent.replace(originalFragment, charFlow.generatedProfile);
+                } else {
+                    newContent = docContent + '\n\n' + charFlow.generatedProfile;
+                }
+            } else {
+                newContent = docContent + (docContent.trim() ? '\n\n' : '') + charFlow.generatedProfile;
+            }
+
+            updateWorldItem('system_personajes', { content: newContent });
+            
+            setCharFlow(prev => ({ ...prev, step: 'success' }));
+            
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: isRefining ? '¡Ficha de personaje refinada y guardada con éxito!' : '¡Nuevo personaje creado y guardado en tu documento!', type: 'success' }
+            }));
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al guardar los cambios en el documento.', type: 'error' }
+            }));
+        }
+    };
+
+    const startRefineFlow = async () => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, configura tu API Key en Ajustes antes de continuar.', type: 'error' }
+            }));
+            return;
+        }
+        setCharFlow({
+            mode: 'refine',
+            step: 'detecting',
+            detectedCharacters: [],
+            selectedCharacter: null,
+            questions: [],
+            currentQuestionIndex: 0,
+            answers: [],
+            loading: true
+        });
+
+        try {
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const prompt = buildDetectionPrompt(docContent);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const list = parseCharactersFromMarkers(response) || [];
+            
+            setCharFlow(prev => ({
+                ...prev,
+                detectedCharacters: list,
+                step: 'select',
+                loading: false
+            }));
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al analizar los personajes existentes en el documento.', type: 'error' }
+            }));
+            setCharFlow(null);
+        }
+    };
+
+    const selectCharacterToRefine = (charObj) => {
+        setCharFlow(prev => ({
+            ...prev,
+            selectedCharacter: charObj,
+            characterName: charObj.nombre,
+            step: 'config'
+        }));
+    };
+
+    const startSuggestFlow = async () => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, configura tu API Key en Ajustes antes de continuar.', type: 'error' }
+            }));
+            return;
+        }
+        setCharFlow({
+            mode: 'suggest',
+            step: 'loading',
+            suggestions: []
+        });
+        setSuggestLoading(true);
+
+        try {
+            const prompt = buildCharacterSuggestionsPrompt(getBookContext());
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const list = extractJSON(response) || [];
+            setCharFlow(prev => ({
+                ...prev,
+                suggestions: list,
+                step: 'suggestions'
+            }));
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al generar sugerencias de personajes.', type: 'error' }
+            }));
+            setCharFlow(null);
+        } finally {
+            setSuggestLoading(false);
+        }
+    };
+
+    const addSuggestedCharacter = (sugg) => {
+        try {
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const formatted = `<h2>${sugg.nombre}</h2><p><strong>Rol Dramático:</strong> ${sugg.rol}</p><p>${sugg.concepto}</p>`;
+            const newContent = docContent + (docContent.trim() ? '\n\n' : '') + formatted;
+
+            updateWorldItem('system_personajes', { content: newContent });
+
+            setAddedSuggestions(prev => ({ ...prev, [sugg.nombre]: true }));
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: `¡${sugg.nombre} añadido al documento!`, type: 'success' }
+            }));
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al añadir la sugerencia.', type: 'error' }
+            }));
+        }
+    };
+
+    const renderCharFlow = () => {
+        if (charFlow === null) {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-gradient-to-tr from-indigo-950/5 via-blue-950/5 to-transparent border border-[var(--border-main)] rounded-3xl shadow-sm animate-in zoom-in-95 duration-300 my-4 font-sans">
+                    <h3 className="text-2xl font-black font-serif italic text-[var(--text-main)] mb-3">Diseñador de Personajes IA</h3>
+                    <p className="text-sm text-[var(--text-muted)] max-w-lg mb-8 leading-relaxed">
+                        Crea, refina y descubre el elenco de tu novela de forma completamente conversacional e interactiva, guardando los resultados directamente en tu documento central de personajes.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-2xl">
+                        {/* Card 1: Crear */}
+                        <button
+                            onClick={() => startCreateFlow()}
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-blue-500/[0.03] border border-[var(--border-main)] hover:border-blue-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left  h-30 shadow-sm"
+                        >
+                            <div>
+                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Crear Personaje</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Diseña un nuevo integrante desde cero con preguntas psicológicas guiadas.</p>
+                            </div>
+                        </button>
+
+                        {/* Card 2: Refinar */}
+                        <button
+                            onClick={() => startRefineFlow()}
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-indigo-500/[0.03] border border-[var(--border-main)] hover:border-indigo-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-30 shadow-sm"
+                        >
+                            <div>
+                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Refinar Existente</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Detecta personajes en tu documento y expande su psicología en profundidad.</p>
+                            </div>
+                        </button>
+
+                        {/* Card 3: Sugerir */}
+                        <button
+                            onClick={() => startSuggestFlow()}
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-orange-500/[0.03] border border-[var(--border-main)] hover:border-orange-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-30 shadow-sm"
+                        >
+                            <div>
+                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Sugerir Ideas</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Genera nombres y arquetipos inspirados en el universo de tu libro.</p>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 1. DETECTING CHARACTERS LOADING ───
+        if (charFlow.step === 'detecting') {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in fade-in duration-300 font-sans">
+                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6" />
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic">Analizando documento...</h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed">
+                        La IA está escaneando tu documento de personajes de forma semántica en busca de perfiles existentes.
+                    </p>
+                </div>
+            );
+        }
+
+        // ─── 2. SELECT CHARACTER TO REFINE ───
+        if (charFlow.step === 'select') {
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <div className="flex items-center gap-3 mb-6">
+                        <button 
+                            onClick={() => setCharFlow(null)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--accent-soft)] text-[var(--text-muted)]"
+                        >
+                            <ArrowLeft size={16} />
+                        </button>
+                        <div>
+                            <h3 className="text-lg font-black font-serif italic text-[var(--text-main)]">Refinar Personaje</h3>
+                            <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Selecciona el personaje del documento que deseas profundizar:</p>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto max-h-[300px] scrollbar-hide py-2 space-y-2">
+                        {charFlow.detectedCharacters?.map((c, i) => (
+                            <button
+                                key={i}
+                                onClick={() => selectCharacterToRefine(c)}
+                                className="w-full text-left p-4 rounded-xl border border-[var(--border-main)] hover:border-indigo-500/40 bg-[var(--bg-app)] hover:bg-indigo-500/[0.02] flex items-center justify-between group transition-all hover:scale-[1.01] active:scale-[0.99]"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-indigo-500/10 rounded-lg text-indigo-500 flex items-center justify-center">
+                                        <Users size={16} />
+                                    </div>
+                                    <span className="font-semibold text-xs text-[var(--text-main)]">{c.nombre}</span>
+                                </div>
+                                <ChevronRight size={14} className="text-[var(--text-muted)] group-hover:translate-x-0.5 transition-transform" />
+                            </button>
+                        ))}
+
+                        {charFlow.detectedCharacters?.length === 0 && (
+                            <div className="text-center py-16 text-xs text-[var(--text-muted)] opacity-60">
+                                No se detectaron personajes estructurados en el documento actual. ¡Empieza creando uno nuevo!
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 3. CONFIGURATION STEP (NAME INPUT OR FOCUS SELECTION) ───
+        if (charFlow.step === 'config') {
+            const isRefine = charFlow.mode === 'refine';
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans text-left">
+                    <div className="flex items-center gap-3 mb-6">
+                        <button 
+                            onClick={() => isRefine ? setCharFlow(prev => ({ ...prev, step: 'select' })) : setCharFlow(null)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--accent-soft)] text-[var(--text-muted)]"
+                        >
+                            <ArrowLeft size={16} />
+                        </button>
+                        <div>
+                            <h3 className="text-lg font-black font-serif italic text-[var(--text-main)]">
+                                {isRefine ? `Refinar: ${charFlow.characterName}` : 'Nuevo Personaje'}
+                            </h3>
+                            <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Configura el enfoque de la entrevista e ideas base.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 space-y-5 overflow-y-auto max-h-[340px] pr-1 scrollbar-hide">
+                        {/* Name input only for CREATE flow */}
+                        {!isRefine && (
+                            <div>
+                                <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Nombre del Personaje</label>
+                                <div className="flex gap-2 mb-2">
+                                    <input 
+                                        type="text"
+                                        value={customNameInput}
+                                        onChange={(e) => setCustomNameInput(e.target.value)}
+                                        placeholder="Ej: Sylas Vance..."
+                                        className="flex-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                    />
+                                    <button
+                                        onClick={() => suggestNames('completo')}
+                                        disabled={nameSuggestionLoading}
+                                        className="px-4 bg-gradient-to-tr from-blue-600/10 to-indigo-600/10 hover:from-blue-600 hover:to-indigo-600 hover:text-white border border-blue-500/20 rounded-xl text-[10px] text-blue-400 font-bold uppercase tracking-wider transition-all disabled:opacity-40 whitespace-nowrap shrink-0 flex items-center gap-1.5"
+                                    >
+                                        {nameSuggestionLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                                        Sugerir Nombres
+                                    </button>
+                                </div>
+
+                                {nameProposals.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 p-3 bg-[var(--bg-app)]/50 rounded-xl border border-[var(--border-main)] mb-2 animate-in fade-in duration-300">
+                                        {nameProposals.map((name, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => setCustomNameInput(name)}
+                                                className="text-[10px] font-medium bg-[var(--bg-editor)] hover:bg-blue-500/10 hover:text-blue-400 border border-[var(--border-main)] rounded-lg px-2.5 py-1 text-[var(--text-main)] transition-all"
+                                            >
+                                                {name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mt-4 mb-2">Idea Inicial o Arquetipo (Opcional)</label>
+                                <textarea
+                                    value={customIdeaInput}
+                                    onChange={(e) => setCustomIdeaInput(e.target.value)}
+                                    placeholder="Ej: Un contrabandista astuto que oculta su pasado real y teme ser traicionado por quienes ama..."
+                                    className="w-full h-16 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                                />
+                            </div>
+                        )}
+
+                        {/* Focus Selection */}
+                        <div>
+                            <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Enfoque Narrativo Principal</label>
+                            <div className="grid grid-cols-1 gap-2">
+                                {Object.values(FOCUSES).map((focus) => {
+                                    const isSelected = selectedFocus === focus.id;
+                                    return (
+                                        <button
+                                            key={focus.id}
+                                            onClick={() => setSelectedFocus(focus.id)}
+                                            className={`w-full text-left p-3.5 rounded-xl border transition-all text-xs flex gap-3 ${
+                                                isSelected
+                                                    ? 'border-indigo-500 bg-indigo-500/[0.02] shadow-sm'
+                                                    : 'border-[var(--border-main)] bg-[var(--bg-app)]/30 hover:bg-[var(--bg-app)]'
+                                            }`}
+                                        >
+                                            <span className="text-base shrink-0">{focus.title.split(' ')[0]}</span>
+                                            <div>
+                                                <h5 className="font-semibold text-xs text-[var(--text-main)]">{focus.label}</h5>
+                                                <p className="text-[9px] text-[var(--text-muted)] leading-relaxed mt-0.5">{focus.description}</p>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => startInterview(isRefine ? charFlow.characterName : customNameInput, isRefine ? '' : customIdeaInput)}
+                        disabled={!isRefine && !customNameInput.trim()}
+                        className="mt-6 w-full py-3.5 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
+                    >
+                        <Sparkles size={14} /> Iniciar Entrevista
+                    </button>
+                </div>
+            );
+        }
+
+        // ─── 4. INTERVIEW LOADING SCREEN ───
+        if (charFlow.step === 'interview_loading') {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6 animate-pulse" />
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Canalizando preguntas...</h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                        Diseñando cuestionario adaptativo de {FOCUSES[selectedFocus]?.label} para el perfil de {charFlow.characterName}...
+                    </p>
+                </div>
+            );
+        }
+
+        // ─── 5. QUESTION SYSTEM (INTERVIEW QUESTIONS) ───
+        if (charFlow.step === 'interview_questions') {
+            const qIdx = charFlow.currentQuestionIndex;
+            const question = charFlow.questions[qIdx];
+            const hasSuggestions = answerSuggestions[qIdx] && answerSuggestions[qIdx].length > 0;
+            const suggestionsList = answerSuggestions[qIdx] || [];
+            const isSugLoading = suggestionsLoading[qIdx] || false;
+
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-200 font-sans text-left justify-between">
+                    <div className="space-y-5">
+                        {/* Progress */}
+                        <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+                            <span>{FOCUSES[selectedFocus]?.label}</span>
+                            <span className="bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded-full">Pregunta {qIdx + 1} de {charFlow.questions.length}</span>
+                        </div>
+
+                        {/* Question Card */}
+                        <div className="p-4 bg-gradient-to-tr from-indigo-950/10 via-[var(--bg-app)] to-transparent border border-[var(--border-main)] rounded-2xl relative overflow-hidden shadow-inner">
+                            <div className="absolute top-0 right-0 p-3 opacity-10">
+                                <MessageSquare size={48} className="text-indigo-500" />
+                            </div>
+                            <h4 className="font-serif italic text-sm md:text-base font-bold text-[var(--text-main)] leading-relaxed relative z-10">
+                                "{question}"
+                            </h4>
+                        </div>
+
+                        {/* Suggestion Section */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">Sugerencias del Co-piloto</span>
+                                {!hasSuggestions && !isSugLoading && (
+                                    <button
+                                        onClick={() => getAnswerSuggestions(qIdx)}
+                                        className="text-[9px] font-bold text-indigo-400 hover:text-indigo-500 uppercase tracking-wider flex items-center gap-1 shrink-0"
+                                    >
+                                        <Sparkles size={10} className="animate-pulse" /> Generar ideas rápidas
+                                    </button>
+                                )}
+                            </div>
+
+                            {isSugLoading && (
+                                <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)] p-2 bg-[var(--bg-app)]/50 rounded-xl border border-[var(--border-main)]/50 animate-pulse">
+                                    <Loader2 size={12} className="animate-spin text-indigo-500" />
+                                    Generando ideas literarias...
+                                </div>
+                            )}
+
+                            {hasSuggestions && (
+                                <div className="grid grid-cols-1 gap-1.5 animate-in fade-in duration-300">
+                                    {suggestionsList.map((sugg, i) => (
+                                        <button
+                                            key={i}
+                                            onClick={() => chooseSuggestion(qIdx, sugg)}
+                                            className="w-full text-left p-2.5 bg-[var(--bg-app)]/60 hover:bg-indigo-500/[0.03] hover:border-indigo-500/30 border border-[var(--border-main)] rounded-xl text-[10px] text-[var(--text-main)] leading-relaxed transition-all active:scale-[0.99]"
+                                        >
+                                            {sugg}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Answer Input */}
+                        <div>
+                            <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Tu respuesta</label>
+                            <textarea
+                                value={charAnswerInput}
+                                onChange={(e) => setCharAnswerInput(e.target.value)}
+                                placeholder="Escribe tu respuesta aquí... Deja volar tu imaginación o edita las sugerencias de arriba."
+                                className="w-full h-24 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl p-3.5 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none leading-relaxed"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex gap-2 mt-6">
+                        {qIdx > 0 && (
+                            <button
+                                onClick={() => {
+                                    const prevIdx = qIdx - 1;
+                                    setCharAnswerInput(charFlow.answers[prevIdx] || '');
+                                    setCharFlow(prev => ({ ...prev, currentQuestionIndex: prevIdx }));
+                                }}
+                                className="px-5 py-3 border border-[var(--border-main)] hover:bg-[var(--accent-soft)] text-[var(--text-muted)] font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+                            >
+                                Atrás
+                            </button>
+                        )}
+                        <button
+                            onClick={nextQuestion}
+                            className="flex-1 py-3 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99]"
+                        >
+                            {qIdx === charFlow.questions.length - 1 ? 'Generar Perfil' : 'Siguiente'}
+                            <ArrowLeft size={14} className="rotate-180" />
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 6. SYNTHESIZING PROGRESS SCREEN ───
+        if (charFlow.step === 'synthesizing_loading') {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6 animate-pulse" />
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Esculpiendo arquetipo...</h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                        La IA está fusionando tus respuestas psicológicas para redactar una ficha tridimensional literaria completa.
+                    </p>
+                </div>
+            );
+        }
+
+        // ─── 7. PREVIEW SCREEN ───
+        if (charFlow.step === 'preview') {
+            const isRefine = charFlow.mode === 'refine';
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans text-left justify-between">
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+                            <span>SÍNTESIS FINAL COMPLETA</span>
+                            <span className="text-indigo-400 font-bold">{charFlow.characterName}</span>
+                        </div>
+
+                        {/* Profile Preview Panel */}
+                        <div 
+                            className="flex-1 overflow-y-auto max-h-[260px] p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl text-xs text-[var(--text-main)] space-y-3 leading-relaxed scrollbar-hide border-l-4 border-l-indigo-500 shadow-inner font-sans"
+                            dangerouslySetInnerHTML={{ __html: charFlow.generatedProfile }}
+                        />
+                    </div>
+
+                    <div className="flex gap-2 mt-6">
+                        <button
+                            onClick={() => setCharFlow(null)}
+                            className="px-5 py-3.5 border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:text-red-500 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+                        >
+                            Descartar
+                        </button>
+                        <button
+                            onClick={saveToDocument}
+                            className="flex-1 py-3.5 bg-gradient-to-tr from-emerald-600 to-teal-600 hover:shadow-lg hover:shadow-emerald-500/10 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99]"
+                        >
+                            <Check size={14} strokeWidth={3} />
+                            {isRefine ? 'Guardar Cambios' : 'Guardar en Documento'}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 8. SUCCESS SCREEN ───
+        if (charFlow.step === 'success') {
+            const isRefine = charFlow.mode === 'refine';
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <div className="w-16 h-16 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-emerald-500/20 scale-110 animate-bounce">
+                        <Check size={32} strokeWidth={3} />
+                    </div>
+                    <h3 className="text-xl font-bold text-[var(--text-main)] mb-2 font-serif italic">
+                        {isRefine ? '¡Refinamiento Guardado!' : '¡Personaje Creado!'}
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed mb-8">
+                        {isRefine 
+                            ? 'Los cambios y adiciones psicológicas se han integrado y reemplazado con éxito en tu documento central de personajes.'
+                            : 'La ficha del nuevo personaje ha sido consolidada en texto estructurado y anexada al final del documento central.'
+                        }
+                    </p>
+                    <button
+                        onClick={() => setCharFlow(null)}
+                        className="px-8 py-3.5 bg-[var(--bg-app)] border border-[var(--border-main)] hover:border-indigo-500/50 text-[var(--text-main)] hover:text-indigo-400 font-black text-xs uppercase tracking-wider rounded-xl transition-all"
+                    >
+                        Volver al Panel Principal
+                    </button>
+                </div>
+            );
+        }
+
+        // ─── 9. SUGGESTION RESULTS PANEL ───
+        if (charFlow.step === 'suggestions') {
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans text-left justify-between">
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                            <button 
+                                onClick={() => setCharFlow(null)}
+                                className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--accent-soft)] text-[var(--text-muted)]"
+                            >
+                                <ArrowLeft size={16} />
+                            </button>
+                            <div>
+                                <h3 className="text-lg font-black font-serif italic text-[var(--text-main)]">Sugerencias de Elenco</h3>
+                                <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Propuestas dramáticas coherentes con el tono de tu historia:</p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto max-h-[280px] scrollbar-hide py-2 space-y-3">
+                            {charFlow.suggestions?.map((sugg, i) => {
+                                const isAdded = addedSuggestions[sugg.nombre];
+                                return (
+                                    <div 
+                                        key={i}
+                                        className="p-4 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl flex flex-col justify-between gap-3 text-xs leading-relaxed"
+                                    >
+                                        <div>
+                                            <div className="flex justify-between items-start mb-1 gap-2">
+                                                <span className="font-bold text-sm text-indigo-400 font-serif">{sugg.nombre}</span>
+                                                <span className="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded font-black uppercase tracking-wider shrink-0">{sugg.rol}</span>
+                                            </div>
+                                            <p className="text-[10px] text-[var(--text-muted)] leading-relaxed mt-1.5">{sugg.concepto}</p>
+                                        </div>
+
+                                        <button
+                                            onClick={() => !isAdded && addSuggestedCharacter(sugg)}
+                                            disabled={isAdded}
+                                            className={`w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all flex items-center justify-center gap-1.5 ${
+                                                isAdded
+                                                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 cursor-default'
+                                                    : 'bg-[var(--bg-editor)] hover:bg-indigo-500/10 border-[var(--border-main)] hover:border-indigo-500/30 text-[var(--text-main)] hover:text-indigo-400 active:scale-[0.98]'
+                                            }`}
+                                        >
+                                            {isAdded ? (
+                                                <>
+                                                    <Check size={11} strokeWidth={3} /> ¡Añadido al libro!
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Plus size={11} /> Añadir a mi libro
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => setCharFlow(null)}
+                        className="mt-6 w-full py-3 border border-[var(--border-main)] hover:bg-[var(--accent-soft)] text-[var(--text-muted)] font-black text-xs uppercase tracking-wider rounded-xl transition-all"
+                    >
+                        Volver al Panel
+                    </button>
+                </div>
+            );
+        }
+
+        // ─── 10. SUGGEST LOADING ───
+        if (charFlow.step === 'loading') {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <Loader2 size={40} className="text-orange-500 animate-spin mb-6 animate-pulse" />
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Bocetando personajes...</h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                        La IA está analizando tu universo narrativo para conjurar arquetipos tridimensionales coherentes...
+                    </p>
+                </div>
+            );
+        }
+
+        return null;
+    };
+
+
 
 
     return (
@@ -427,7 +1310,9 @@ const IAStudioChat = ({
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 scrollbar-hide">
                 <div className="max-w-3xl mx-auto space-y-6">
-                    {messages.length === 0 ? (
+                    {selectedAction === 'constructor_personaje' ? (
+                        renderCharFlow()
+                    ) : messages.length === 0 ? (
                         <div className="flex flex-col justify-center h-full min-h-[400px] text-center text-[var(--text-muted)] space-y-8 py-4">
                             <div className="flex flex-col items-center">
                                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-purple-600/10 flex items-center justify-center mb-4">
@@ -686,72 +1571,107 @@ const IAStudioChat = ({
                     <div className="flex items-center gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-3 pr-4 py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
                         {/* Action Selector - Custom Dropdown */}
                         <div className="relative shrink-0 select-none">
-                            <button
-                                onClick={() => setShowActionDropdown(!showActionDropdown)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--bg-app)] border border-[var(--border-main)] text-[9px] font-black uppercase tracking-widest text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all"
-                            >
-                                <span className="text-[10px]">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
-                                <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🔍💡]/g, '').trim() || 'Personalizado'}</span>
-                                <ChevronDown size={10} className="text-[var(--text-muted)] opacity-70 shrink-0" />
-                            </button>
+                            {(() => {
+                                const actionColors = {
+                                    personalizado: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/30',
+                                    crear: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30',
+                                    modificar: 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/30',
+                                    escena: 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20 dark:text-sky-400 dark:border-sky-500/30',
+                                    constructor_personaje: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/30',
+                                    analizar: 'bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30',
+                                    sugerir: 'bg-purple-500/10 text-purple-600 border-purple-500/20 hover:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/30',
+                                };
+                                const activeColorClass = actionColors[selectedAction] || 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--accent-soft)]';
 
-                            {showActionDropdown && (
-                                <>
-                                    <div className="fixed inset-0 z-30" onClick={() => setShowActionDropdown(false)} />
-                                    <div className="absolute bottom-full left-0 mb-2 w-60 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-xl z-40 overflow-hidden animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200 p-1.5 space-y-0.5">
-                                        {QUICK_ACTIONS?.map(action => {
-                                            const actionColors = {
-                                                personalizado: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
-                                                crear: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-                                                modificar: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
-                                                analizar: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-                                                sugerir: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-                                            };
-                                            const isSelected = action.id === selectedAction;
-                                            return (
-                                                <button
-                                                    key={action.id}
-                                                    onClick={() => handleActionChange(action.id)}
-                                                    className={`w-full text-left px-3 py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent ${
-                                                        isSelected
-                                                            ? 'bg-gradient-to-r from-purple-500/5 to-transparent border-l-2 border-l-purple-500 text-purple-600 font-bold'
-                                                            : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40 hover:translate-x-0.5'
-                                                    }`}
-                                                >
-                                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 border transition-transform ${isSelected ? 'scale-110' : ''} ${actionColors[action.id] || 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
-                                                        {action.label?.match(/^.{1,2}/)?.[0] || '💬'}
-                                                    </span>
-                                                    <div className="flex-1 min-w-0">
-                                                        <span className="block truncate font-semibold">{action.label?.replace(/[💬✏️📝🔍💡]/g, '').trim()}</span>
-                                                        <span className="block text-[8px] text-[var(--text-muted)] opacity-60 truncate">{action.description}</span>
-                                                    </div>
-                                                    {isSelected && (
-                                                        <Check size={11} className="text-purple-500 shrink-0 animate-in zoom-in-50 duration-200" strokeWidth={3} />
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </>
-                            )}
+                                return (
+                                    <>
+                                        <button
+                                            onClick={() => setShowActionDropdown(!showActionDropdown)}
+                                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 ${activeColorClass}`}
+                                        >
+                                            <span className="text-xs transition-transform duration-300">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
+                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim() || 'Personalizado'}</span>
+                                            <ChevronDown size={11} className={`text-current opacity-80 transition-transform duration-300 shrink-0 ${showActionDropdown ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        {showActionDropdown && (
+                                            <>
+                                                <div className="fixed inset-0 z-30" onClick={() => setShowActionDropdown(false)} />
+                                                <div className="absolute bottom-full left-0 mb-2.5 w-64 bg-[var(--bg-editor)]/95 backdrop-blur-2xl border border-[var(--border-main)]/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-40 overflow-hidden animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200 p-1.5 space-y-0.5">
+                                                    {QUICK_ACTIONS?.map(action => {
+                                                        const isSelected = action.id === selectedAction;
+                                                        return (
+                                                            <button
+                                                                key={action.id}
+                                                                onClick={() => {
+                                                                    handleActionChange(action.id);
+                                                                    setShowActionDropdown(false);
+                                                                }}
+                                                                className={`w-full text-left px-3 py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent ${
+                                                                    isSelected
+                                                                        ? `${actionColors[action.id] || 'bg-indigo-500/10 text-indigo-500'} font-bold`
+                                                                        : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 hover:translate-x-0.5'
+                                                                }`}
+                                                            >
+                                                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 border transition-transform ${isSelected ? 'scale-110' : ''} ${actionColors[action.id] || 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
+                                                                    {action.label?.match(/^.{1,2}/)?.[0] || '💬'}
+                                                                </span>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <span className="block truncate font-semibold">{action.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim()}</span>
+                                                                    <span className="block text-[8px] text-[var(--text-muted)] opacity-60 truncate">{action.description}</span>
+                                                                </div>
+                                                                {isSelected && (
+                                                                    <Check size={11} className="text-current shrink-0 animate-in zoom-in-50 duration-200" strokeWidth={3} />
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </>
+                                        )}
+                                    </>
+                                );
+                            })()}
                         </div>
 
                         {/* Textarea */}
-                        <textarea
-                            ref={inputRef}
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder="Escribe tu mensaje... (Enter para enviar)"
-                            className="flex-1 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
-                            rows={1}
-                            disabled={isLoading}
-                        />
+                        {selectedAction === 'constructor_personaje' ? (
+                            <div className="flex-1 text-center py-2.5 text-xs text-[var(--text-muted)] font-medium italic select-none">
+                                Esta acción se ejecuta interactivamente mediante el <span className="text-indigo-400 font-bold">Diseñador Conversacional</span>.
+                            </div>
+                        ) : (
+                            <textarea
+                                ref={inputRef}
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                placeholder="Escribe tu mensaje... (Enter para enviar)"
+                                className="flex-1 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
+                                rows={1}
+                                disabled={isLoading}
+                            />
+                        )}
+
+                        {/* Redactar Escena shortcut button */}
+                        {selectedAction === 'escena' && (
+                            <button
+                                onClick={() => {
+                                    const prompt = "Escribe la escena ahora de acuerdo a lo planificado.";
+                                    onSend(prompt);
+                                }}
+                                disabled={isLoading}
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-500/10 border border-sky-500/20 text-[9px] font-black uppercase tracking-widest text-sky-500 hover:bg-sky-500/20 transition-all shrink-0 hover:scale-[1.03] active:scale-95 disabled:opacity-40"
+                                title="Generar la prosa de la escena planificada"
+                            >
+                                <Sparkles size={11} className="text-sky-500" />
+                                <span className="hidden xs:inline">Redactar Escena</span>
+                            </button>
+                        )}
 
                         {/* Send / Stop button */}
                         <button
                             onClick={isLoading ? onCancelStream : handleSend}
-                            disabled={!isLoading && !inputValue.trim()}
+                            disabled={!isLoading && !inputValue.trim() && selectedAction !== 'escena'}
                             className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-md ${
                                 isLoading 
                                     ? 'bg-rose-500 text-white hover:bg-rose-600' 
@@ -867,6 +1787,7 @@ const IAStudioChat = ({
                     </div>
                 </div>
             </Modal>
+
         </div>
     );
 };

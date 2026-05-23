@@ -246,7 +246,13 @@ const IAStudio = () => {
     // Send message
     const handleSend = useCallback(async (userMessage, overrideAction = null) => {
         const apiKey = getApiKey();
-        const effectiveAction = overrideAction || selectedAction;
+        let effectiveAction = overrideAction || selectedAction;
+
+        // BUG FIX: Si el Modo Extenso (Secciones) está activo y el escritor está usando la acción 'crear',
+        // forzamos la acción efectiva a 'seccion' para activar el prompt y parser correctos.
+        if (effectiveAction === 'crear' && sectionMode) {
+            effectiveAction = 'seccion';
+        }
 
         if (!apiKey) {
             const apiName = selectedApi === 'google_direct' ? 'Google' : selectedApi === 'deepseek' ? 'DeepSeek' : 'OpenRouter';
@@ -367,6 +373,7 @@ const IAStudio = () => {
                     if (t.startsWith('conten')) streamResponseType = 'content';
                     else if (t.startsWith('frag') || t.startsWith('parc') || t.startsWith('patch')) streamResponseType = 'patch';
                     else if (t.startsWith('secc') || t.startsWith('sect')) streamResponseType = 'section';
+                    else if (t.startsWith('esce') || t.startsWith('scen')) streamResponseType = 'scene';
                     else if (t.startsWith('anal') || t.startsWith('anál')) streamResponseType = 'analysis';
                     else if (t.startsWith('suge')) streamResponseType = 'suggestion';
                 }
@@ -379,6 +386,8 @@ const IAStudio = () => {
                         streamResponseType = 'patch';
                     } else if (lowerResp.includes('<response_type>section') || lowerResp.includes('<response-type>section')) {
                         streamResponseType = 'section';
+                    } else if (lowerResp.includes('<response_type>scene') || lowerResp.includes('<response-type>scene')) {
+                        streamResponseType = 'scene';
                     } else if (lowerResp.includes('<response_type>analysis') || lowerResp.includes('<response-type>analysis')) {
                         streamResponseType = 'analysis';
                     } else if (lowerResp.includes('<response_type>suggestion') || lowerResp.includes('<response-type>suggestion')) {
@@ -412,6 +421,7 @@ const IAStudio = () => {
                 const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
                 const patchBlocks = parsedBlocks.filter(b => b.isPatch);
                 const sectionBlocks = parsedBlocks.filter(b => b.isSection);
+                const sceneBlocks = parsedBlocks.filter(b => b.isScene);
 
                 let displayContent;
                 let responseType = 'analysis';
@@ -427,6 +437,12 @@ const IAStudio = () => {
                     if (originalPreview) {
                         displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
                     }
+                } else if (sceneBlocks.length > 0) {
+                    // Scene response
+                    responseType = 'scene';
+                    const scene = sceneBlocks[0];
+                    const wordCount = cleanText(scene.content || '').split(/\s+/).filter(Boolean).length;
+                    displayContent = `🎬 **Escena ${scene.sceneIndex || 1}: ${scene.titleOriginal || 'Nueva Escena'}** generada — ${wordCount} palabras`;
                 } else if (sectionBlocks.length > 0) {
                     // Section response
                     responseType = 'section';
@@ -467,7 +483,7 @@ const IAStudio = () => {
                     setSessions(SessionManager.getSessions());
                 }
 
-                const shouldShowDiff = htmlBlocks.length > 0 || patchBlocks.length > 0 || sectionBlocks.length > 0;
+                const shouldShowDiff = htmlBlocks.length > 0 || patchBlocks.length > 0 || sectionBlocks.length > 0 || sceneBlocks.length > 0;
 
                 if (shouldShowDiff && !isEchoingContext) {
                     handleShowDiff(parsedBlocks);
@@ -661,6 +677,41 @@ const IAStudio = () => {
                     saveChapterContent(htmlContent);
                 } else {
                     createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
+                }
+                return;
+            }
+
+            // ── Scene mode: apply accumulated/appended scene ──
+            if (block.isScene) {
+                const targetDoc = block.mode === 'manual' && block.docId
+                    ? findDestinationDoc(block, chapters, worldItems)
+                    : (activeChapter || null);
+
+                const currentHtml = targetDoc?.content || '';
+                const sceneHtml = ensureHtmlFormat(block.proposedContent);
+                
+                // Separador personalizado: "Escena N: [Nombre]"
+                const divider = `<h3>Escena ${block.sceneIndex || 1}: ${block.titleOriginal || 'Nueva Escena'}</h3>`;
+                
+                const existingHtml = currentHtml.trim();
+                const combinedHtml = existingHtml 
+                    ? `${existingHtml}\n${divider}\n${sceneHtml}` 
+                    : `${divider}\n${sceneHtml}`;
+
+                if (block.mode === 'manual' && block.docId) {
+                    if (block.docType === 'chapter') {
+                        if (block.docId === activeChapter?.id) {
+                            saveChapterContent(combinedHtml);
+                        } else {
+                            updateChapter(block.docId, { content: combinedHtml });
+                        }
+                    } else if (block.docType === 'worldItem') {
+                        updateWorldItem(block.docId, { content: combinedHtml });
+                    }
+                } else if (activeChapter) {
+                    saveChapterContent(combinedHtml);
+                } else {
+                    createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
                 }
                 return;
             }

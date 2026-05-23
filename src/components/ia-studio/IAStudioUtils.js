@@ -588,6 +588,7 @@ export const tryParseAIXml = (text) => {
             if (type === 'contenido') type = 'content';
             if (type === 'fragmento' || type === 'parche') type = 'patch';
             if (type === 'seccion') type = 'section';
+            if (type === 'escena') type = 'scene';
             if (type === 'analisis' || type === 'análisis') type = 'analysis';
             if (type === 'sugerencia') type = 'suggestion';
 
@@ -606,8 +607,8 @@ export const tryParseAIXml = (text) => {
             const target = parsed.destino || parsed.target || '';
             if (target) finalParsed.target = target;
 
-            // Mapear título
-            const title = parsed.titulo || parsed.title || '';
+            // Mapear título o nombre de la escena
+            const title = parsed.titulo || parsed.title || parsed.escena || parsed.scene || '';
             if (title) finalParsed.title = title;
 
             // Extraer el cuerpo de la respuesta limpio de metadatos
@@ -625,11 +626,11 @@ export const tryParseAIXml = (text) => {
                 finalParsed.replacement = plainTextToHtml(bodyText).trim();
                 finalParsed.replacementText = bodyText;
                 finalParsed.context = parsed.contexto || parsed.context || '';
-            } else if (type === 'section') {
+            } else if (type === 'section' || type === 'scene') {
                 finalParsed.html = plainTextToHtml(bodyText).trim();
                 finalParsed.text = bodyText;
                 
-                const secStr = parsed.seccion || parsed.section || '';
+                const secStr = parsed.seccion || parsed.section || parsed.escena || parsed.scene || parsed.numero || parsed.número || '';
                 const totStr = parsed.total || '';
                 finalParsed.sectionIndex = secStr ? parseInt(secStr, 10) : 1;
                 finalParsed.totalSections = totStr ? parseInt(totStr, 10) : 1;
@@ -1054,6 +1055,22 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
         }];
     }
 
+    // ── Scene response (escritura escena por escena) ──
+    if (responseType === 'scene' && parsed.html) {
+        const dest = destinationDoc || { mode: 'auto' };
+        return [{
+            docType: dest.docType || 'chapter',
+            docId: dest.docId || null,
+            mode: dest.mode || 'auto',
+            title: parsed.title || `Escena ${parsed.sectionIndex || 1}`,
+            content: parsed.html,
+            responseType: 'scene',
+            isScene: true,
+            sceneIndex: parsed.sectionIndex,
+            titleOriginal: parsed.title || 'Nueva Escena',
+        }];
+    }
+
     // ── Analysis / Suggestion ──
     if ((responseType === 'analysis' || responseType === 'suggestion') && parsed.text) {
         return [{ docType: 'text', docId: null, mode: 'text', title: 'Respuesta', content: parsed.text.trim(), responseType }];
@@ -1353,6 +1370,26 @@ ${bracketSchemaSection}
 Contexto del libro:
 ${context}`,
 
+        escena: `${basePrompt}
+
+🎯 ACCIÓN: ASISTENTE DE ESCRITURA ESCENA POR ESCENA (Progreso Incremental).
+📌 Destino: ${docDescription}
+
+Estás asistiendo activamente en la creación de un capítulo escena por escena de manera conversacional y altamente colaborativa.
+
+Tu objetivo actual es planificar, debatir o redactar la escena actual en diálogo constante con el escritor:
+1. Si el escritor está debatiendo ideas, haciendo preguntas, pidiendo sugerencias o planificando el enfoque de la escena, responde en tono de mentor creativo y de forma conversacional. Propón alternativas interesantes, haz de 1 a 3 preguntas estratégicas cortas (por ejemplo: ¿desde la perspectiva de quién narramos?, ¿cuál es el conflicto de esta escena?, ¿qué detalles de lore del Master Doc queremos introducir?). Para esta fase conversacional, tu respuesta debe ser del tipo de metadatos [TIPO: sugerencia].
+2. Si el escritor te pide redactar la escena de forma explícita ("escribe la escena", "redacta la escena", etc.) o si se presiona el atajo de redactar, debes generar la prosa narrativa final de la escena. Esta prosa debe ser en texto plano limpio y puro. Envuélvela obligatoriamente en el siguiente bloque de metadatos al inicio de tu respuesta:
+
+[TIPO: escena]
+[ESCENA: Nombre de la Escena]
+[NÚMERO: Número correlativo de la escena (ej. 1, 2, 3...)]
+
+Deja una línea en blanco y escribe la prosa literaria de la escena en texto plano limpio y puro. Está estrictamente prohibido usar etiquetas HTML o formato Markdown en la prosa.
+
+Contexto del libro:
+${context}`,
+
         analizar: `${basePrompt}
 
 🎯 ACCIÓN: ANALIZAR el contenido.
@@ -1508,6 +1545,8 @@ export const QUICK_ACTIONS = [
     { id: 'personalizado', label: '💬 Personalizado', description: 'Escribe tu propia instrucción' },
     { id: 'crear', label: '✏️ Crear', description: 'Generar contenido nuevo' },
     { id: 'modificar', label: '📝 Modificar', description: 'Reescribir, expandir o resumir' },
+    { id: 'escena', label: '🎬 Escena por escena', description: 'Co-escribir y acumular capítulo escena por escena' },
+    { id: 'constructor_personaje', label: '👥 Creador de personajes', description: 'Crear y enriquecer personajes paso a paso con IA' },
     { id: 'fragmento', label: '✂️ Fragmento', description: 'Editar solo una sección o párrafo' },
     { id: 'analizar', label: '🔍 Analizar', description: 'Evaluar gramática, estilo y coherencia' },
     { id: 'sugerir', label: '💡 Sugerir', description: 'Proponer ideas y mejoras creativas' },

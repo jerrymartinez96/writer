@@ -149,11 +149,18 @@ export const AIService = {
      */
     async sendMessage(prompt, apiKey, options = {}) {
         const modelId = options.model || "google/gemini-2.0-flash-exp:free";
-        const isGoogleDirect = modelId.startsWith('google_direct/');
+        const isGoogleDirect = modelId.startsWith('google_direct/') || options.apiSelected === 'google_direct';
+        const isDeepSeekDirect = options.apiSelected === 'deepseek' || modelId === 'deepseek-v4-flash' || modelId === 'deepseek-v4-pro';
 
         if (isGoogleDirect) {
             const googleKey = options.googleApiKey || apiKey;
-            return this.sendGeminiMessage(prompt, googleKey, modelId.split('/')[1], options);
+            const modelName = modelId.includes('/') ? modelId.split('/')[1] : modelId;
+            return this.sendGeminiMessage(prompt, googleKey, modelName, options);
+        }
+
+        if (isDeepSeekDirect) {
+            const deepseekKey = options.deepseekApiKey || apiKey;
+            return this.sendDeepSeekMessage(prompt, deepseekKey, modelId, options);
         }
 
         if (!apiKey) {
@@ -229,6 +236,56 @@ export const AIService = {
             throw new Error("Respuesta de Gemini malformada.");
         } catch (error) {
             console.error("AIService.sendGeminiMessage Error:", error);
+            throw error;
+        }
+    },
+
+    /**
+     * Direct call to DeepSeek API (non-streaming)
+     */
+    async sendDeepSeekMessage(prompt, apiKey, model, options = {}) {
+        if (!apiKey) {
+            throw new Error("API Key de DeepSeek no configurada.");
+        }
+
+        const temperature = options.temperature ?? 0.7;
+
+        try {
+            const body = {
+                model: model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: temperature,
+                max_tokens: options.max_tokens || 8192,
+            };
+
+            // Enable JSON mode if requested
+            if (options.useJsonMode) {
+                body.response_format = { type: "json_object" };
+            }
+
+            const response = await retryOnRateLimit(async () => {
+                return await fetch(DEEPSEEK_URL, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(body)
+                });
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData?.error?.message || `Error en DeepSeek (${response.status})`);
+            }
+
+            const data = await response.json();
+            if (data.choices && data.choices[0] && data.choices[0].message) {
+                return data.choices[0].message.content || "";
+            }
+            throw new Error("Respuesta de DeepSeek malformada.");
+        } catch (error) {
+            console.error("AIService.sendDeepSeekMessage Error:", error);
             throw error;
         }
     },
