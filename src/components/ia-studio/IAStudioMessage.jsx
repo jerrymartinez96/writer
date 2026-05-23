@@ -57,6 +57,56 @@ const MessageContent = ({ content, responseType, isStreaming }) => {
         );
     }
 
+    // Patch response — show a fragment ready indicator
+    if (responseType === 'patch') {
+        return (
+            <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <FileDiff size={14} className="text-indigo-500" />
+                </div>
+                <div>
+                    <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">
+                        Fragmento editado
+                    </p>
+                    {content && (
+                        <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed line-clamp-3 opacity-70">
+                            {content}
+                        </p>
+                    )}
+                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mt-2 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        Haz clic en "Ver Cambios" para revisar y aplicar
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    // Section response — show a section ready indicator
+    if (responseType === 'section') {
+        return (
+            <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <FileText size={14} className="text-sky-500" />
+                </div>
+                <div>
+                    <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">
+                        Sección generada
+                    </p>
+                    {content && (
+                        <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed line-clamp-3 opacity-70">
+                            {content}
+                        </p>
+                    )}
+                    <p className="text-[10px] font-black uppercase tracking-widest text-sky-500 mt-2 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                        Haz clic en "Ver Cambios" para revisar y aplicar
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     // Analysis or suggestion — render with plain text
     if (responseType === 'analysis' || responseType === 'suggestion') {
         return (
@@ -108,7 +158,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }
     }, [showConfirmDelete]);
 
     // Determine if this message has applicable content (to show diff button)
-    const hasApplicableContent = !isUser && !isStreaming && responseType === 'content';
+    const hasApplicableContent = !isUser && !isStreaming && (responseType === 'content' || responseType === 'patch' || responseType === 'section');
 
     // Determine icon for the response type
     const ResponseTypeIcon = useMemo(() => {
@@ -164,7 +214,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }
                         : 'bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-tl-md text-[var(--text-main)] pr-10'
                 }`}>
                     {/* Floating Hover Copy Button (desktop) */}
-                    {!isUser && !isStreaming && message.content && responseType !== 'content' && (
+                    {!isUser && !isStreaming && message.content && (responseType === 'analysis' || responseType === 'suggestion') && (
                         <button
                             onClick={handleCopy}
                             className="absolute top-2 right-2 w-6 h-6 rounded-md bg-[var(--bg-app)] border border-[var(--border-main)] flex items-center justify-center text-[var(--text-muted)] hover:text-emerald-500 hover:border-emerald-500/30 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all shadow-sm active:scale-90"
@@ -258,7 +308,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }
                         {/* Diff Viewer Button — only for content type */}
                         {hasApplicableContent && (
                             <button
-                                onClick={() => onShowDiff(message.content)}
+                                onClick={() => onShowDiff(message.rawResponse || message.content)}
                                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest text-indigo-500 hover:bg-indigo-500/10 transition-all"
                                 title="Ver cambios propuestos"
                             >
@@ -268,7 +318,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast }
                         )}
 
                         {/* Copy Button — for text-based responses */}
-                        {responseType !== 'content' && (
+                        {(responseType === 'analysis' || responseType === 'suggestion') && (
                             <button
                                 onClick={handleCopy}
                                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest text-emerald-500 hover:bg-emerald-500/10 transition-all"

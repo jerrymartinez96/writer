@@ -194,14 +194,22 @@ export const addMessage = (sessionId, message) => {
 /**
  * Actualiza el último mensaje (para streaming)
  */
-export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false) => {
+export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined) => {
     const store = getStore();
     const session = store.sessions.find(s => s.id === sessionId);
     if (session && session.messages.length > 0) {
         const lastMsg = session.messages[session.messages.length - 1];
         if (lastMsg.role === 'assistant') {
-            lastMsg.content = partialContent;
+            if (partialContent !== null) {
+                lastMsg.content = partialContent;
+            }
             if (isComplete) lastMsg.isStreaming = false;
+            if (responseType !== undefined) {
+                lastMsg.responseType = responseType;
+            }
+            if (rawResponse !== undefined) {
+                lastMsg.rawResponse = rawResponse;
+            }
             session.updatedAt = Date.now();
             saveStore(store);
         }

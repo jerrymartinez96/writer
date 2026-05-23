@@ -359,11 +359,38 @@ const IAStudio = () => {
                 signal: abortControllerRef.current.signal,
             }, (chunk) => {
                 fullResponse += chunk;
+                
+                let streamResponseType = undefined;
+                const match = /\[tipo\s*:\s*([^\]\s]*)/i.exec(fullResponse);
+                if (match) {
+                    const t = match[1].toLowerCase();
+                    if (t.startsWith('conten')) streamResponseType = 'content';
+                    else if (t.startsWith('frag') || t.startsWith('parc') || t.startsWith('patch')) streamResponseType = 'patch';
+                    else if (t.startsWith('secc') || t.startsWith('sect')) streamResponseType = 'section';
+                    else if (t.startsWith('anal') || t.startsWith('anál')) streamResponseType = 'analysis';
+                    else if (t.startsWith('suge')) streamResponseType = 'suggestion';
+                }
+
+                if (!streamResponseType) {
+                    const lowerResp = fullResponse.toLowerCase();
+                    if (lowerResp.includes('<response_type>content') || lowerResp.includes('<response-type>content')) {
+                        streamResponseType = 'content';
+                    } else if (lowerResp.includes('<response_type>patch') || lowerResp.includes('<response-type>patch')) {
+                        streamResponseType = 'patch';
+                    } else if (lowerResp.includes('<response_type>section') || lowerResp.includes('<response-type>section')) {
+                        streamResponseType = 'section';
+                    } else if (lowerResp.includes('<response_type>analysis') || lowerResp.includes('<response-type>analysis')) {
+                        streamResponseType = 'analysis';
+                    } else if (lowerResp.includes('<response_type>suggestion') || lowerResp.includes('<response-type>suggestion')) {
+                        streamResponseType = 'suggestion';
+                    }
+                }
+
                 setMessages(prev => prev.map(m =>
-                    m.id === aiMsgId ? { ...m, content: fullResponse } : m
+                    m.id === aiMsgId ? { ...m, content: fullResponse, responseType: streamResponseType } : m
                 ));
                 if (activeSession) {
-                    SessionManager.updateLastAssistantMessage(activeSession.id, fullResponse, false);
+                    SessionManager.updateLastAssistantMessage(activeSession.id, fullResponse, false, streamResponseType);
                 }
             });
 
@@ -433,10 +460,10 @@ const IAStudio = () => {
                 }
 
                 setMessages(prev => prev.map(m =>
-                    m.id === aiMsgId ? { ...m, content: displayContent || fullResponse, isStreaming: false, responseType } : m
+                    m.id === aiMsgId ? { ...m, content: displayContent || fullResponse, rawResponse: fullResponse, isStreaming: false, responseType } : m
                 ));
                 if (activeSession) {
-                    SessionManager.updateLastAssistantMessage(activeSession.id, displayContent || fullResponse, true);
+                    SessionManager.updateLastAssistantMessage(activeSession.id, displayContent || fullResponse, true, responseType, fullResponse);
                     setSessions(SessionManager.getSessions());
                 }
 

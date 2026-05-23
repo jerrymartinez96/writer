@@ -457,11 +457,13 @@ export const parseDestinationsFromResponse = (response, destinationDoc, chapters
     if (html) {
         const dest = destinationDoc || { mode: 'auto' };
         if (dest.mode === 'new') {
-            return [{ docType: 'chapter', docId: null, mode: 'new', title: 'Nuevo documento', content: html, responseType: 'content' }];
+            const blockTitle = detectTitleFromContent(html) || 'Nuevo capítulo';
+            return [{ docType: 'chapter', docId: null, mode: 'new', title: blockTitle, content: html, responseType: 'content' }];
         } else if (dest.mode === 'manual' && dest.docId) {
             return [{ docType: dest.docType, docId: dest.docId, mode: 'manual', title: dest.docTitle || 'Documento', content: html, responseType: 'content' }];
         } else {
-            return [{ docType: 'chapter', docId: null, mode: 'auto', title: 'Automático', content: html, responseType: 'content' }];
+            const blockTitle = detectTitleFromContent(html) || 'Automático';
+            return [{ docType: 'chapter', docId: null, mode: 'auto', title: blockTitle, content: html, responseType: 'content' }];
         }
     }
 
@@ -511,17 +513,333 @@ export const extractXmlTag = (text, tagName) => {
 };
 
 /**
- * Intenta parsear una respuesta XML semántica, tolerando etiquetas incompletas.
+ * Intenta detectar el título de un capítulo a partir del inicio del contenido generado.
+ * Quita marcas de formato markdown y etiquetas HTML.
+ */
+export const detectTitleFromContent = (content) => {
+    if (!content) return '';
+    // Reemplazar saltos de línea HTML con saltos de línea de texto
+    let clean = content
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/h[1-6]>/gi, '\n');
+    
+    // Quitar el resto de etiquetas HTML
+    clean = clean.replace(/<[^>]*>/g, '').trim();
+    if (!clean) return '';
+
+    // Obtener la primera línea no vacía
+    const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return '';
+
+    let firstLine = lines[0];
+    
+    // Quitar marcas de markdown comunes de la cabecera
+    firstLine = firstLine.replace(/^[#\s*]+|[#\s*]+$/g, '').replace(/\*\*/g, '').trim();
+    
+    // Si la primera línea tiene un tamaño razonable para ser un título
+    if (firstLine.length > 0 && firstLine.length < 70) {
+        return firstLine;
+    }
+
+    return '';
+};
+
+/**
+ * Intenta parsear una respuesta XML semántica o pseudo-etiquetas estructuradas,
+ * tolerando etiquetas incompletas o sin brackets angulares.
  * Retorna un objeto estructurado idéntico al esquema JSON tradicional para compatibilidad.
  */
 export const tryParseAIXml = (text) => {
     if (!text) return null;
 
-    // Detectar si hay presencia de la etiqueta de tipo XML clave
     const lowerText = text.toLowerCase();
-    if (!lowerText.includes('<response_type>') && !lowerText.includes('<response-type>')) {
-        return null;
+    
+    // ── 1. PARSEADOR PRIMARIO: Formato de Corchetes Rectos [TIPO: ...] ──
+    const hasBracketMetadata = lowerText.includes('[tipo:') || lowerText.includes('[tipo :');
+
+    if (hasBracketMetadata) {
+        const parsed = {};
+        
+        // Extraer todos los pares [CLAVE: VALOR] de las líneas del texto
+        const bracketRegex = /^\s*\[([a-záéíóúüñ\-_]+)\s*:\s*([^\]]+)\]/gim;
+        let match;
+        const metadataLines = [];
+        
+        while ((match = bracketRegex.exec(text)) !== null) {
+            const key = match[1].toLowerCase();
+            const val = match[2].trim();
+            parsed[key] = val;
+            metadataLines.push(match[0]);
+        }
+
+        // Buscar bloques multilínea de fragmentos como [ORIGINAL] ... [/ORIGINAL]
+        const originalBlockRegex = /\[original\]([\s\S]*?)\[\/original\]/i;
+        const origMatch = originalBlockRegex.exec(text);
+        if (origMatch) {
+            parsed.original = origMatch[1].trim();
+            metadataLines.push(origMatch[0]);
+        }
+
+        // Si encontramos la clave fundamental 'tipo', estructuramos la respuesta
+        if (parsed.tipo) {
+            let type = parsed.tipo.toLowerCase().trim();
+            if (type === 'contenido') type = 'content';
+            if (type === 'fragmento' || type === 'parche') type = 'patch';
+            if (type === 'seccion') type = 'section';
+            if (type === 'analisis' || type === 'análisis') type = 'analysis';
+            if (type === 'sugerencia') type = 'suggestion';
+
+            const finalParsed = { type };
+
+            // Mapear ámbito / scope
+            let scope = parsed.ambito || parsed.scope || '';
+            if (scope) {
+                scope = scope.toLowerCase().trim();
+                if (scope === 'completo') scope = 'complete';
+                if (scope === 'parcial') scope = 'partial';
+                finalParsed.scope = scope;
+            }
+
+            // Mapear destino
+            const target = parsed.destino || parsed.target || '';
+            if (target) finalParsed.target = target;
+
+            // Mapear título
+            const title = parsed.titulo || parsed.title || '';
+            if (title) finalParsed.title = title;
+
+            // Extraer el cuerpo de la respuesta limpio de metadatos
+            let bodyText = text;
+            metadataLines.forEach(line => {
+                bodyText = bodyText.replace(line, '');
+            });
+            bodyText = bodyText.trim();
+
+            if (type === 'content') {
+                finalParsed.html = plainTextToHtml(bodyText).trim();
+                finalParsed.text = bodyText;
+            } else if (type === 'patch') {
+                finalParsed.original = parsed.original || '';
+                finalParsed.replacement = plainTextToHtml(bodyText).trim();
+                finalParsed.replacementText = bodyText;
+                finalParsed.context = parsed.contexto || parsed.context || '';
+            } else if (type === 'section') {
+                finalParsed.html = plainTextToHtml(bodyText).trim();
+                finalParsed.text = bodyText;
+                
+                const secStr = parsed.seccion || parsed.section || '';
+                const totStr = parsed.total || '';
+                finalParsed.sectionIndex = secStr ? parseInt(secStr, 10) : 1;
+                finalParsed.totalSections = totStr ? parseInt(totStr, 10) : 1;
+            } else if (type === 'analysis' || type === 'suggestion') {
+                finalParsed.text = bodyText;
+            }
+
+            return finalParsed;
+        }
     }
+
+    // ── 2. PARSEADOR SECUNDARIO (FALLBACK): Etiquetas XML Estándar <response_type> ──
+    const hasStandardXml = lowerText.includes('<response_type>') || lowerText.includes('<response-type>');
+
+    if (hasStandardXml) {
+        // Normalizar si usaron guion en lugar de guion bajo
+        const normalizedText = text
+            .replace(/<response-type>/gi, '<response_type>')
+            .replace(/<\/response-type>/gi, '</response_type>')
+            .replace(/<target-doc>/gi, '<target_doc>')
+            .replace(/<\/target-doc>/gi, '</target_doc>')
+            .replace(/<content-html>/gi, '<content_html>')
+            .replace(/<\/content-html>/gi, '</content_html>')
+            .replace(/<content-markdown>/gi, '<content_markdown>')
+            .replace(/<\/content-markdown>/gi, '</content_markdown>')
+            .replace(/<content-text>/gi, '<content_text>')
+            .replace(/<\/content-text>/gi, '</content_text>')
+            .replace(/<replacement-markdown>/gi, '<replacement_markdown>')
+            .replace(/<\/replacement-markdown>/gi, '</replacement_markdown>')
+            .replace(/<replacement-text>/gi, '<replacement_text>')
+            .replace(/<\/replacement-text>/gi, '</replacement_text>')
+            .replace(/<section-index>/gi, '<section_index>')
+            .replace(/<\/section-index>/gi, '</section_index>')
+            .replace(/<total-sections>/gi, '<total_sections>')
+            .replace(/<\/total-sections>/gi, '</total_sections>')
+            .replace(/<response-scope>/gi, '<response_scope>')
+            .replace(/<\/response-scope>/gi, '</response_scope>');
+
+        const type = extractXmlTag(normalizedText, 'response_type').trim().toLowerCase();
+        if (!type) return null;
+
+        const parsed = { type };
+
+        // Extraer scope de respuesta (partial / complete)
+        const scope = extractXmlTag(normalizedText, 'response_scope').trim().toLowerCase();
+        if (scope) parsed.scope = scope;
+
+        if (type === 'content') {
+            const textContent = extractXmlTag(normalizedText, 'content_text');
+            const markdown = extractXmlTag(normalizedText, 'content_markdown');
+            
+            if (textContent) {
+                parsed.html = plainTextToHtml(textContent).trim();
+                parsed.text = textContent;
+            } else if (markdown) {
+                parsed.html = plainTextToHtml(markdown).trim();
+                parsed.text = markdown;
+                parsed.markdown = markdown;
+            } else {
+                const legacyHtml = extractXmlTag(normalizedText, 'content_html');
+                if (legacyHtml && /<[a-z][\s\S]*?>/i.test(legacyHtml)) {
+                    parsed.html = legacyHtml;
+                } else {
+                    parsed.html = plainTextToHtml(legacyHtml).trim();
+                }
+                parsed.text = parsed.html;
+            }
+            parsed.title = extractXmlTag(normalizedText, 'title').trim();
+            parsed.target = extractXmlTag(normalizedText, 'target_doc').trim();
+        } else if (type === 'patch') {
+            parsed.original = extractXmlTag(normalizedText, 'original').trim();
+            const replacementText = extractXmlTag(normalizedText, 'replacement_text');
+            const replacementMarkdown = extractXmlTag(normalizedText, 'replacement_markdown');
+            
+            if (replacementText) {
+                parsed.replacement = plainTextToHtml(replacementText).trim();
+                parsed.replacementText = replacementText;
+            } else if (replacementMarkdown) {
+                parsed.replacement = plainTextToHtml(replacementMarkdown).trim();
+                parsed.replacementMarkdown = replacementMarkdown;
+            } else {
+                const legacyReplacement = extractXmlTag(normalizedText, 'replacement');
+                if (legacyReplacement && /<[a-z][\s\S]*?>/i.test(legacyReplacement)) {
+                    parsed.replacement = legacyReplacement;
+                } else {
+                    parsed.replacement = plainTextToHtml(legacyReplacement).trim();
+                }
+            }
+            parsed.context = extractXmlTag(normalizedText, 'context').trim();
+            parsed.target = extractXmlTag(normalizedText, 'target_doc').trim();
+        } else if (type === 'section') {
+            const textContent = extractXmlTag(normalizedText, 'content_text');
+            const markdown = extractXmlTag(normalizedText, 'content_markdown');
+            
+            if (textContent) {
+                parsed.html = plainTextToHtml(textContent).trim();
+                parsed.text = textContent;
+            } else if (markdown) {
+                parsed.html = plainTextToHtml(markdown).trim();
+                parsed.markdown = markdown;
+            } else {
+                const legacyHtml = extractXmlTag(normalizedText, 'content_html');
+                if (legacyHtml && /<[a-z][\s\S]*?>/i.test(legacyHtml)) {
+                    parsed.html = legacyHtml;
+                } else {
+                    parsed.html = plainTextToHtml(legacyHtml).trim();
+                }
+            }
+            parsed.title = extractXmlTag(normalizedText, 'title').trim();
+            const sectionIdxStr = extractXmlTag(normalizedText, 'section_index').trim();
+            const totalSectionsStr = extractXmlTag(normalizedText, 'total_sections').trim();
+            parsed.sectionIndex = sectionIdxStr ? parseInt(sectionIdxStr, 10) : 1;
+            parsed.totalSections = totalSectionsStr ? parseInt(totalSectionsStr, 10) : 1;
+        } else if (type === 'analysis' || type === 'suggestion') {
+            parsed.text = extractXmlTag(normalizedText, 'text');
+        }
+
+        return parsed;
+    }
+
+    // ── 3. PARSEADOR TERCIARIO: Pseudo-etiquetas clave-valor sin delimitadores (ej. _type content) ──
+    const keys = [
+        'response_type', 'response-type', 'type',
+        'response_scope', 'response-scope', 'scope',
+        'target_doc', 'target-doc', 'target',
+        'title',
+        'content_text', 'content-text', 'content_html', 'content-html', 'content',
+        'text',
+        'original',
+        'replacement_text', 'replacement-text', 'replacement',
+        'context',
+        'section_index', 'section-index',
+        'total_sections', 'total-sections'
+    ];
+
+    const sortedKeys = [...keys].sort((a, b) => b.length - a.length);
+    const regexStr = '(?:<|\\b|\\s|_\\[)?\\b(' + sortedKeys.join('|') + ')\\b(?:>|\\b|\\s|_\\])?\\s*[:=]?\\s*';
+    const regex = new RegExp(regexStr, 'gi');
+
+    const matches = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        matches.push({
+            keyName: match[1].toLowerCase(),
+            index: match.index,
+            length: match[0].length
+        });
+    }
+
+    if (matches.length >= 2) {
+        const parsed = {};
+        for (let i = 0; i < matches.length; i++) {
+            const current = matches[i];
+            const start = current.index + current.length;
+            const end = (i + 1 < matches.length) ? matches[i + 1].index : text.length;
+            const rawVal = text.substring(start, end).trim();
+
+            let key = current.keyName;
+            if (key === 'type') key = 'response_type';
+            if (key === 'response-type') key = 'response_type';
+            if (key === 'scope') key = 'response_scope';
+            if (key === 'response-scope') key = 'response_scope';
+            if (key === 'target') key = 'target_doc';
+            if (key === 'target-doc') key = 'target_doc';
+            if (key === 'content-text') key = 'content_text';
+            if (key === 'content') key = 'content_text';
+            if (key === 'content_html') key = 'content_text';
+            if (key === 'content-html') key = 'content_text';
+            if (key === 'replacement-text') key = 'replacement_text';
+            if (key === 'replacement') key = 'replacement_text';
+            if (key === 'section-index') key = 'section_index';
+            if (key === 'total-sections') key = 'total_sections';
+
+            parsed[key] = rawVal;
+        }
+
+        if (parsed.response_type) {
+            const type = parsed.response_type.toLowerCase();
+            const finalParsed = { type };
+            if (parsed.response_scope) finalParsed.scope = parsed.response_scope.toLowerCase();
+
+            if (type === 'content') {
+                const textContent = parsed.content_text || '';
+                finalParsed.html = plainTextToHtml(textContent).trim();
+                finalParsed.text = textContent;
+                finalParsed.title = (parsed.title || '').trim();
+                finalParsed.target = (parsed.target_doc || '').trim();
+            } else if (type === 'patch') {
+                finalParsed.original = (parsed.original || '').trim();
+                const replacementText = parsed.replacement_text || '';
+                finalParsed.replacement = plainTextToHtml(replacementText).trim();
+                finalParsed.replacementText = replacementText;
+                finalParsed.context = (parsed.context || '').trim();
+                finalParsed.target = (parsed.target_doc || '').trim();
+            } else if (type === 'section') {
+                const textContent = parsed.content_text || '';
+                finalParsed.html = plainTextToHtml(textContent).trim();
+                finalParsed.text = textContent;
+                finalParsed.title = (parsed.title || '').trim();
+                finalParsed.sectionIndex = parsed.section_index ? parseInt(parsed.section_index, 10) : 1;
+                finalParsed.totalSections = parsed.total_sections ? parseInt(parsed.total_sections, 10) : 1;
+            } else if (type === 'analysis' || type === 'suggestion') {
+                finalParsed.text = parsed.text || '';
+            }
+
+            return finalParsed;
+        }
+    }
+
+    return null;
 
     // Normalizar si usaron guion en lugar de guion bajo
     const normalizedText = text
@@ -710,11 +1028,13 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
         const isPartial = parsed.scope === 'partial';
 
         if (dest.mode === 'new') {
-            return [{ docType: 'chapter', docId: null, mode: 'new', title: parsed.title || 'Nuevo documento', content: parsed.html, responseType: 'content', isPartial }];
+            const blockTitle = parsed.title || detectTitleFromContent(parsed.text || parsed.html) || 'Nuevo capítulo';
+            return [{ docType: 'chapter', docId: null, mode: 'new', title: blockTitle, content: parsed.html, responseType: 'content', isPartial }];
         } else if (dest.mode === 'manual' && dest.docId) {
             return [{ docType: dest.docType, docId: dest.docId, mode: 'manual', title: dest.docTitle || 'Documento', content: parsed.html, responseType: 'content', isPartial }];
         } else {
-            return [{ docType: 'chapter', docId: null, mode: 'auto', title: parsed.title || 'Automático', content: parsed.html, responseType: 'content', isPartial }];
+            const blockTitle = parsed.title || detectTitleFromContent(parsed.text || parsed.html) || 'Automático';
+            return [{ docType: 'chapter', docId: null, mode: 'auto', title: blockTitle, content: parsed.html, responseType: 'content', isPartial }];
         }
     }
 
@@ -859,8 +1179,8 @@ export const findDestinationDoc = (destinationDoc, chapters, worldItems) => {
  *  - modificar   → type:"content"   (HTML completo o parcial según tamaño del cambio)
  *  - fragmento   → type:"patch"     (solo el fragmento modificado)
  *  - seccion     → type:"section"   (sección específica del documento)
- *  - analizar    → type:"analysis"  (markdown)
- *  - sugerir     → type:"suggestion"(markdown)
+ *  - analizar    → type:"analysis"  (texto plano)
+ *  - sugerir     → type:"suggestion"(texto plano)
  *  - personalizado → detecta automáticamente
  */
 export const buildSystemPrompt = (action, context, destinationDoc, activeChapter, extraOptions = {}) => {
@@ -897,89 +1217,70 @@ export const buildSystemPrompt = (action, context, destinationDoc, activeChapter
     if (dest.mode === 'manual' && dest.docId) {
         const docLabel = dest.docType === 'worldItem' ? 'Master Doc' : 'Capítulo';
         docDescription = `"${dest.docTitle || 'Documento'}" (${docLabel})`;
-        contentInstruction = `Modifica el documento especificado y devuelve su contenido en texto plano limpio dentro de la etiqueta <content_text>.`;
+        contentInstruction = `Modifica el documento especificado y devuelve su contenido en texto plano limpio.`;
     } else if (dest.mode === 'new') {
         docDescription = 'Nuevo documento';
-        contentInstruction = `Genera el contenido en texto plano limpio completo del nuevo documento dentro de la etiqueta <content_text>. Sugiere un título dentro de la etiqueta <title>.`;
+        contentInstruction = `Genera el contenido en texto plano limpio completo del nuevo documento. Sugiere un título dentro del bloque de metadatos inicial como [TÍTULO: Tu Título].`;
     } else {
         docDescription = 'Automático (La IA determina el destino)';
-        contentInstruction = `Devuelve el contenido en texto plano limpio dentro de la etiqueta <content_text>. Si el contenido modificado/añadido está destinado a una sección del Master Doc o a un capítulo específico, indica el título exacto de ese documento dentro de la etiqueta <target_doc> (ej. <target_doc>Personajes</target_doc>) para que la app sepa dónde guardarlo automáticamente.${targetsStr}`;
+        contentInstruction = `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc o a un capítulo específico, indica el título exacto de ese documento dentro del bloque de metadatos inicial como [DESTINO: Nombre Exacto] (ej. [DESTINO: Personajes]) para que la app sepa dónde guardarlo automáticamente.${targetsStr}`;
     }
 
-    const xmlSchemaContent = `
-FORMATO DE RESPUESTA OBLIGATORIO — Debes responder SIEMPRE estructurando tu respuesta exclusivamente usando las siguientes etiquetas XML semánticas:
+    const bracketSchemaContent = `
+FORMATO DE RESPUESTA OBLIGATORIO — Debes comenzar tu respuesta SIEMPRE estructurando el siguiente bloque de metadatos exacto en la cabecera (usando corchetes individuales, un par por línea):
 
-Para crear o modificar contenido:
-<response_type>content</response_type>
-<response_scope>complete o partial (OBLIGATORIO: indica si tu respuesta contiene el documento COMPLETO con todos sus párrafos y secciones, o solo los fragmentos que modificaste)</response_scope>
-<target_doc>Nombre exacto de la sección del Master Doc (ej. 'Personajes', 'Estructura de Capítulos', 'Información General') o título de capítulo existente al que va dirigido este contenido (opcional, muy útil si el destino es automático)</target_doc>
-<title>Título sugerido (solo si es documento nuevo, opcional)</title>
-<content_text>
-  Escribe aquí el contenido modificado o nuevo exclusivamente en texto plano limpio y puro.
-  - Separa los párrafos únicamente con un doble salto de línea completo (\\n\\n).
-  - Queda COMPLETAMENTE PROHIBIDO usar cualquier tipo de formato Markdown (como **, *, #, lista con guiones, etc.) o etiquetas HTML (como <p>, <strong>, <em>, etc.).
-  - Escribe en prosa narrativa limpia y fluida, sin ningún tipo de código o adorno tipográfico.
-  - Las comillas dobles (") son signos de puntuación estándar. Escríbelas de forma continua y natural en la misma línea del texto para diálogos o términos específicos (ej. "Recipiente Nulo" o "esclavo corporativo"), sin añadir saltos de línea ni espaciados artificiales a su alrededor.
-</content_text>
+[TIPO: contenido]
+[ÁMBITO: completo o parcial] (OBLIGATORIO: indica 'completo' si tu respuesta contiene el documento completo con todos sus párrafos y secciones, o 'parcial' si solo devuelves los fragmentos/párrafos modificados)
+[DESTINO: Nombre exacto de la sección o capítulo] (Nombre de la sección del Master Doc o título de capítulo existente al que va dirigido este contenido, ej. 'Personajes', 'Estructura de Capítulos' o 'Capítulo 1')
+[TÍTULO: Título sugerido] (Solo si estás creando un documento o capítulo nuevo, opcional)
 
-Para análisis de texto:
-<response_type>analysis</response_type>
-<text>
-  Tu análisis detallado en texto plano limpio (sin Markdown ni HTML, párrafos separados por \\n\\n)...
-</text>
-
-Para sugerencias creativas:
-<response_type>suggestion</response_type>
-<text>
-  Tus sugerencias creativas en texto plano limpio (sin Markdown ni HTML, párrafos separados por \\n\\n)...
-</text>
+A continuación del bloque de metadatos, deja una línea en blanco y escribe el contenido nuevo o modificado exclusivamente en texto plano limpio y puro.
 
 REGLAS CRÍTICAS DE PRESERVACIÓN Y FORMATO (TEXTO PLANO ESTRICTO):
-- Responde usando estrictamente las etiquetas XML anteriores, no incluyas ningún texto de saludo o despedida fuera de las etiquetas.
-- REGLA DE PRESERVACIÓN DE ALTA FIDELIDAD: Al modificar, queda ESTRICTAMENTE PROHIBIDO resumir, simplificar, acortar, o eliminar información, listas, nombres o secciones de lore que ya existan en el texto original, a menos que el usuario lo haya solicitado explícitamente de forma directa. Preserva cada párrafo, descripción y detalle palabra por palabra si no es afectado directamente por la instrucción.
-- Queda COMPLETAMENTE PROHIBIDO usar cualquier tipo de formato de Markdown (como **, *, #, -, etc.) o etiquetas HTML (como <p>, <strong>, <em>) dentro de <content_text>, <replacement_text> o <text>. La prosa debe ser texto plano puro.
-- Los párrafos se separan únicamente por un doble salto de línea (\\n\\n).
+- Escribe el bloque de metadatos inicial exactamente como se muestra, con los corchetes rectos.
+- REGLA DE PRESERVACIÓN DE ALTA FIDELIDAD: Al modificar, queda ESTRICTAMENTE PROHIBIDO resumir, simplificar, acortar o eliminar información, listas, nombres o secciones de lore que ya existan en el texto original, a menos que el usuario lo haya solicitado explícitamente de forma directa. Preserva cada párrafo, descripción y detalle palabra por palabra si no es afectado directamente por la instrucción.
+- Queda COMPLETAMENTE PROHIBIDO usar cualquier tipo de formato de Markdown (como **, *, #, -, etc.) o etiquetas HTML (como <p>, <strong>, <em>) en el cuerpo del texto. La prosa debe ser texto plano puro.
+- Los párrafos en el cuerpo se separan únicamente por un doble salto de línea (\n\n).
 - Usa comillas dobles estándar (") de forma natural y fluida dentro de las oraciones en la misma línea. No agregues espacios innecesarios ni saltos de línea alrededor de las comillas.
-- NUNCA uses bloques de código con triple comilla invertida (\`\`\`) ni de JSON ni de XML alrededor del documento. Responde en texto plano con las etiquetas XML directamente.`;
+- NUNCA uses bloques de código con triple comilla invertida (\`\`\`). Escribe la prosa limpia directamente después del bloque de metadatos.`;
 
-    const xmlSchemaPatch = `
+    const bracketSchemaPatch = `
 FORMATO DE RESPUESTA OBLIGATORIO — Modo "Fragmento" (patch):
 
-Responde estructurando tu respuesta exclusivamente usando las siguientes etiquetas XML semánticas:
-<response_type>patch</response_type>
-<target_doc>Nombre exacto de la sección del Master Doc (ej. 'Personajes', 'Estructura de Capítulos', 'Información General') o título de capítulo existente al que va dirigido este cambio (opcional, muy útil si el destino es automático)</target_doc>
-<original>El texto EXACTO del fragmento original que vas a modificar (texto plano literal extraído del documento original, tal cual, sin formato ni HTML)</original>
-<replacement_text>
-  Escribe el nuevo contenido exclusivamente en texto plano limpio (sin **, sin *, sin #, usa saltos de línea \\n\\n para párrafos) para reemplazar ese fragmento.
-  - Queda COMPLETAMENTE PROHIBIDO usar etiquetas HTML o formato Markdown. Escribe en prosa nativa limpia.
-  - Usa comillas dobles estándar (") de forma natural, fluida e integrada en el texto de la misma línea, sin añadir saltos de línea ni espaciados incorrectos alrededor de las mismas.
-</replacement_text>
-<context>Breve descripción de qué cambió y por qué (1-2 frases)</context>
+Comienza tu respuesta estructurando el siguiente bloque de metadatos y delimitadores exactos (usando corchetes individuales):
 
-REGLAS CRÍTICAS para modo patch:
-- En <original>: copia exactamente el texto plano literal del fragmento que se quiere cambiar (sin formato ni asteriscos).
-- En <replacement_text>: escribe el nuevo contenido en texto plano limpio que reemplazará ese fragmento.
-- NO reescribas el documento completo — solo el fragmento indicado.
-- Responde usando estrictamente las etiquetas XML anteriores, no incluyas ningún texto adicional ni bloques \`\`\`.`;
+[TIPO: fragmento]
+[DESTINO: Nombre exacto de la sección o capítulo]
+[CONTEXTO: Breve descripción de qué cambió y por qué (1-2 frases)]
+[ORIGINAL]
+Aquí va el texto EXACTO del fragmento original que vas a modificar (texto plano literal extraído del documento original, tal cual, sin formato ni HTML).
+[/ORIGINAL]
 
-    const xmlSchemaSection = `
+A continuación del bloque anterior, deja una línea en blanco y escribe el nuevo fragmento en texto plano limpio que reemplazará al original.
+
+REGLAS CRÍTICAS para modo fragmento:
+- En [ORIGINAL]: copia exactamente el texto plano literal del fragmento que se quiere cambiar (tal cual, sin asteriscos ni marcas).
+- Fuera del bloque de metadatos y del bloque [ORIGINAL]...[/ORIGINAL], escribe exclusivamente el contenido de reemplazo en texto plano limpio.
+- NO reescribas el documento completo — solo el fragmento de reemplazo.
+- Queda COMPLETAMENTE PROHIBIDO usar formato Markdown o etiquetas HTML.
+- NUNCA uses bloques de código con triple comilla invertida (\`\`\`).`;
+
+    const bracketSchemaSection = `
 FORMATO DE RESPUESTA OBLIGATORIO — Modo "Sección":
 
-Responde estructurando tu respuesta exclusivamente usando las siguientes etiquetas XML semánticas:
-<response_type>section</response_type>
-<title>Nombre de la sección</title>
-<section_index>${extraOptions.sectionIndex || 1}</section_index>
-<total_sections>${extraOptions.totalSections || 1}</total_sections>
-<content_text>
-  Escribe aquí el contenido en texto plano limpio para esta sección específica...
-  - Queda COMPLETAMENTE PROHIBIDO usar etiquetas HTML o formato Markdown. Escribe en prosa nativa limpia.
-  - Usa comillas dobles estándar (") de forma natural, fluida e integrada en el texto de la misma línea, sin añadir saltos de línea ni espaciados incorrectos alrededor de las mismas.
-</content_text>
+Comienza tu respuesta estructurando el siguiente bloque de metadatos exacto (usando corchetes individuales):
+
+[TIPO: seccion]
+[TÍTULO: Nombre de la sección]
+[SECCIÓN: ${extraOptions.sectionIndex || 1}]
+[TOTAL: ${extraOptions.totalSections || 1}]
+
+A continuación del bloque, escribe el contenido en texto plano limpio para esta sección específica.
 
 REGLAS CRÍTICAS:
 - Escribe SOLO la sección indicada, no el capítulo completo.
-- El contenido debe ser prosa narrativa de texto plano lista para insertar en el documento.
-- Responde usando estrictamente las etiquetas XML anteriores, no incluyas ningún texto de saludo o despedida.`;
+- El contenido debe ser prosa narrativa de texto plano limpia, sin Markdown ni HTML.
+- NUNCA uses bloques de código con triple comilla invertida (\`\`\`).`;
 
     // ── Prompts por acción ──
     const actionPrompts = {
@@ -992,7 +1293,7 @@ ${contentInstruction}
 
 Escribe contenido original, rico y bien estructurado. Para textos largos, usa párrafos bien desarrollados en texto plano.
 
-${xmlSchemaContent}
+${bracketSchemaContent}
 
 Contexto del libro:
 ${context}`,
@@ -1005,15 +1306,15 @@ ${context}`,
 ${contentInstruction}
 
 ESTRATEGIA DE RESPUESTA SEGÚN MAGNITUD DEL CAMBIO:
-- Si el cambio afecta POCAS PALABRAS o FRASES aisladas (ej. reemplazar un nombre, corregir un dato) → USA <response_type>content</response_type> con <response_scope>partial</response_scope> devolviendo SOLO las secciones/párrafos que contienen los cambios (con suficiente contexto para identificar dónde van). La app fusionará automáticamente los fragmentos devueltos con el documento original.
-- Si el cambio afecta la MAYORÍA del documento (>50% del contenido) → USA <response_type>content</response_type> con <response_scope>complete</response_scope> devolviendo el documento COMPLETO.
-- Si el cambio es UN SOLO PÁRRAFO o FRASE específica → Considera usar <response_type>patch</response_type> con <replacement_text>.
+- Si el cambio afecta POCAS PALABRAS o FRASES aisladas (ej. reemplazar un nombre, corregir un dato) → USA [TIPO: contenido] con [ÁMBITO: parcial] devolviendo SOLO las secciones/párrafos que contienen los cambios (con suficiente contexto para identificar dónde van). La app fusionará automáticamente los fragmentos devueltos con el documento original.
+- Si el cambio afecta la MAYORÍA del documento (>50% del contenido) → USA [TIPO: contenido] con [ÁMBITO: completo] devolviendo el documento COMPLETO.
+- Si el cambio es UN SOLO PÁRRAFO o FRASE específica → Considera usar [TIPO: fragmento] con el bloque [ORIGINAL]...[/ORIGINAL].
 
 ⚠️ DIRECTRICES DE FIDELIDAD NARRATIVA:
 - NUNCA resumas, omitas ni abrevies la información que SÍ devuelves. Cada sección devuelta debe mantener su extensión y riqueza original, con solo los cambios solicitados aplicados.
-- Si usas scope "partial", asegúrate de incluir las secciones completas donde ocurren los cambios (no fragmentos sueltos sin contexto).
+- Si usas scope "parcial", asegúrate de incluir las secciones completas donde ocurren los cambios (no fragmentos sueltos sin contexto).
 
-${xmlSchemaContent}
+${bracketSchemaContent}
 
 Contexto del libro:
 ${context}`,
@@ -1027,11 +1328,11 @@ El usuario ha seleccionado un fragmento específico de su texto para que lo modi
 Tu tarea es:
 1. Recibir el fragmento original
 2. Aplicar los cambios solicitados SOLO a ese fragmento
-3. Devolver el fragmento modificado en texto plano limpio dentro de <replacement_text>
+3. Devolver el fragmento modificado en texto plano limpio.
 
 NO reescribas el documento completo. Trabaja exclusivamente con el fragmento proporcionado.
 
-${xmlSchemaPatch}
+${bracketSchemaPatch}
 
 Contexto del libro:
 ${context}`,
@@ -1047,7 +1348,7 @@ Estás escribiendo una sección específica de un capítulo o documento largo.
 - Ajusta el ritmo y el tono a la posición de esta sección en el documento.
 - Escribe prosa narrativa completa y rica en texto plano.
 
-${xmlSchemaSection}
+${bracketSchemaSection}
 
 Contexto del libro:
 ${context}`,
@@ -1063,9 +1364,10 @@ Analiza el contexto proporcionado y da retroalimentación sobre:
 4. **Coherencia** — Conectividad con personajes y tono
 5. **Sugerencias de mejora** — Puntos específicos
 
-Responde con <response_type>analysis</response_type> y usa texto plano claro y estructurado con saltos de línea dobles (\\n\\n) dentro de la etiqueta <text>. Queda prohibido usar formato markdown o html.
+Responde con el siguiente formato de metadatos al inicio:
+[TIPO: analisis]
 
-${xmlSchemaContent}
+Tu análisis detallado en texto plano claro y estructurado con saltos de línea dobles (\n\n). Queda prohibido usar formato markdown o html.
 
 Contexto del libro:
 ${context}`,
@@ -1081,9 +1383,10 @@ Basado en el contexto, propón ideas para mejorar la historia:
 4. **Mejoras de tensión dramática**
 5. **Ampliación del mundo**
 
-Responde con <response_type>suggestion</response_type> y usa texto plano claro y estructurado con saltos de línea dobles (\\n\\n) dentro de la etiqueta <text>. Sé creativo pero relevante. Queda prohibido usar formato markdown o html.
+Responde con el siguiente formato de metadatos al inicio:
+[TIPO: sugerencia]
 
-${xmlSchemaContent}
+Tus sugerencias creativas en texto plano claro y estructurado con saltos de línea dobles (\n\n). Sé creativo pero relevante. Queda prohibido usar formato markdown o html.
 
 Contexto del libro:
 ${context}`,
@@ -1093,17 +1396,17 @@ ${context}`,
 📌 Destino configurado: ${docDescription}
 
 Determina el tipo de respuesta según lo que pida el usuario:
-- Si pide CREAR, ESCRIBIR, AÑADIR → usa <response_type>content</response_type> con <response_scope>complete</response_scope> y devuelve texto plano en <content_text>
-- Si pide MODIFICAR, REESCRIBIR, MEJORAR contenido → usa <response_type>content</response_type> y devuelve texto plano en <content_text>. Usa <response_scope>partial</response_scope> si solo devuelves las secciones afectadas, o <response_scope>complete</response_scope> si devuelves el documento completo.
-- Si pide editar UN FRAGMENTO, UNA SECCIÓN, UN PÁRRAFO específico → usa <response_type>patch</response_type> con <original> + <replacement_text>
-- Si pide ANALIZAR, EVALUAR, REVISAR → usa <response_type>analysis</response_type> con texto plano en <text>
-- Si pide SUGERIR, PROPONER, IDEAS → usa <response_type>suggestion</response_type> con texto plano en <text>
+- Si pide CREAR, ESCRIBIR, AÑADIR → usa [TIPO: contenido] con [ÁMBITO: completo] y devuelve texto plano.
+- Si pide MODIFICAR, REESCRIBIR, MEJORAR contenido → usa [TIPO: contenido] y devuelve texto plano. Usa [ÁMBITO: parcial] si solo devuelves las secciones afectadas, o [ÁMBITO: completo] si devuelves el documento completo.
+- Si pide editar UN FRAGMENTO, UNA SECCIÓN, UN PÁRRAFO específico → usa [TIPO: fragmento] con el bloque [ORIGINAL]...[/ORIGINAL] y el texto de reemplazo.
+- Si pide ANALIZAR, EVALUAR, REVISAR → usa [TIPO: analisis]
+- Si pide SUGERIR, PROPONER, IDEAS → usa [TIPO: sugerencia]
 
 ⚠️ DIRECTRICES DE FIDELIDAD NARRATIVA:
 - NUNCA resumas, omitas ni abrevies la información que SÍ devuelves. Cada sección devuelta debe mantener su extensión y detalle original.
-- Si usas scope "partial", la app fusionará automáticamente tu respuesta con el documento original, preservando las secciones no devueltas.
+- Si usas scope "parcial", la app fusionará automáticamente tu respuesta con el documento original, preservando las secciones no devueltas.
 
-${xmlSchemaContent}
+${bracketSchemaContent}
 
 Contexto del libro:
 ${context}`
