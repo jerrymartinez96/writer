@@ -394,7 +394,7 @@ const SettingsView = () => {
                                         <label className="text-[8px] text-[var(--text-muted)] font-black uppercase tracking-[0.1em] block mb-1">Entrada (Input)</label>
                                         <input
                                             type="number"
-                                            step="0.00001"
+                                            step="0.1"
                                             min="0"
                                             value={inputTokenCost}
                                             onChange={(e) => setInputTokenCost(parseFloat(e.target.value) || 0)}
@@ -406,7 +406,7 @@ const SettingsView = () => {
                                         <label className="text-[8px] text-[var(--text-muted)] font-black uppercase tracking-[0.1em] block mb-1">Salida (Output)</label>
                                         <input
                                             type="number"
-                                            step="0.00001"
+                                            step="0.1"
                                             min="0"
                                             value={outputTokenCost}
                                             onChange={(e) => setOutputTokenCost(parseFloat(e.target.value) || 0)}

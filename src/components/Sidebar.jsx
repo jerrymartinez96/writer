@@ -188,9 +188,24 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
     const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
 
-    const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
-    const outputCost = (outputTokens / 1000000) * outputTokenCost;
-    const totalCost = inputCost + outputCost;
+    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
+    const selectedApi = aiSettings.selectedApi || 'openrouter';
+    const isDeepSeek = selectedApi === 'deepseek';
+    const cumulativeUsage = activeSession?.cumulativeUsage;
+    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+
+    let displayMessagesTokens = messagesTokens;
+    let displayTotalTokens = totalInputTokens + outputTokens;
+    let totalCost = 0;
+
+    if (hasCumulativeCost) {
+        // En DeepSeek el costo acumulado es inmutable y persistente
+        totalCost = cumulativeUsage.cost;
+    } else {
+        const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
+        const outputCost = (outputTokens / 1000000) * outputTokenCost;
+        totalCost = inputCost + outputCost;
+    }
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -640,8 +655,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                         Estadísticas y Costos
                                     </span>
                                 </div> */}
-                                
-                                <div className="space-y-2 bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/40 rounded-xl p-2.5 shadow-sm">
+                                                      <div className="space-y-2 bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/40 rounded-xl p-2.5 shadow-sm">
                                     {/* Context Stat */}
                                     <div className="flex items-center justify-between text-[10px]">
                                         <span className="text-[var(--text-muted)] flex items-center gap-1">
@@ -673,7 +687,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     <div className="flex items-center justify-between text-[10px]">
                                         <span className="text-[var(--text-muted)]">Conversación:</span>
                                         <span className="text-[var(--text-main)] font-semibold">
-                                            {(messagesTokens / 1000).toFixed(1)} k 
+                                            {(displayMessagesTokens / 1000).toFixed(1)} k 
                                         </span>
                                     </div>
 
@@ -681,7 +695,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     <div className="flex items-center justify-between text-[10px]">
                                         <span className="text-[var(--text-muted)]">Tokens Totales:</span>
                                         <span className="text-[var(--text-main)] font-bold">
-                                            {(totalInputTokens + outputTokens).toLocaleString()} k
+                                            {displayTotalTokens.toLocaleString()} k
                                         </span>
                                     </div>
 

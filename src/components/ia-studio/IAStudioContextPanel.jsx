@@ -11,7 +11,7 @@ const IAStudioContextPanel = ({
     compressContext = false,
     onToggleCompress = null,
 }) => {
-    const { contextSelections, destinationDoc, onContextChange, onDestinationChange, messages = [] } = useIAStudioContext();
+    const { contextSelections, destinationDoc, onContextChange, onDestinationChange, messages = [], activeSession } = useIAStudioContext();
     const [showQuickSelect, setShowQuickSelect] = useState(false);
     const [showDestDropdown, setShowDestDropdown] = useState(false);
 
@@ -53,9 +53,24 @@ const IAStudioContextPanel = ({
     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
     const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
 
-    const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
-    const outputCost = (outputTokens / 1000000) * outputTokenCost;
-    const totalCost = inputCost + outputCost;
+    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
+    const selectedApi = aiSettings.selectedApi || 'openrouter';
+    const isDeepSeek = selectedApi === 'deepseek';
+    const cumulativeUsage = activeSession?.cumulativeUsage;
+    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+
+    let displayMessagesTokens = messagesTokens;
+    let displayTotalTokens = totalInputTokens + outputTokens;
+    let totalCost = 0;
+
+    if (hasCumulativeCost) {
+        // En DeepSeek el costo acumulado es inmutable y persistente
+        totalCost = cumulativeUsage.cost;
+    } else {
+        const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
+        const outputCost = (outputTokens / 1000000) * outputTokenCost;
+        totalCost = inputCost + outputCost;
+    }
 
     // Volúmenes y capítulos ordenados
     const volumes = useMemo(() =>
@@ -499,7 +514,7 @@ const IAStudioContextPanel = ({
                     <div className="flex items-center justify-between text-[10px]">
                         <span className="text-[var(--text-muted)]">Conversación:</span>
                         <span className="text-[var(--text-main)] font-semibold">
-                            {(messagesTokens / 1000).toFixed(1)}k <span className="text-[8px] opacity-60 font-normal">tkn</span>
+                            {(displayMessagesTokens / 1000).toFixed(1)}k <span className="text-[8px] opacity-60 font-normal">tkn</span>
                         </span>
                     </div>
 
@@ -507,7 +522,7 @@ const IAStudioContextPanel = ({
                     <div className="flex items-center justify-between text-[10px] border-b border-[var(--border-main)]/20 pb-2">
                         <span className="text-[var(--text-muted)]">Total:</span>
                         <span className="text-[var(--text-main)] font-bold">
-                            {(totalInputTokens + outputTokens).toLocaleString()} <span className="text-[8px] opacity-60 font-normal">tkn</span>
+                            {displayTotalTokens.toLocaleString()} <span className="text-[8px] opacity-60 font-normal">tkn</span>
                         </span>
                     </div>
 

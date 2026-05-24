@@ -499,10 +499,8 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
     };
 
     const handleApply = () => {
-        console.log("[AUDIT 5] handleApply ejecutado en IAStudioDiff. viewMode actual:", viewMode);
         // Only reconstruct cherry-picked content if in 'semantic' view
         if (viewMode === 'semantic' && cherryPickState.selectedIds && cherryPickState.groups && !isPatchMode && !isSectionMode) {
-            console.log("[AUDIT 5.1] Cherry-pick activo. IDs seleccionados:", Array.from(cherryPickState.selectedIds));
             // Reconstruct proposed content using only selected changes
             const { selectedIds, groups } = cherryPickState;
             const filteredText = groups.map(g => {
@@ -513,8 +511,6 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
                 }
                 return '';
             }).join('');
-
-            console.log("[AUDIT 5.2] Texto plano reconstruido tras cherry-pick semántico:\n", filteredText);
 
             // Create modified blocks with cherry-picked content, preserving original paragraph breaks (\n\n)
             const cherryBlocks = blocks.map((b, idx) => {
@@ -528,12 +524,10 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
                     .map(p => `<p>${p}</p>`)
                     .join('');
 
-                console.log("[AUDIT 5.3] HTML reconstruido para guardar:\n", paragraphs);
                 return { ...b, proposedContent: paragraphs || b.proposedContent };
             });
             onApply(cherryBlocks);
         } else {
-            console.log("[AUDIT 5.4] Sin cherry-pick o en vista Lado a Lado. Aplicando bloques propuestos crudos:\n", JSON.stringify(blocks, null, 2));
             onApply(blocks);
         }
     };

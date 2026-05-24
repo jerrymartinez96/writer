@@ -296,7 +296,7 @@ export const AIService = {
      * @param {Object} settings - AI settings (apiKey, model, temperature, useJsonMode, etc)
      * @param {Function} onChunk - Callback for each text chunk
      */
-    async generateStream(messages, settings, onChunk) {
+    async generateStream(messages, settings, onChunk, onUsage) {
         const modelId = settings?.selectedAiModel || "google/gemini-2.0-flash-exp:free";
         const selectedApi = settings?.selectedApi || 'openrouter';
         const temperature = settings?.temperature ?? 0.7;
@@ -311,6 +311,7 @@ export const AIService = {
                 model: modelId,
                 messages: messages,
                 stream: true,
+                stream_options: { include_usage: true },
                 temperature: temperature,
                 max_tokens: 32768
             };
@@ -360,6 +361,16 @@ export const AIService = {
                             const data = JSON.parse(dataStr);
                             const text = data.choices?.[0]?.delta?.content || '';
                             if (text) onChunk(text);
+
+                            // Capture usage data if returned in stream
+                            if (data.usage && onUsage) {
+                                onUsage({
+                                    promptTokens: data.usage.prompt_tokens,
+                                    completionTokens: data.usage.completion_tokens,
+                                    totalTokens: data.usage.total_tokens,
+                                    reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens || 0
+                                });
+                            }
                         } catch (e) {
                             console.warn("DeepSeek SSE parse error:", e);
                         }

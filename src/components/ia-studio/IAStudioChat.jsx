@@ -10,6 +10,7 @@ import {
     extractJSON, 
     parseCharactersFromMarkers,
     buildDetectionPrompt, 
+    buildRefineSuggestionsPrompt,
     buildNameProposalsPrompt, 
     buildCharacterSuggestionsPrompt, 
     buildChatQuestionsPrompt, 
@@ -85,6 +86,29 @@ const IAStudioChat = ({
     const [customNameInput, setCustomNameInput] = useState('');
     const [customIdeaInput, setCustomIdeaInput] = useState('');
     const [charAnswerInput, setCharAnswerInput] = useState('');
+    const [refineAspectInput, setRefineAspectInput] = useState('');
+    const [refineSuggestions, setRefineSuggestions] = useState([]);
+    const [refineSuggestionsLoading, setRefineSuggestionsLoading] = useState(false);
+    const [loadingTime, setLoadingTime] = useState(0);
+
+    useEffect(() => {
+        let interval = null;
+        const isLoadingStep = charFlow?.step === 'detecting' || 
+                              charFlow?.step === 'interview_loading' || 
+                              charFlow?.step === 'synthesizing_loading' || 
+                              charFlow?.step === 'loading';
+        if (isLoadingStep) {
+            setLoadingTime(0);
+            interval = setInterval(() => {
+                setLoadingTime(prev => prev + 1);
+            }, 1000);
+        } else {
+            setLoadingTime(0);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [charFlow?.step]);
 
     const apiSelected = selectedApi;
     const modelSelected = selectedModel;
@@ -96,6 +120,8 @@ const IAStudioChat = ({
     }, [activeSession]);
     
     const messagesEndRef = useRef(null);
+    const chatContainerRef = useRef(null);
+    const shouldAutoScrollRef = useRef(true);
     const inputRef = useRef(null);
     const fragmentRef = useRef(null);
 
@@ -295,15 +321,42 @@ const IAStudioChat = ({
     const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
 
-    const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
-    const outputCost = (outputTokens / 1000000) * outputTokenCost;
-    const totalCost = inputCost + outputCost;
+    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
+    const isDeepSeek = selectedApi === 'deepseek';
+    const cumulativeUsage = activeSession?.cumulativeUsage;
+    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+
+    let displayMessagesTokens = messagesTokens;
+    let displayTotalTokens = totalInputTokens + outputTokens;
+    let totalCost = 0;
+
+    if (hasCumulativeCost) {
+        // En DeepSeek el costo acumulado es inmutable y persistente
+        totalCost = cumulativeUsage.cost;
+    } else {
+        const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
+        const outputCost = (outputTokens / 1000000) * outputTokenCost;
+        totalCost = inputCost + outputCost;
+    }
 
     const currentAction = QUICK_ACTIONS?.find(a => a.id === selectedAction);
 
+    const handleScroll = useCallback(() => {
+        if (!chatContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+        // Check if user is scrolled within 60px of the bottom
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 60;
+        shouldAutoScrollRef.current = isAtBottom;
+    }, []);
+
     // Auto-scroll
     useEffect(() => {
-        if (messagesEndRef.current) {
+        const isLastMsgUser = messages.length > 0 && messages[messages.length - 1].role === 'user';
+        if (isLastMsgUser) {
+            shouldAutoScrollRef.current = true;
+        }
+
+        if (shouldAutoScrollRef.current && messagesEndRef.current) {
             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [messages]);
@@ -462,7 +515,13 @@ const IAStudioChat = ({
         try {
             const isRefining = charFlow?.mode === 'refine';
             const existingProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
-            const prompt = buildChatQuestionsPrompt(charName, selectedFocus, isRefining ? existingProfile : charIdea, isRefining);
+            const prompt = buildChatQuestionsPrompt(
+                charName, 
+                selectedFocus, 
+                isRefining ? existingProfile : charIdea, 
+                isRefining,
+                isRefining ? refineAspectInput : ""
+            );
             const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
             const qs = extractJSON(response) || [];
             
@@ -651,7 +710,41 @@ const IAStudioChat = ({
         }
     };
 
+    const fetchRefineSuggestions = async () => {
+        const apiKey = getLocalApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Por favor, configura tu API Key en Ajustes antes de continuar.', type: 'error' }
+            }));
+            return;
+        }
+
+        setRefineSuggestionsLoading(true);
+        try {
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const charName = charFlow?.characterName;
+            const charProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
+            
+            const prompt = buildRefineSuggestionsPrompt(charName, charProfile, docContent, getBookContext());
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const list = extractJSON(response) || [];
+            
+            setRefineSuggestions(list);
+        } catch (e) {
+            console.error(e);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al generar sugerencias de refinamiento.', type: 'error' }
+            }));
+        } finally {
+            setRefineSuggestionsLoading(false);
+        }
+    };
+
     const selectCharacterToRefine = (charObj) => {
+        setRefineAspectInput('');
+        setRefineSuggestions([]);
+        setRefineSuggestionsLoading(false);
         setCharFlow(prev => ({
             ...prev,
             selectedCharacter: charObj,
@@ -765,13 +858,24 @@ const IAStudioChat = ({
 
         // ─── 1. DETECTING CHARACTERS LOADING ───
         if (charFlow.step === 'detecting') {
+            const formatTime = (secs) => {
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                return `${m}:${s < 10 ? '0' : ''}${s}`;
+            };
+
             return (
                 <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in fade-in duration-300 font-sans">
                     <Loader2 size={40} className="text-indigo-500 animate-spin mb-6" />
                     <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic">Analizando documento...</h3>
-                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed">
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed mb-5">
                         La IA está escaneando tu documento de personajes de forma semántica en busca de perfiles existentes.
                     </p>
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/[0.06] border border-indigo-500/15 rounded-full text-[11px] font-mono text-indigo-500 font-bold shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        <span>Tiempo transcurrido: {formatTime(loadingTime)}</span>
+                    </div>
                 </div>
             );
         }
@@ -840,87 +944,156 @@ const IAStudioChat = ({
                         </div>
                     </div>
 
-                    <div className="flex-1 space-y-5 overflow-y-auto max-h-[340px] pr-1 scrollbar-hide">
-                        {/* Name input only for CREATE flow */}
-                        {!isRefine && (
-                            <div>
-                                <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Nombre del Personaje</label>
-                                <div className="flex gap-2 mb-2">
-                                    <input 
-                                        type="text"
-                                        value={customNameInput}
-                                        onChange={(e) => setCustomNameInput(e.target.value)}
-                                        placeholder="Ej: Sylas Vance..."
-                                        className="flex-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    <div className="flex-grow space-y-5 overflow-y-auto max-h-[340px] pr-1 scrollbar-hide">
+                        {isRefine ? (
+                            /* REFINE FLOW: CUSTOM ASPECT INPUT & AI GAP SUGGESTIONS */
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                                        ¿Qué aspecto o detalle deseas refinar de {charFlow.characterName}?
+                                    </label>
+                                    <textarea
+                                        value={refineAspectInput}
+                                        onChange={(e) => setRefineAspectInput(e.target.value)}
+                                        placeholder="Ej: Quiero pulir su motivación oculta, aclarar su pasado familiar o detallar su enemistad con Sylas..."
+                                        className="w-full h-20 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none mb-3"
                                     />
-                                    <button
-                                        onClick={() => suggestNames('completo')}
-                                        disabled={nameSuggestionLoading}
-                                        className="px-4 bg-gradient-to-tr from-blue-600/10 to-indigo-600/10 hover:from-blue-600 hover:to-indigo-600 hover:text-white border border-blue-500/20 rounded-xl text-[10px] text-blue-400 font-bold uppercase tracking-wider transition-all disabled:opacity-40 whitespace-nowrap shrink-0 flex items-center gap-1.5"
-                                    >
-                                        {nameSuggestionLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                                        Sugerir Nombres
-                                    </button>
+                                    
+                                    <div className="flex justify-between items-center">
+                                        <button
+                                            type="button"
+                                            onClick={fetchRefineSuggestions}
+                                            disabled={refineSuggestionsLoading}
+                                            className="px-4 py-2.5 bg-indigo-500/10 hover:bg-indigo-500 hover:text-white border border-indigo-500/20 rounded-xl text-[10px] text-indigo-400 font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center gap-1.5 cursor-pointer shrink-0"
+                                        >
+                                            {refineSuggestionsLoading ? (
+                                                <Loader2 size={12} className="animate-spin" />
+                                            ) : (
+                                                <Sparkles size={12} />
+                                            )}
+                                            No sé, sugiéreme qué refinar
+                                        </button>
+                                    </div>
                                 </div>
 
-                                {nameProposals.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 p-3 bg-[var(--bg-app)]/50 rounded-xl border border-[var(--border-main)] mb-2 animate-in fade-in duration-300">
-                                        {nameProposals.map((name, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => setCustomNameInput(name)}
-                                                className="text-[10px] font-medium bg-[var(--bg-editor)] hover:bg-blue-500/10 hover:text-blue-400 border border-[var(--border-main)] rounded-lg px-2.5 py-1 text-[var(--text-main)] transition-all"
-                                            >
-                                                {name}
-                                            </button>
-                                        ))}
+                                {refineSuggestionsLoading && (
+                                    <div className="flex flex-col items-center justify-center p-6 bg-[var(--bg-app)]/30 border border-[var(--border-main)] rounded-2xl animate-in fade-in duration-300">
+                                        <Loader2 size={24} className="text-indigo-500 animate-spin mb-3" />
+                                        <p className="text-[10px] text-[var(--text-muted)] font-mono animate-pulse">
+                                            Analizando elenco y buscando vacíos...
+                                        </p>
                                     </div>
                                 )}
 
-                                <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mt-4 mb-2">Idea Inicial o Arquetipo (Opcional)</label>
-                                <textarea
-                                    value={customIdeaInput}
-                                    onChange={(e) => setCustomIdeaInput(e.target.value)}
-                                    placeholder="Ej: Un contrabandista astuto que oculta su pasado real y teme ser traicionado por quienes ama..."
-                                    className="w-full h-16 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-                                />
+                                {!refineSuggestionsLoading && refineSuggestions.length > 0 && (
+                                    <div className="space-y-2 animate-in fade-in duration-300">
+                                        <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+                                            Vacíos o sugerencias de mejora detectados:
+                                        </label>
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {refineSuggestions.map((sugg, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    type="button"
+                                                    onClick={() => setRefineAspectInput(sugg.titulo + ": " + sugg.descripcion)}
+                                                    className="w-full text-left p-3 bg-[var(--bg-app)] hover:bg-blue-500/[0.02] border border-[var(--border-main)] hover:border-blue-500/30 rounded-xl transition-all hover:scale-[1.01] active:scale-[0.99] flex gap-2 cursor-pointer"
+                                                >
+                                                    <span className="text-sm shrink-0">🎯</span>
+                                                    <div>
+                                                        <h5 className="font-bold text-[11px] text-[var(--text-main)]">{sugg.titulo}</h5>
+                                                        <p className="text-[9px] text-[var(--text-muted)] leading-relaxed mt-0.5">{sugg.descripcion}</p>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            /* CREATE FLOW (AS IT WAS): NAME INPUT & FOCUS SELECTION */
+                            <div className="space-y-5">
+                                <div>
+                                    <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Nombre del Personaje</label>
+                                    <div className="flex gap-2 mb-2">
+                                        <input 
+                                            type="text"
+                                            value={customNameInput}
+                                            onChange={(e) => setCustomNameInput(e.target.value)}
+                                            placeholder="Ej: Sylas Vance..."
+                                            className="flex-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => suggestNames('completo')}
+                                            disabled={nameSuggestionLoading}
+                                            className="px-4 bg-gradient-to-tr from-blue-600/10 to-indigo-600/10 hover:from-blue-600 hover:to-indigo-600 hover:text-white border border-blue-500/20 rounded-xl text-[10px] text-blue-400 font-bold uppercase tracking-wider transition-all disabled:opacity-40 whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                            {nameSuggestionLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                                            Sugerir Nombres
+                                        </button>
+                                    </div>
+
+                                    {nameProposals.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 p-3 bg-[var(--bg-app)]/50 rounded-xl border border-[var(--border-main)] mb-2 animate-in fade-in duration-300">
+                                            {nameProposals.map((name, i) => (
+                                                <button
+                                                    key={i}
+                                                    type="button"
+                                                    onClick={() => setCustomNameInput(name)}
+                                                    className="text-[10px] font-medium bg-[var(--bg-editor)] hover:bg-blue-500/10 hover:text-blue-400 border border-[var(--border-main)] rounded-lg px-2.5 py-1 text-[var(--text-main)] transition-all cursor-pointer"
+                                                >
+                                                    {name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mt-4 mb-2">Idea Inicial o Arquetipo (Opcional)</label>
+                                    <textarea
+                                        value={customIdeaInput}
+                                        onChange={(e) => setCustomIdeaInput(e.target.value)}
+                                        placeholder="Ej: Un contrabandista astuto que oculta su pasado real y teme ser traicionado por quienes ama..."
+                                        className="w-full h-16 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Enfoque Narrativo Principal</label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {Object.values(FOCUSES).map((focus) => {
+                                            const isSelected = selectedFocus === focus.id;
+                                            return (
+                                                <button
+                                                    key={focus.id}
+                                                    type="button"
+                                                    onClick={() => setSelectedFocus(focus.id)}
+                                                    className={`w-full text-left p-3.5 rounded-xl border transition-all text-xs flex gap-3 cursor-pointer ${
+                                                        isSelected
+                                                            ? 'border-indigo-500 bg-indigo-500/[0.02] shadow-sm'
+                                                            : 'border-[var(--border-main)] bg-[var(--bg-app)]/30 hover:bg-[var(--bg-app)]'
+                                                    }`}
+                                                >
+                                                    <span className="text-base shrink-0">{focus.title.split(' ')[0]}</span>
+                                                    <div>
+                                                        <h5 className="font-semibold text-xs text-[var(--text-main)]">{focus.label}</h5>
+                                                        <p className="text-[9px] text-[var(--text-muted)] leading-relaxed mt-0.5">{focus.description}</p>
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </div>
                         )}
-
-                        {/* Focus Selection */}
-                        <div>
-                            <label className="block text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2">Enfoque Narrativo Principal</label>
-                            <div className="grid grid-cols-1 gap-2">
-                                {Object.values(FOCUSES).map((focus) => {
-                                    const isSelected = selectedFocus === focus.id;
-                                    return (
-                                        <button
-                                            key={focus.id}
-                                            onClick={() => setSelectedFocus(focus.id)}
-                                            className={`w-full text-left p-3.5 rounded-xl border transition-all text-xs flex gap-3 ${
-                                                isSelected
-                                                    ? 'border-indigo-500 bg-indigo-500/[0.02] shadow-sm'
-                                                    : 'border-[var(--border-main)] bg-[var(--bg-app)]/30 hover:bg-[var(--bg-app)]'
-                                            }`}
-                                        >
-                                            <span className="text-base shrink-0">{focus.title.split(' ')[0]}</span>
-                                            <div>
-                                                <h5 className="font-semibold text-xs text-[var(--text-main)]">{focus.label}</h5>
-                                                <p className="text-[9px] text-[var(--text-muted)] leading-relaxed mt-0.5">{focus.description}</p>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
                     </div>
 
                     <button
+                        type="button"
                         onClick={() => startInterview(isRefine ? charFlow.characterName : customNameInput, isRefine ? '' : customIdeaInput)}
-                        disabled={!isRefine && !customNameInput.trim()}
-                        className="mt-6 w-full py-3.5 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
+                        disabled={isRefine ? !refineAspectInput.trim() : !customNameInput.trim()}
+                        className="mt-6 w-full py-3.5 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer shrink-0"
                     >
-                        <Sparkles size={14} /> Iniciar Entrevista
+                        <Sparkles size={14} /> {isRefine ? 'Iniciar Refinamiento' : 'Iniciar Entrevista'}
                     </button>
                 </div>
             );
@@ -928,13 +1101,24 @@ const IAStudioChat = ({
 
         // ─── 4. INTERVIEW LOADING SCREEN ───
         if (charFlow.step === 'interview_loading') {
+            const formatTime = (secs) => {
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                return `${m}:${s < 10 ? '0' : ''}${s}`;
+            };
+
             return (
                 <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
-                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6 animate-pulse" />
+                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6" />
                     <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Canalizando preguntas...</h3>
-                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85 mb-5">
                         Diseñando cuestionario adaptativo de {FOCUSES[selectedFocus]?.label} para el perfil de {charFlow.characterName}...
                     </p>
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/[0.06] border border-indigo-500/15 rounded-full text-[11px] font-mono text-indigo-500 font-bold shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        <span>Tiempo transcurrido: {formatTime(loadingTime)}</span>
+                    </div>
                 </div>
             );
         }
@@ -1041,13 +1225,24 @@ const IAStudioChat = ({
 
         // ─── 6. SYNTHESIZING PROGRESS SCREEN ───
         if (charFlow.step === 'synthesizing_loading') {
+            const formatTime = (secs) => {
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                return `${m}:${s < 10 ? '0' : ''}${s}`;
+            };
+
             return (
                 <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
-                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6 animate-pulse" />
+                    <Loader2 size={40} className="text-indigo-500 animate-spin mb-6" />
                     <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Esculpiendo arquetipo...</h3>
-                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85 mb-5">
                         La IA está fusionando tus respuestas psicológicas para redactar una ficha tridimensional literaria completa.
                     </p>
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/[0.06] border border-indigo-500/15 rounded-full text-[11px] font-mono text-indigo-500 font-bold shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        <span>Tiempo transcurrido: {formatTime(loadingTime)}</span>
+                    </div>
                 </div>
             );
         }
@@ -1187,13 +1382,24 @@ const IAStudioChat = ({
 
         // ─── 10. SUGGEST LOADING ───
         if (charFlow.step === 'loading') {
+            const formatTime = (secs) => {
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                return `${m}:${s < 10 ? '0' : ''}${s}`;
+            };
+
             return (
                 <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
-                    <Loader2 size={40} className="text-orange-500 animate-spin mb-6 animate-pulse" />
+                    <Loader2 size={40} className="text-orange-500 animate-spin mb-6" />
                     <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic animate-pulse">Bocetando personajes...</h3>
-                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85">
+                    <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed opacity-85 mb-5">
                         La IA está analizando tu universo narrativo para conjurar arquetipos tridimensionales coherentes...
                     </p>
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-500/[0.06] border border-orange-500/15 rounded-full text-[11px] font-mono text-orange-500 font-bold shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+                        <span>Tiempo transcurrido: {formatTime(loadingTime)}</span>
+                    </div>
                 </div>
             );
         }
@@ -1308,7 +1514,11 @@ const IAStudioChat = ({
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 scrollbar-hide">
+            <div 
+                ref={chatContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 scrollbar-hide"
+            >
                 <div className="max-w-3xl mx-auto space-y-6">
                     {selectedAction === 'constructor_personaje' ? (
                         renderCharFlow()
@@ -1393,10 +1603,10 @@ const IAStudioChat = ({
                                 )}
                             </span>
                             <span className="flex items-center gap-1">
-                                Conversación: <strong className="text-[var(--text-main)] font-semibold">{(messagesTokens / 1000).toFixed(1)}k</strong> tkn
+                                Conversación: <strong className="text-[var(--text-main)] font-semibold">{(displayMessagesTokens / 1000).toFixed(1)}k</strong> tkn
                             </span>
                             <span className="flex items-center gap-1">
-                                Total: <strong className="text-[var(--text-main)] font-semibold">{(totalInputTokens + outputTokens).toLocaleString()}</strong> tkn
+                                Total: <strong className="text-[var(--text-main)] font-semibold">{displayTotalTokens.toLocaleString()}</strong> tkn
                             </span>
                         </div>
                         <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-1.5 sm:pt-0 border-t border-[var(--border-main)]/10 sm:border-0">

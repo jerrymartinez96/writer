@@ -86,22 +86,49 @@ export const extractJSON = (text) => {
 export const parseCharactersFromMarkers = (text) => {
     if (!text) return [];
     
-    const regex = /\[\[PERSONAJE:\s*(.*?)\s*\]\]\s*\[\[FRAGMENTO\]\]\s*([\s\S]*?)\s*\[\[FIN_PERSONAJE\]\]/g;
     const results = [];
-    let match;
+    // Split the text by [[PERSONAJE: (case-insensitive)
+    const parts = text.split(/\[\[PERSONAJE:\s*/i);
     
-    while ((match = regex.exec(text)) !== null) {
-        results.push({
-            nombre: match[1].trim(),
-            fragmento_exacto: match[2].trim()
-        });
+    for (let i = 1; i < parts.length; i++) {
+        const part = parts[i];
+        const closingBracketIdx = part.indexOf(']]');
+        if (closingBracketIdx === -1) continue;
+        
+        const nombre = part.substring(0, closingBracketIdx).trim();
+        let content = part.substring(closingBracketIdx + 2);
+        
+        // Remove [[FRAGMENTO]] if it exists (case-insensitive)
+        content = content.replace(/\[\[FRAGMENTO\]\]/gi, '');
+        
+        // Remove [[FIN_PERSONAJE]] or similar closing markers (case-insensitive)
+        content = content.replace(/\[\[FIN_PERSONAJE\]\]/gi, '');
+        content = content.replace(/\[\[FIN\]\]/gi, '');
+        
+        // Clean up trailing/leading whitespaces
+        content = content.trim();
+        
+        if (nombre) {
+            results.push({
+                nombre,
+                fragmento_exacto: content
+            });
+        }
     }
     
-    // Fallback to extractJSON if it happened to return JSON anyway
+    // Fallback: only call JSON parsing if we found absolutely no markers
     if (results.length === 0) {
         try {
-            const parsed = extractJSON(text);
-            if (Array.isArray(parsed)) return parsed;
+            // Silence console.error logs during fallback checks
+            const originalConsoleError = console.error;
+            console.error = () => {};
+            try {
+                const parsed = extractJSON(text);
+                console.error = originalConsoleError;
+                if (Array.isArray(parsed)) return parsed;
+            } catch (err) {
+                console.error = originalConsoleError;
+            }
         } catch (e) {
             // Ignore fallback error
         }
@@ -139,6 +166,48 @@ REGLAS CRÍTICAS:
 - No incluyas preámbulos, explicaciones ni comentarios. Solo la lista de personajes estructurada con las etiquetas.
 - Si el documento está vacío o no contiene personajes, no devuelvas nada o responde con un texto vacío.
 - En el fragmento, debes incluir todo el texto/HTML del personaje de forma textual y exacta. No resumas, no reescribas nada. Debe ser idéntico al original para que funcione la búsqueda y reemplazo.`;
+};
+
+/**
+ * Prompt to analyze the document, cast, and selected character's current profile,
+ * and suggest exactly 3 highly specific, contextual areas or gaps to refine/improve.
+ */
+export const buildRefineSuggestionsPrompt = (characterName, characterProfile, fullDocumentContent, bookContext) => {
+    return `Actúa como un editor literario y psicólogo de personajes sumamente agudo.
+Estás analizando el elenco de una novela para ayudar al autor a pulir y refinar al personaje "${characterName}".
+
+Aquí tienes el contexto general de la obra:
+--- CONTEXTO DEL MANUSCRITO ---
+${bookContext}
+------------------------------
+
+Aquí tienes a todos los personajes documentados (el elenco completo):
+--- ELENCO DE PERSONAJES COMPLETO ---
+${fullDocumentContent}
+-------------------------------------
+
+Y este es el perfil documentado del personaje que deseamos refinar:
+--- PERFIL ACTUAL DE ${characterName} ---
+${characterProfile}
+----------------------------------------
+
+Tu misión es identificar exactamente 3 brechas, contradicciones, lagunas de información o áreas de mejora muy específicas y lógicas en la psicología, trasfondo, motivaciones o relaciones de "${characterName}" en comparación con el resto del elenco y la trama.
+- Ejemplo de brecha: Si otros personajes tienen detalles sobre su pasado familiar o apariencia física (ej. color de cabello, marcas, cicatrices) pero este no, identifícalo.
+- Ejemplo de contradicción: Si su arquetipo dice ser fiel pero en la trama traiciona a alguien, sugiere explorar esa fricción moral.
+- Ejemplo de relación: Sugiere pulir su fricción o deuda emocional con otro personaje específico del elenco si falta detalle.
+
+Debes responder ÚNICAMENTE en formato JSON con la siguiente estructura exacta (un array con exactamente 3 sugerencias):
+[
+  {
+    "titulo": "Título de la sugerencia (ej: Pasado familiar no revelado, Fricción oculta con Mirella, Contradicción en su núcleo moral)",
+    "descripcion": "Descripción detallada del vacío o área a pulir, justificándolo a partir de lo que le falta en comparación con el elenco (ej: 'Varios personajes del elenco tienen marcas físicas claras de su pasado, pero el perfil de Sylas carece de ellas...', o 'Falta detallar cuál es el origen de su resentimiento hacia Mirella...')"
+  },
+  ...
+]
+
+REGLAS:
+- Evita el melodrama pretencioso y la cursilería. Las sugerencias deben ser realistas, profesionales y de alto valor literario.
+- No incluyas preámbulos, explicaciones ni comentarios. Solo el array JSON válido.`;
 };
 
 /**
@@ -197,7 +266,7 @@ REGLAS:
  * Prompt to generate exactly 3 diagnostic questions in a conversational wizard,
  * adapted to the character, focus, and whether they are new or being refined.
  */
-export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrExistingProfile = "", isRefining = false) => {
+export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrExistingProfile = "", isRefining = false, customAspect = "") => {
     const focus = FOCUSES[focusId] || FOCUSES.general;
     
     const contextType = isRefining ? 'PERFIL ACTUAL DEL PERSONAJE' : 'IDEA INICIAL / ARQUETIPO';
@@ -205,25 +274,33 @@ export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrEx
         ? `\n--- ${contextType} ---\n${initialIdeaOrExistingProfile}\n--------------------------`
         : '';
 
-    return `Actúa como un psicólogo y guionista de cine experto en el desarrollo de personajes literarios tridimensionales complejos.
-Tu tarea es formular exactamente 3 preguntas de diagnóstico extremadamente profundas, evocadoras e inquisitivas para el personaje "${characterName}".
+    const aspectStr = isRefining && customAspect 
+        ? `\n--- ASPECTO / DETALLE ESPECÍFICO QUE EL AUTOR QUIERE REFINAR ---\n"${customAspect}"\n--------------------------------------------------------------`
+        : '';
 
-Estas preguntas deben centrarse en el siguiente enfoque narrativo:
-ENFOQUE: "${focus.title}"
-DESCRIPCIÓN: ${focus.description}
+    return `Actúa como un psicólogo de personajes, editor literario y consultor de narrativa experto.
+Tu tarea es formular exactamente 3 preguntas de diagnóstico psicológico y narrativo muy útiles, profundas y concretas para el personaje "${characterName}".
+
+Estas preguntas deben centrarse exclusivamente en el siguiente enfoque narrativo:
+${isRefining && customAspect ? `ENFOQUE DE REFINAMIENTO PERSONALIZADO: "${customAspect}"` : `ENFOQUE: "${focus.title}"\nDESCRIPCIÓN: ${focus.description}`}
 ${contextStr}
+${aspectStr}
 
 INSTRUCCIONES DE DISEÑO DE PREGUNTAS:
-- Si es para REFINAR (isRefining = true), analiza lo que ya se conoce en su perfil actual y formula preguntas que exploren vacíos, contradicciones no resueltas, relaciones de fricción o dilemas latentes que no estén completamente detallados.
-- Si es para CREAR, formula preguntas que ayuden a revelar su núcleo moral, sus justificaciones racionales y el dolor que motiva sus actos.
-- Diseña preguntas con alto valor lírico y dramático. Evita preguntas genéricas.
+- ¡CRÍTICO! Evita por completo la cursilería, el melodrama teatral, la poesía pretenciosa, las metáforas góticas u oscuras exageradas (NO hagas preguntas del tipo "qué canción de cuna te cantas en la oscuridad para evadir el remordimiento" o "qué cicatriz fundacional llamas destino").
+- Escribe preguntas profesionales, realistas, directas y sumamente útiles para un escritor que está construyendo una novela. Las preguntas deben ser psicológicamente agudas y estimulantes, pero formuladas de manera natural y clara.
+- ${isRefining && customAspect 
+    ? `Dado que el autor desea refinar el aspecto específico: "${customAspect}", formula 3 preguntas concretas que exploren precisamente ese detalle, sus causas, sus contradicciones, cómo impacta a la psicología del personaje o cómo afecta sus interacciones con los demás. No te desvíes a otros temas.`
+    : `Si el enfoque es "Perfil General y Arquetipo", las preguntas deben ser fundacionales y centrarse en la identidad esencial del personaje, su función narrativa o rol en la trama, su rasgo de personalidad definitorio y sus principales fortalezas o debilidades iniciales.`}
+- Si es para REFINAR (isRefining = true), analiza lo que ya se conoce en su perfil actual y haz preguntas orientadas a profundizar en contradicciones, huecos de información o evolución de sus relaciones.
+- Si es para CREAR, haz preguntas que revelen su personalidad, motivaciones básicas y la forma en que se desenvuelve ante los conflictos.
 
 INSTRUCCIONES DE FORMATO:
 - Devuelve la respuesta ÚNICAMENTE en formato de array JSON de strings con exactamente 3 elementos:
 [
-  "Pregunta profunda 1...",
-  "Pregunta profunda 2...",
-  "Pregunta profunda 3..."
+  "Pregunta 1...",
+  "Pregunta 2...",
+  "Pregunta 3..."
 ]
 - No incluyas preámbulos, introducciones ni explicaciones fuera del array.`;
 };
@@ -267,27 +344,25 @@ export const buildSynthesisPrompt = (characterName, focusId, questionsAndAnswers
         ? `\n--- PERFIL ACTUAL DEL PERSONAJE (TEXTO PLANO / HTML EXISTENTE) ---\n${existingProfile}\n--------------------------------------------------------------`
         : '';
 
-    return `Actúa como un novelista consagrado y editor literario de alto nivel.
-Tu misión es consolidar las respuestas de la entrevista psicológica y redactar el perfil definitivo en texto limpio, estructurado y literario para el personaje "${characterName}".
-
-Enfoque General del Refinamiento: "${focus.title}"
+    return `Actúa como un editor literario, consultor de narrativa y creador de fichas de personajes experto.
+Tu misión es consolidar las respuestas de la entrevista psicológica y redactar el perfil técnico, descriptivo y detallado del personaje "${characterName}".
 
 --- RESPUESTAS DE LA ENTREVISTA ---
 ${qaStr}
 ------------------------------------
 ${existingStr}
 
-INSTRUCCIONES DE REDACCIÓN Y FUSIÓN:
-${hasExisting
-  ? `1. ¡CRÍTICO! El personaje ya posee un perfil documentado (se adjunta arriba). NO debes borrarlo. Tu meta es INTEGRAR y FUSIONAR la información nueva de esta entrevista dentro del perfil actual.
-2. Analiza el bloque existente, reescribe los párrafos correspondientes para incorporar los nuevos rasgos psicológicos revelados, y añade nuevas subsecciones si el cuestionario arrojó luz sobre áreas nuevas.
-3. El resultado debe ser una única ficha coherente, fluida y consolidada que contenga lo viejo y lo nuevo amalgamado.`
-  : `1. Crea una ficha tridimensional estructurada desde cero en base a las respuestas de la entrevista.
-2. Organiza la información en secciones claras empleando encabezados de texto plano.`}
+INSTRUCCIONES CRÍTICAS DE REDACCIÓN Y FUSIÓN:
+- ¡EVITA EL LIRISMO VAGO Y LA PROSA POÉTICA NARRATIVA! No redactes el perfil como una historia corta, un cuento o un texto puramente lírico. El autor necesita una FICHA DE TRABAJO descriptiva, clara, estructurada y técnica en texto plano. Utiliza descripciones directas y listas con viñetas de Markdown simples, evitando tablas complejas u otros formatos que no sean texto plano legible.
+- ¡RESPETA Y PRESERVA AL 100% EL CONTENIDO Y ESTILO ORIGINAL! Si el personaje ya tiene un perfil (se adjunta arriba), NO debes reescribir ni alterar sus descripciones físicas, color de cabello, rasgos, edad u otros hechos ya definidos. Tu tarea es únicamente INTEGRAR y COMPLEMENTAR la información nueva de la entrevista como sutiles apoyos, agregando detalles a las secciones existentes o creando una subsección nueva al final, respetando absolutamente todo lo anterior.
+- Si es un personaje nuevo (desde cero), estructura la ficha de forma organizada utilizando el siguiente esquema claro:
+  - Datos Básicos (Nombre, Rol Dramático, Arquetipo)
+  - Apariencia Física y Detalles Concretos (Cabello, vestimenta, cicatrices, etc.)
+  - Perfil Psicológico y Motivaciones (Deseos, miedos, traumas revelados)
+  - Notas de Desarrollo (Detalles narrativos y evolución)
 
 NORMAS DE FORMATO:
-- Estructura el perfil utilizando una jerarquía limpia de títulos planos de Markdown (ej. "## [Nombre]", "### Psicología y Fisuras", "### Deseos y Contradicciones").
-- Utiliza una prosa literaria exquisita, llena de subtexto y sumamente agradable al lector.
-- Si hay citas evocadoras, utiliza el bloque de citas de Markdown ("> [Cita]").
+- Estructura el perfil utilizando una jerarquía limpia de títulos planos de Markdown (ej. "## [Nombre]", "### Apariencia Física", "### Psicología y Fisuras").
+- Sé sumamente detallado, específico y concreto en lugar de usar metáforas abstractas o lenguaje poético vago.
 - **CRÍTICO:** Devuelve ÚNICAMENTE la ficha final redactada en texto/markdown plano. No incluyas cajas de código tipo \`\`\`markdown, ni preámbulos, ni explicaciones de "Aquí tienes tu ficha...". Devuelve directamente el texto de la ficha redactada.`;
 };

@@ -78,6 +78,12 @@ export const createSession = (initialContext = null, initialDestination = null) 
             docTitle: '',
         },
         messages: [],
+        cumulativeUsage: {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            cost: 0
+        }
     };
 
     store.sessions.push(newSession);
@@ -194,7 +200,7 @@ export const addMessage = (sessionId, message) => {
 /**
  * Actualiza el último mensaje (para streaming)
  */
-export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined) => {
+export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined, usage = undefined) => {
     const store = getStore();
     const session = store.sessions.find(s => s.id === sessionId);
     if (session && session.messages.length > 0) {
@@ -209,6 +215,9 @@ export const updateLastAssistantMessage = (sessionId, partialContent, isComplete
             }
             if (rawResponse !== undefined) {
                 lastMsg.rawResponse = rawResponse;
+            }
+            if (usage !== undefined && usage !== null) {
+                lastMsg.usage = usage;
             }
             session.updatedAt = Date.now();
             saveStore(store);
@@ -278,6 +287,41 @@ export const deleteMessage = (sessionId, messageId) => {
 };
 
 /**
+ * Agrega el consumo acumulado de tokens y costo a la sesión activa
+ */
+export const addSessionCumulativeUsage = (sessionId, usage, inputCostPer1M, outputCostPer1M) => {
+    if (!usage) return;
+    const store = getStore();
+    const session = store.sessions.find(s => s.id === sessionId);
+    if (session) {
+        if (!session.cumulativeUsage) {
+            session.cumulativeUsage = {
+                promptTokens: 0,
+                completionTokens: 0,
+                totalTokens: 0,
+                cost: 0
+            };
+        }
+
+        const promptTokensInc = usage.promptTokens || 0;
+        const completionTokensInc = usage.completionTokens || 0;
+        const totalTokensInc = usage.totalTokens || (promptTokensInc + completionTokensInc);
+
+        const inCost = (promptTokensInc / 1000000) * inputCostPer1M;
+        const outCost = (completionTokensInc / 1000000) * outputCostPer1M;
+        const incrementalCost = inCost + outCost;
+
+        session.cumulativeUsage.promptTokens += promptTokensInc;
+        session.cumulativeUsage.completionTokens += completionTokensInc;
+        session.cumulativeUsage.totalTokens += totalTokensInc;
+        session.cumulativeUsage.cost = (session.cumulativeUsage.cost || 0) + incrementalCost;
+
+        session.updatedAt = Date.now();
+        saveStore(store);
+    }
+};
+
+/**
  * Obtiene el conteo de sesiones activas
  */
 export const getActiveSessionCount = () => {
@@ -305,6 +349,7 @@ export default {
     updateLastAssistantMessage,
     deleteLastTwoMessages,
     deleteMessage,
+    addSessionCumulativeUsage,
     exportSessionAsText,
     getActiveSessionCount,
     hasSessions,

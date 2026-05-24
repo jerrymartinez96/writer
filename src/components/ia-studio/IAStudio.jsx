@@ -352,6 +352,7 @@ const IAStudio = () => {
 
         try {
             let fullResponse = '';
+            let finalUsage = null;
 
             await AIService.generateStream(aiMessages, {
                 selectedAiModel: selectedModel,
@@ -401,6 +402,8 @@ const IAStudio = () => {
                 if (activeSession) {
                     SessionManager.updateLastAssistantMessage(activeSession.id, fullResponse, false, streamResponseType);
                 }
+            }, (usage) => {
+                finalUsage = usage;
             });
 
             const isEchoingContext = fullResponse.trim().startsWith('<book>') || fullResponse.trim().startsWith('=== ');
@@ -411,11 +414,7 @@ const IAStudio = () => {
                     m.id === aiMsgId ? { ...m, content: errorMsg, isStreaming: false, responseType: 'error' } : m
                 ));
             } else {
-                console.log("=== AUDITORÍA IA STUDIO - INICIO ===");
-                console.log("[AUDIT 1] Respuesta cruda final de la IA:\n", fullResponse);
-                
                 const parsedBlocks = parseDestinationsFromResponse(fullResponse, destinationDoc, chapters, worldItems);
-                console.log("[AUDIT 2] Bloques parseados por parseDestinationsFromResponse:\n", JSON.stringify(parsedBlocks, null, 2));
 
                 const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
                 const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
@@ -475,11 +474,19 @@ const IAStudio = () => {
                     displayContent = fullResponse;
                 }
 
+                if (activeSession && selectedApi === 'deepseek' && finalUsage) {
+                    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
+                    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
+                    SessionManager.addSessionCumulativeUsage(activeSession.id, finalUsage, inputTokenCost, outputTokenCost);
+                }
+
                 setMessages(prev => prev.map(m =>
-                    m.id === aiMsgId ? { ...m, content: displayContent || fullResponse, rawResponse: fullResponse, isStreaming: false, responseType } : m
+                    m.id === aiMsgId ? { ...m, content: displayContent || fullResponse, rawResponse: fullResponse, isStreaming: false, responseType, usage: finalUsage } : m
                 ));
                 if (activeSession) {
-                    SessionManager.updateLastAssistantMessage(activeSession.id, displayContent || fullResponse, true, responseType, fullResponse);
+                    SessionManager.updateLastAssistantMessage(activeSession.id, displayContent || fullResponse, true, responseType, fullResponse, finalUsage);
+                    // Sync active session and sessions in state with cumulativeUsage changes
+                    setActiveSession(SessionManager.getSession(activeSession.id));
                     setSessions(SessionManager.getSessions());
                 }
 
@@ -607,15 +614,12 @@ const IAStudio = () => {
 
     // Apply changes — supports regular content, patches, and section accumulation
     const handleApplyChanges = useCallback((editedBlocks) => {
-        console.log("[AUDIT 6] Entrando a handleApplyChanges con editedBlocks:\n", JSON.stringify(editedBlocks, null, 2));
         const blocks = (Array.isArray(editedBlocks) && editedBlocks.length > 0) ? editedBlocks : lastParsedBlocksRef.current;
         if (!blocks || blocks.length === 0) {
-            console.log("[AUDIT 6.1] No hay bloques para aplicar.");
             return;
         }
 
         blocks.forEach((block, idx) => {
-            console.log(`[AUDIT 6.2] Procesando bloque [${idx}] para aplicar. Modo: ${block.mode}, Tipo: ${block.docType}, isPatch: ${block.isPatch}, isSection: ${block.isSection}`);
             if (block.mode === 'text') return;
 
             // ── Patch mode ──
@@ -718,7 +722,6 @@ const IAStudio = () => {
 
             // ── Standard content mode ──
             const htmlContent = ensureHtmlFormat(block.proposedContent);
-            console.log("[AUDIT 7] HTML resultante final a guardar en Standard content mode:\n", htmlContent);
 
             if (block.mode === 'manual' && block.docId) {
                 if (block.docType === 'chapter') {
