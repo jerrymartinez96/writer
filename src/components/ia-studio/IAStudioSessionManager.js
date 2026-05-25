@@ -218,7 +218,7 @@ export const addMessage = (sessionId, message) => {
 /**
  * Actualiza el último mensaje (para streaming)
  */
-export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined, usage = undefined) => {
+export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined, usage = undefined, inconsistencies = undefined) => {
     const store = getStore();
     const session = store.sessions.find(s => s.id === sessionId);
     if (session && session.messages.length > 0) {
@@ -236,6 +236,9 @@ export const updateLastAssistantMessage = (sessionId, partialContent, isComplete
             }
             if (usage !== undefined && usage !== null) {
                 lastMsg.usage = usage;
+            }
+            if (inconsistencies !== undefined) {
+                lastMsg.inconsistencies = inconsistencies;
             }
             session.updatedAt = Date.now();
             saveStore(store);
@@ -353,6 +356,19 @@ export const hasSessions = () => {
     return getSessions().length > 0;
 };
 
+/**
+ * Guarda la lista completa de mensajes de una sesión para persistencia.
+ */
+export const saveSessionMessages = (sessionId, messages) => {
+    const store = getStore();
+    const session = store.sessions.find(s => s.id === sessionId);
+    if (session) {
+        session.messages = messages;
+        session.updatedAt = Date.now();
+        saveStore(store);
+    }
+};
+
 export default {
     setBookId,
     createSession,
@@ -368,6 +384,7 @@ export default {
     updateLastAssistantMessage,
     deleteLastTwoMessages,
     deleteMessage,
+    saveSessionMessages,
     addSessionCumulativeUsage,
     exportSessionAsText,
     getActiveSessionCount,

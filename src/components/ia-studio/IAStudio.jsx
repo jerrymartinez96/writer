@@ -16,6 +16,8 @@ import {
     smartMergePartialResponse,
     applyPatch,
     SYSTEM_WORLD_ITEM_IDS,
+    parseInconsistenciesFromResponse,
+    SYSTEM_WORLD_ITEM_LABELS,
 } from './IAStudioUtils';
 
 import { AIService } from '../../services/AIService';
@@ -79,7 +81,7 @@ const IAStudio = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
-    const [selectedAction, setSelectedAction] = useState('personalizado');
+    const [selectedAction, setSelectedAction] = useState('escribir');
 
     // Modo sección: acumulación de secciones generadas
     const [sectionMode, setSectionMode] = useState(false);
@@ -89,6 +91,9 @@ const IAStudio = () => {
 
     // Fragmento activo (para modo patch)
     const [activeFragment, setActiveFragment] = useState('');
+
+    // Inconsistencia activa que se está resolviendo
+    const [activeResolution, setActiveResolution] = useState(null); // { messageId, inconsistencyId, title, option, customText, retryCount }
 
     const lastUserMessageRef = useRef('');
     const lastParsedBlocksRef = useRef([]);
@@ -255,9 +260,10 @@ const IAStudio = () => {
         const apiKey = getApiKey();
         let effectiveAction = overrideAction || selectedAction;
 
-        // BUG FIX: Si el Modo Extenso (Secciones) está activo y el escritor está usando la acción 'crear',
-        // forzamos la acción efectiva a 'seccion' para activar el prompt y parser correctos.
-        if (effectiveAction === 'crear' && sectionMode) {
+        // BUG FIX: Si el Modo Extenso (Secciones) está activo, forzamos la acción
+        // efectiva a 'seccion' para activar el prompt y parser correctos.
+        if (effectiveAction === 'escribir' && sectionMode) {
+
             effectiveAction = 'seccion';
         }
 
@@ -481,17 +487,68 @@ const IAStudio = () => {
                     displayContent = fullResponse;
                 }
 
-                if (activeSession && selectedApi === 'deepseek' && finalUsage) {
+                // Si la respuesta contiene inconsistencias XML o de doble corchete, promover su tipo a 'inconsistencias'
+                // NOTA: Usar .toLowerCase() porque la IA a veces escribe [[INCONSISTENCIA]] en mayúsculas
+                const lowerResp = fullResponse.toLowerCase();
+                if (responseType === 'analysis' && (lowerResp.includes('<inconsistencia') || lowerResp.includes('[[inconsistencia'))) {
+                    responseType = 'inconsistencies';
+                }
+
+
+                const inconsistencies = responseType === 'inconsistencies'
+                    ? (parsedBlocks[0]?.inconsistencies || parseInconsistenciesFromResponse(fullResponse) || [])
+                    : undefined;
+
+                if (responseType === 'inconsistencies') {
+                    // Limpiar el XML crudo, los dobles corchetes y los bloques de código que lo envuelven del displayContent
+                    displayContent = (displayContent || fullResponse)
+                        .replace(/\[\[inconsistencia[\s\S]*?\[\/inconsistencia\]\]/gi, '')
+                        .replace(/\[\[inconsistencia[^\]]*\]\]([\s\S]*?)\[\[\/inconsistencia\]\]/gi, '')
+                        .replace(/\[\[inconsistencia\s+\d+[^\]]*\]\][\s\S]*?(?=\[\[inconsistencia|\z)/gi, '')
+                        .replace(/\[\[titulo\]\][\s\S]*?\[\[\/titulo\]\]/gi, '')
+                        .replace(/\[\[problema\]\][\s\S]*?\[\[\/problema\]\]/gi, '')
+                        .replace(/\[\[solucion[^\]]*\]\][\s\S]*?\[\[\/solucion\]\]/gi, '')
+                        .replace(/UBICACIÓN:\s*[^\n]+\n?/gi, '')
+                        .replace(/SOLUCIÓ?N\s+[A-D]\s*:\s*[\s\S]*?(?=\n(?:SOLUCIÓ?N|\[\[|\z))/gi, '')
+                        .replace(/<inconsistencia[\s\S]*?<\/inconsistencia>/gi, '')
+                        .replace(/<inconsistencia[^>]*>([\s\S]*?)<\/inconsistencia>/gi, '')
+                        .replace(/<titulo>[\s\S]*?<\/titulo>/gi, '')
+                        .replace(/<problema>[\s\S]*?<\/problema>/gi, '')
+                        .replace(/<solucion[^>]*>[\s\S]*?<\/solucion>/gi, '')
+                        .replace(/```xml[\s\S]*?```/gi, '')
+                        .replace(/```[\s\S]*?```/gi, '')
+                        .replace(/\n{3,}/g, '\n\n')
+                        .trim();
+                }
+
+
+                if (activeSession && finalUsage) {
                     const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
                     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
                     SessionManager.addSessionCumulativeUsage(activeSession.id, finalUsage, inputTokenCost, outputTokenCost);
                 }
 
                 setMessages(prev => prev.map(m =>
-                    m.id === aiMsgId ? { ...m, content: displayContent || fullResponse, rawResponse: fullResponse, isStreaming: false, responseType, usage: finalUsage } : m
+                    m.id === aiMsgId ? { 
+                        ...m, 
+                        content: displayContent || fullResponse, 
+                        rawResponse: fullResponse, 
+                        isStreaming: false, 
+                        responseType, 
+                        inconsistencies,
+                        usage: finalUsage 
+                    } : m
                 ));
                 if (activeSession) {
-                    SessionManager.updateLastAssistantMessage(activeSession.id, displayContent || fullResponse, true, responseType, fullResponse, finalUsage);
+                    SessionManager.updateLastAssistantMessage(
+                        activeSession.id, 
+                        displayContent || fullResponse, 
+                        true, 
+                        responseType, 
+                        fullResponse, 
+                        finalUsage,
+                        inconsistencies
+                    );
                     // Sync active session and sessions in state with cumulativeUsage changes
                     setActiveSession(SessionManager.getSession(activeSession.id));
                     setSessions(SessionManager.getSessions());
@@ -543,6 +600,122 @@ const IAStudio = () => {
         selectedApi, selectedModel, temperature, aiSettings, getApiKey, handleShowDiff, activeSession, setMessages,
         setSessions, compressContext, activeFragment, sectionConfig, sectionMode, currentSectionIndex, accumulatedSections,
         activeChapter]);
+
+    // Resolve an inconsistency by requesting the IA to edit the affected documents
+    const handleResolveInconsistency = useCallback(async (messageId, inconsistencyId, option, solutionText, isRetry = false) => {
+        const apiKey = getApiKey();
+        if (!apiKey) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '❌ API Key no configurada. Ve a Ajustes > Inteligencia.', type: 'error' }
+            }));
+            return;
+        }
+
+        // 1. Localizar la inconsistencia en el historial de mensajes
+        const msg = messages.find(m => m.id === messageId);
+        if (!msg) return;
+
+        const inconsistencies = msg.inconsistencies || parseInconsistenciesFromResponse(msg.rawResponse || msg.content) || [];
+        const inc = inconsistencies.find(i => i.id === inconsistencyId);
+        if (!inc) return;
+
+        // 2. Reunir contenidos de los archivos afectados
+        const affectedContents = [];
+        inc.files.forEach(fId => {
+            let docContent = '';
+            let docTitle = fId;
+            if (fId.startsWith('system_')) {
+                const doc = worldItems?.find(w => w.id === fId);
+                docContent = doc?.content || '';
+                docTitle = SYSTEM_WORLD_ITEM_LABELS[fId] || fId;
+            } else {
+                // Buscar en capítulos por título o ID
+                const doc = chapters?.find(c => c.title?.toLowerCase() === fId.toLowerCase() || c.id === fId);
+                docContent = doc?.content || '';
+                docTitle = doc?.title || fId;
+            }
+            affectedContents.push(`--- DOCUMENTO: "${docTitle}" (ID: ${fId}) ---\n${docContent}`);
+        });
+
+        const filesContextText = affectedContents.join('\n\n');
+
+        setIsLoading(true);
+        setActiveResolution({
+            messageId,
+            inconsistencyId,
+            title: inc.title,
+            option,
+            customText: option === 'CUSTOM' ? solutionText : '',
+            retryCount: isRetry ? ((activeResolution?.retryCount || 0) + 1) : 0
+        });
+
+        try {
+            // 3. Construir el contexto general desde las selecciones
+            const contextText = buildContextFromSelections(
+                activeBook,
+                chapters,
+                contextSelections?.chapterIds || [],
+                characters,
+                worldItems,
+                contextSelections?.worldItemIds || [],
+                compressContext
+            );
+
+            // 4. Construir el system prompt usando el catálogo centralizado
+            const extraOptions = { chapters, worldItems };
+            const systemPrompt = buildSystemPrompt(
+                'inconsistencia',
+                contextText,
+                destinationDoc,
+                activeChapter,
+                extraOptions
+            );
+
+            // 5. Mensaje de usuario con los detalles específicos de la inconsistencia + archivos afectados
+            const userPrompt = `RESOLUCIÓN DE INCONSISTENCIA:
+
+CONFLICTO DE LORE: "${inc.title}"
+PROBLEMA DETECTADO: "${inc.problem}"
+SOLUCIÓN SELECCIONADA POR EL ESCRITOR: "${solutionText}" (${option})
+
+DOCUMENTOS AFECTADOS (contenido actual):
+${filesContextText}
+
+APLICA LA SOLUCIÓN: Edita SOLO las secciones necesarias de los documentos afectados.
+NUNCA reescribas un documento completo — usa SIEMPRE [ÁMBITO: parcial].
+Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIGINAL].`;
+
+            const aiMessages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ];
+
+            const response = await AIService.sendMessage(aiMessages, apiKey, {
+                model: selectedModel,
+                apiSelected: selectedApi,
+                temperature: 0.2 // Baja temperatura para parches precisos
+            });
+
+            // 6. Parsear destinos y mostrar visor de diferencias
+            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems);
+            if (parsedBlocks && parsedBlocks.length > 0) {
+                handleShowDiff(parsedBlocks);
+            } else {
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: '⚠️ La IA no devolvió cambios válidos. Inténtalo de nuevo.', type: 'warning' }
+                }));
+            }
+        } catch (error) {
+            console.error("Error al resolver inconsistencia:", error);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: `❌ Error: ${error.message || 'Error al comunicarse con la IA'}`, type: 'error' }
+            }));
+        } finally {
+            setIsLoading(false);
+        }
+    }, [messages, chapters, worldItems, characters, activeBook, contextSelections, compressContext,
+        getApiKey, selectedModel, selectedApi, destinationDoc, activeChapter, handleShowDiff, activeResolution]);
+
 
     // Cancel Stream Generation
     const handleCancelStream = useCallback(() => {
@@ -753,8 +926,55 @@ const IAStudio = () => {
             }
         });
 
+        if (activeResolution) {
+            const { messageId, inconsistencyId, option, customText } = activeResolution;
+            setMessages(prev => prev.map(m => {
+                if (m.id === messageId) {
+                    const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                    const updated = currentInconsistencies.map(inc => {
+                        if (inc.id === inconsistencyId) {
+                            return { ...inc, resolved: true, selectedOption: option, customText };
+                        }
+                        return inc;
+                    });
+                    return { ...m, inconsistencies: updated };
+                }
+                return m;
+            }));
+
+            // Guardar en la sesión de Firebase/SessionManager para persistencia
+            if (activeSession) {
+                setTimeout(() => {
+                    const currentSession = SessionManager.getSession(activeSession.id);
+                    if (currentSession) {
+                        const updatedMsgList = currentSession.messages.map(m => {
+                            if (m.id === messageId) {
+                                const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                                const updated = currentInconsistencies.map(inc => {
+                                    if (inc.id === inconsistencyId) {
+                                        return { ...inc, resolved: true, selectedOption: option, customText };
+                                    }
+                                    return inc;
+                                });
+                                return { ...m, inconsistencies: updated };
+                            }
+                            return m;
+                        });
+                        SessionManager.saveSessionMessages(activeSession.id, updatedMsgList);
+                        setSessions(SessionManager.getSessions());
+                    }
+                }, 100);
+            }
+
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '✅ Cambios guardados e Inconsistencia resuelta con éxito.', type: 'success' }
+            }));
+
+            setActiveResolution(null);
+        }
+
         setDiffBlocks(null);
-    }, [saveChapterContent, updateChapter, updateWorldItem, createChapter, activeChapter, chapters, worldItems, accumulatedSections]);
+    }, [saveChapterContent, updateChapter, updateWorldItem, createChapter, activeChapter, chapters, worldItems, accumulatedSections, activeResolution, setMessages, activeSession, setSessions]);
 
 
     // Export conversation
@@ -837,6 +1057,7 @@ const IAStudio = () => {
                 currentSectionIndex={currentSectionIndex}
                 accumulatedSections={accumulatedSections}
                 destinationDoc={destinationDoc}
+                onResolveInconsistency={handleResolveInconsistency}
             />
 
             {/* Diff Modal */}
@@ -845,9 +1066,25 @@ const IAStudio = () => {
                     diffBlocks={diffBlocks}
                     destinationTitle={diffBlocks[0]?.title}
                     onApply={handleApplyChanges}
-                    onClose={() => setDiffBlocks(null)}
-                    onRegenerate={handleRegenerate}
+                    onClose={() => {
+                        setDiffBlocks(null);
+                        setActiveResolution(null);
+                    }}
+                    onRegenerate={() => {
+                        if (activeResolution) {
+                            handleResolveInconsistency(
+                                activeResolution.messageId,
+                                activeResolution.inconsistencyId,
+                                activeResolution.option,
+                                activeResolution.customText || 'applied',
+                                true // isRetry
+                            );
+                        } else {
+                            handleRegenerate();
+                        }
+                    }}
                     accumulatedSections={accumulatedSections}
+                    activeResolution={activeResolution}
                 />
             )}
 

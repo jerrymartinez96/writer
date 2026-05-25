@@ -59,6 +59,7 @@ const IAStudioChat = ({
     currentSectionIndex = 1,
     accumulatedSections = [],
     destinationDoc = null,
+    onResolveInconsistency = null,
 }) => {
     const [inputValue, setInputValue] = useState('');
     const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -305,35 +306,37 @@ const IAStudioChat = ({
         selectedWorldItemIds
     );
     const contextCharCount = contextText.length;
-    const contextTokens = Math.ceil(contextCharCount / 4.2);
+    const contextTokens = Math.ceil(contextCharCount / 3.8);
     
     const messagesCharCount = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
-    const messagesTokens = Math.ceil(messagesCharCount / 4.2);
+    const messagesTokens = Math.ceil(messagesCharCount / 3.8);
     const totalInputTokens = contextTokens + messagesTokens;
 
     const assistantCharCount = messages
         .filter(m => m.role === 'assistant')
         .reduce((sum, m) => sum + (m.content || '').length, 0);
-    const outputTokens = Math.ceil(assistantCharCount / 4.2);
+    const outputTokens = Math.ceil(assistantCharCount / 3.8);
 
     // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
     const aiSettings = activeBook?.aiSettings || {};
     const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
 
-    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
-    const isDeepSeek = selectedApi === 'deepseek';
+    // Híbrido Estimado-Acumulado (Para todos los proveedores de IA)
     const cumulativeUsage = activeSession?.cumulativeUsage;
-    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+    const hasCumulativeCost = cumulativeUsage && (cumulativeUsage.cost > 0 || cumulativeUsage.totalTokens > 0);
 
     let displayMessagesTokens = messagesTokens;
     let displayTotalTokens = totalInputTokens + outputTokens;
     let totalCost = 0;
+    const isEstimated = !hasCumulativeCost;
 
     if (hasCumulativeCost) {
-        // En DeepSeek el costo acumulado es inmutable y persistente
+        // Si hay consumo acumulado real persistido, mostramos las cifras reales de la API
+        displayTotalTokens = cumulativeUsage.totalTokens || displayTotalTokens;
         totalCost = cumulativeUsage.cost;
     } else {
+        // Si no hay consumo acumulado, mostramos la estimación del costo de la siguiente consulta
         const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
         const outputCost = (outputTokens / 1000000) * outputTokenCost;
         totalCost = inputCost + outputCost;
@@ -380,7 +383,7 @@ const IAStudioChat = ({
         window.dispatchEvent(new CustomEvent('ia-studio-action', { detail: actionId }));
         setShowActionDropdown(false);
         // Reset section mode when switching away
-        if (actionId !== 'seccion') {
+        if (actionId !== 'escribir') {
             setShowSectionSetup(false);
         }
     };
@@ -1616,6 +1619,7 @@ const IAStudioChat = ({
                                 onRegenerate={onRegenerate}
                                 onDelete={() => onDeleteMessage && onDeleteMessage(msg.id)}
                                 isLast={i === messages.length - 1}
+                                onResolveInconsistency={onResolveInconsistency}
                             />
                         ))
                     )}
@@ -1631,9 +1635,9 @@ const IAStudioChat = ({
                     <div className="flex md:hidden flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-2 text-[10px] text-[var(--text-muted)] opacity-85 border-b border-[var(--border-main)]/25 pb-2.5">
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 w-full sm:w-auto">
                             <span className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
-                                Contexto: <strong className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500' : 'text-[var(--text-main)]'}`}>{(contextTokens / 1000).toFixed(1)}k</strong> tkn
-                                {contextWeight.isHeavy && (
+                                <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy && isEstimated ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
+                                {isEstimated ? 'Contexto:' : 'Entrada (Real):'} <strong className={`font-semibold ${contextWeight.isHeavy && isEstimated ? 'text-amber-500' : 'text-[var(--text-main)]'}`}>{((isEstimated ? contextTokens : (cumulativeUsage?.promptTokens || 0)) / 1000).toFixed(1)}k</strong> tkn
+                                {contextWeight.isHeavy && isEstimated && (
                                     <button
                                         onClick={handleToggleCompress}
                                         title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
@@ -1649,14 +1653,14 @@ const IAStudioChat = ({
                                 )}
                             </span>
                             <span className="flex items-center gap-1">
-                                Conversación: <strong className="text-[var(--text-main)] font-semibold">{(displayMessagesTokens / 1000).toFixed(1)}k</strong> tkn
+                                {isEstimated ? 'Conversación:' : 'Salida (Real):'} <strong className="text-[var(--text-main)] font-semibold">{((isEstimated ? displayMessagesTokens : (cumulativeUsage?.completionTokens || 0)) / 1000).toFixed(1)}k</strong> tkn
                             </span>
                             <span className="flex items-center gap-1">
-                                Total: <strong className="text-[var(--text-main)] font-semibold">{displayTotalTokens.toLocaleString()}</strong> tkn
+                                {isEstimated ? 'Total est.:' : 'Total real:'} <strong className="text-[var(--text-main)] font-semibold">{(displayTotalTokens / 1000).toFixed(1)}k</strong> tkn
                             </span>
                         </div>
                         <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-1.5 sm:pt-0 border-t border-[var(--border-main)]/10 sm:border-0">
-                            <span>Costo est. ({selectedModel?.split('/').pop()?.split(':')?.[0] || 'Gemini 2.0 Flash'}):</span>
+                            <span>{isEstimated ? 'Costo est. (Siguiente consulta):' : 'Costo acumulado (Exacto):'}</span>
                             <span 
                                 className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold tracking-wider shrink-0 cursor-help"
                                 title={`Costo calculado con tarifas de:\nEntrada: $${inputTokenCost}/1M tokens\nSalida: $${outputTokenCost}/1M tokens`}
@@ -1701,7 +1705,7 @@ const IAStudioChat = ({
                     )}
 
                     {/* ── Modo Sección — Setup o Progress ── */}
-                    {selectedAction === 'crear' && !sectionMode && (
+                    {selectedAction === 'escribir' && !sectionMode && (
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setShowSectionSetup(prev => !prev)}
@@ -1829,9 +1833,8 @@ const IAStudioChat = ({
                         <div className="relative shrink-0 select-none">
                             {(() => {
                                 const actionColors = {
-                                    personalizado: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/30',
-                                    crear: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30',
-                                    modificar: 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/30',
+                                    escribir: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30',
+                                    fragmento: 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/30',
                                     escena: 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20 dark:text-sky-400 dark:border-sky-500/30',
                                     constructor_personaje: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/30',
                                     analizar: 'bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30',
@@ -1846,7 +1849,7 @@ const IAStudioChat = ({
                                             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 ${activeColorClass}`}
                                         >
                                             <span className="text-xs transition-transform duration-300">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
-                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim() || 'Personalizado'}</span>
+                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim() || 'Escribir'}</span>
                                             <ChevronDown size={11} className={`text-current opacity-80 transition-transform duration-300 shrink-0 ${showActionDropdown ? 'rotate-180' : ''}`} />
                                         </button>
 

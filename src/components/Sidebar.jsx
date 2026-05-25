@@ -171,16 +171,16 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         selectedWorldItemIds
     );
     const contextCharCount = contextText.length;
-    const contextTokens = Math.ceil(contextCharCount / 4.2);
+    const contextTokens = Math.ceil(contextCharCount / 3.8);
     
     const messagesCharCount = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
-    const messagesTokens = Math.ceil(messagesCharCount / 4.2);
+    const messagesTokens = Math.ceil(messagesCharCount / 3.8);
     const totalInputTokens = contextTokens + messagesTokens;
 
     const assistantCharCount = messages
         .filter(m => m.role === 'assistant')
         .reduce((sum, m) => sum + (m.content || '').length, 0);
-    const outputTokens = Math.ceil(assistantCharCount / 4.2);
+    const outputTokens = Math.ceil(assistantCharCount / 3.8);
 
     // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
     const aiSettings = activeBook?.aiSettings || {};
@@ -188,20 +188,22 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
     const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
 
-    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
+    // Híbrido Estimado-Acumulado (Para todos los proveedores de IA)
     const selectedApi = aiSettings.selectedApi || 'openrouter';
-    const isDeepSeek = selectedApi === 'deepseek';
     const cumulativeUsage = activeSession?.cumulativeUsage;
-    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+    const hasCumulativeCost = cumulativeUsage && (cumulativeUsage.cost > 0 || cumulativeUsage.totalTokens > 0);
 
     let displayMessagesTokens = messagesTokens;
     let displayTotalTokens = totalInputTokens + outputTokens;
     let totalCost = 0;
+    const isEstimated = !hasCumulativeCost;
 
     if (hasCumulativeCost) {
-        // En DeepSeek el costo acumulado es inmutable y persistente
+        // Si hay consumo acumulado real persistido, mostramos las cifras reales de la API
+        displayTotalTokens = cumulativeUsage.totalTokens || displayTotalTokens;
         totalCost = cumulativeUsage.cost;
     } else {
+        // Si no hay consumo acumulado, mostramos la estimación del costo de la siguiente consulta
         const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
         const outputCost = (outputTokens / 1000000) * outputTokenCost;
         totalCost = inputCost + outputCost;
@@ -659,14 +661,14 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     {/* Context Stat */}
                                     <div className="flex items-center justify-between text-[10px]">
                                         <span className="text-[var(--text-muted)] flex items-center gap-1">
-                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
-                                            Contexto:
+                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy && isEstimated ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
+                                            {isEstimated ? 'Contexto:' : 'Entrada (Real):'}
                                         </span>
                                         <div className="flex items-center gap-1.5">
-                                            <span className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
-                                                {(contextTokens / 1000).toFixed(1)} k
+                                            <span className={`font-semibold ${contextWeight.isHeavy && isEstimated ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
+                                                {((isEstimated ? contextTokens : (cumulativeUsage?.promptTokens || 0)) / 1000).toFixed(1)} k
                                             </span>
-                                            {contextWeight.isHeavy && (
+                                            {contextWeight.isHeavy && isEstimated && (
                                                 <button
                                                     onClick={() => setCompressContext(prev => !prev)}
                                                     title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
@@ -682,27 +684,29 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                             )}
                                         </div>
                                     </div>
-
+ 
                                     {/* Chat Stat */}
                                     <div className="flex items-center justify-between text-[10px]">
-                                        <span className="text-[var(--text-muted)]">Conversación:</span>
+                                        <span className="text-[var(--text-muted)]">{isEstimated ? 'Conversación:' : 'Salida (Real):'}</span>
                                         <span className="text-[var(--text-main)] font-semibold">
-                                            {(displayMessagesTokens / 1000).toFixed(1)} k 
+                                            {((isEstimated ? displayMessagesTokens : (cumulativeUsage?.completionTokens || 0)) / 1000).toFixed(1)} k 
                                         </span>
                                     </div>
-
+ 
                                     {/* Total Stat */}
                                     <div className="flex items-center justify-between text-[10px]">
-                                        <span className="text-[var(--text-muted)]">Tokens Totales:</span>
+                                        <span className="text-[var(--text-muted)]">
+                                            {isEstimated ? 'Tokens Totales (Est.):' : 'Tokens Totales (Real):'}
+                                        </span>
                                         <span className="text-[var(--text-main)] font-bold">
-                                            {displayTotalTokens.toLocaleString()} k
+                                            {(displayTotalTokens / 1000).toFixed(1)} k
                                         </span>
                                     </div>
-
+ 
                                     {/* Dynamic Cost Estimate */}
                                     <div className="flex items-center justify-between pt-1 text-[10px]">
                                         <span className="text-[var(--text-muted)] truncate max-w-[120px]" title={selectedModel}>
-                                            Costo Estimado:
+                                            {isEstimated ? 'Costo Estimado:' : 'Costo Acumulado:'}
                                         </span>
                                         <span 
                                             className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-black tracking-wider shrink-0 cursor-help"

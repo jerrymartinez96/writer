@@ -147,6 +147,10 @@ export const AIService = {
     /**
      * Sends a prompt to OpenRouter or Google Directly (non-streaming, single prompt)
      */
+    /**
+     * Sends a prompt to OpenRouter, Google Directly or DeepSeek Directly (non-streaming)
+     * Supports both a single prompt string and an array of message objects [{role, content}]
+     */
     async sendMessage(prompt, apiKey, options = {}) {
         const modelId = options.model || "google/gemini-2.0-flash-exp:free";
         const isGoogleDirect = modelId.startsWith('google_direct/') || options.apiSelected === 'google_direct';
@@ -170,6 +174,7 @@ export const AIService = {
         const temperature = options.temperature ?? 0.7;
 
         try {
+            const messagesList = Array.isArray(prompt) ? prompt : [{ role: "user", content: prompt }];
             const response = await retryOnRateLimit(async () => {
                 return await fetch(OPENROUTER_URL, {
                     method: "POST",
@@ -181,7 +186,7 @@ export const AIService = {
                     },
                     body: JSON.stringify({
                         model: modelId,
-                        messages: [{ role: "user", content: prompt }],
+                        messages: messagesList,
                         temperature: temperature,
                         max_tokens: options.max_tokens || 8192,
                     })
@@ -203,6 +208,7 @@ export const AIService = {
 
     /**
      * Direct call to Google AI Studio (Gemini) API (non-streaming)
+     * Supports both a single prompt string and an array of message objects [{role, content}]
      */
     async sendGeminiMessage(prompt, apiKey, model, options = {}) {
         if (!apiKey) {
@@ -212,16 +218,36 @@ export const AIService = {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
         try {
+            const payload = {
+                generationConfig: {
+                    temperature: options.temperature ?? 0.7,
+                    maxOutputTokens: options.max_tokens || 8192,
+                }
+            };
+
+            if (Array.isArray(prompt)) {
+                // Filtrar mensajes del sistema para colocarlos en systemInstruction
+                payload.contents = prompt
+                    .filter(m => m.role !== 'system')
+                    .map(m => ({
+                        role: m.role === 'assistant' ? 'model' : 'user',
+                        parts: [{ text: m.content }]
+                    }));
+
+                const systemMsg = prompt.find(m => m.role === 'system');
+                if (systemMsg) {
+                    payload.systemInstruction = {
+                        parts: [{ text: systemMsg.content }]
+                    };
+                }
+            } else {
+                payload.contents = [{ parts: [{ text: prompt }] }];
+            }
+
             const response = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature: options.temperature ?? 0.7,
-                        maxOutputTokens: options.max_tokens || 8192,
-                    }
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
@@ -242,6 +268,7 @@ export const AIService = {
 
     /**
      * Direct call to DeepSeek API (non-streaming)
+     * Supports both a single prompt string and an array of message objects [{role, content}]
      */
     async sendDeepSeekMessage(prompt, apiKey, model, options = {}) {
         if (!apiKey) {
@@ -251,9 +278,10 @@ export const AIService = {
         const temperature = options.temperature ?? 0.7;
 
         try {
+            const messagesList = Array.isArray(prompt) ? prompt : [{ role: "user", content: prompt }];
             const body = {
                 model: model,
-                messages: [{ role: "user", content: prompt }],
+                messages: messagesList,
                 temperature: temperature,
                 max_tokens: options.max_tokens || 8192,
             };
@@ -459,6 +487,15 @@ export const AIService = {
                             const data = JSON.parse(dataStr);
                             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
                             if (text) onChunk(text);
+
+                            // Capture exact usage data if returned by Google Gemini
+                            if (data.usageMetadata && onUsage) {
+                                onUsage({
+                                    promptTokens: data.usageMetadata.promptTokenCount || 0,
+                                    completionTokens: data.usageMetadata.candidatesTokenCount || 0,
+                                    totalTokens: data.usageMetadata.totalTokenCount || 0
+                                });
+                            }
                         } catch (e) {
                             console.warn("Gemini SSE JSON parse error:", e);
                         }
@@ -472,6 +509,7 @@ export const AIService = {
                 model: modelId,
                 messages: messages,
                 stream: true,
+                stream_options: { include_usage: true },
                 temperature: temperature,
                 max_tokens: 32768,
             };
@@ -519,6 +557,15 @@ export const AIService = {
                             const data = JSON.parse(dataStr);
                             const text = data.choices?.[0]?.delta?.content;
                             if (text) onChunk(text);
+
+                            // Capture exact usage data if returned by OpenRouter
+                            if (data.usage && onUsage) {
+                                onUsage({
+                                    promptTokens: data.usage.prompt_tokens,
+                                    completionTokens: data.usage.completion_tokens,
+                                    totalTokens: data.usage.total_tokens
+                                });
+                            }
                         } catch (e) {
                             console.warn("OpenRouter SSE JSON parse error:", e);
                         }

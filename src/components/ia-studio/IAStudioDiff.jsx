@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { X, Check, RotateCcw, FileText, ChevronDown, ChevronUp, Scissors, Layers, GitMerge } from 'lucide-react';
+import { X, Check, RotateCcw, FileText, ChevronDown, ChevronUp, Scissors, Layers, GitMerge, AlertTriangle } from 'lucide-react';
 import { cleanText, cleanHtmlToPlainText, computeWordDiff } from './IAStudioUtils';
 import DiffMatchPatch from 'diff-match-patch';
 
@@ -440,7 +440,7 @@ const SectionAccumulatorView = ({ blocks, accumulatedSections }) => {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destinationTitle, accumulatedSections = [] }) => {
+const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destinationTitle, accumulatedSections = [], activeResolution = null }) => {
     const [activeIndex, setActiveIndex] = useState(0);
 
     // Adjust state when props change during render to avoid cascading renders and ESLint errors
@@ -537,6 +537,16 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
             <div className="absolute inset-0" onClick={onClose} />
 
             <div className="relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-[0_30px_100px_rgba(0,0,0,0.5)] w-full max-w-5xl max-h-[90vh] flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+
+                {/* Banner de Resolución Activa */}
+                {activeResolution && (
+                    <div className="bg-amber-500/10 border-b border-amber-500/25 px-5 py-3 flex items-center gap-2.5 text-xs text-amber-600 dark:text-amber-400 shrink-0">
+                        <AlertTriangle size={14} className="animate-pulse shrink-0 text-amber-500" />
+                        <span className="leading-snug">
+                            <strong>Resolviendo conflicto de lore:</strong> "{activeResolution.title}" {activeResolution.option && `(Solución ${activeResolution.option})`}. Revisa la propuesta de cambios a continuación y decide si deseas aplicarlos.
+                        </span>
+                    </div>
+                )}
 
                 {/* Header */}
                 <div className="flex items-center justify-between p-5 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/50 shrink-0">
