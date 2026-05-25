@@ -53,7 +53,7 @@ const IAStudio = () => {
     const {
         activeBook, activeChapter, chapters, characters, worldItems,
         saveChapterContent, updateChapter, updateWorldItem, createChapter,
-        profile, updateBookData,
+        profile, updateBookData, lazyLoadChapters,
     } = useData();
 
 
@@ -167,6 +167,13 @@ const IAStudio = () => {
             }
         }
     }, [chapters, worldItems, contextSelections, onContextChange]);
+
+    // Lazy-load context chapters in the background when selections change
+    useEffect(() => {
+        if (contextSelections?.chapterIds && contextSelections.chapterIds.length > 0 && lazyLoadChapters) {
+            lazyLoadChapters(contextSelections.chapterIds);
+        }
+    }, [contextSelections?.chapterIds, lazyLoadChapters]);
 
     // Show diff - supports multiple document blocks
     const handleShowDiff = useCallback((parsedBlocks) => {

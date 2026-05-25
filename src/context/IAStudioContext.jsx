@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import SessionManager from '../components/ia-studio/IAStudioSessionManager';
+import { useData } from './DataContext';
 
 const IAStudioContext = createContext(null);
 
 export const IAStudioProvider = ({ children }) => {
+    const { activeBook } = useData();
     const [contextSelections, setContextSelections] = useState({ chapterIds: [], worldItemIds: [] });
     const [destinationDoc, setDestinationDoc] = useState({ mode: 'auto', docId: null, docType: 'chapter', docTitle: '' });
     const [compressContext, setCompressContext] = useState(false);
@@ -21,25 +23,36 @@ export const IAStudioProvider = ({ children }) => {
         setDestinationDoc(newDestination);
     }, []);
 
-    // Initial session load
+    // Sincronizar cambios de libro activo y cargar sus sesiones
     useEffect(() => {
+        if (!activeBook?.id) return;
+        
+        SessionManager.setBookId(activeBook.id);
+        
         let sess = SessionManager.getActiveSession();
         if (!sess) {
-            sess = SessionManager.createSession(contextSelections, destinationDoc);
+            sess = SessionManager.createSession(
+                { chapterIds: [], worldItemIds: [] },
+                { mode: 'auto', docId: null, docType: 'chapter', docTitle: '' }
+            );
         }
-        setActiveSession(sess);
-        setMessages(sess.messages || []);
         
-        // Sync context and destination from session to context
+        // Sincronizar contexto y destino desde la sesión cargada al estado local
         if (sess.contextSelections) {
             setContextSelections(sess.contextSelections);
+        } else {
+            setContextSelections({ chapterIds: [], worldItemIds: [] });
         }
         if (sess.destinationDoc) {
             setDestinationDoc(sess.destinationDoc);
+        } else {
+            setDestinationDoc({ mode: 'auto', docId: null, docType: 'chapter', docTitle: '' });
         }
-        
+
+        setActiveSession(sess);
+        setMessages(sess.messages || []);
         setSessions(SessionManager.getSessions());
-    }, []);
+    }, [activeBook?.id]);
 
     // Switch active session
     const switchSession = useCallback((sessionId) => {
@@ -117,20 +130,26 @@ export const IAStudioProvider = ({ children }) => {
     // Sync contextSelections modifications to active session in localStorage
     useEffect(() => {
         if (activeSession && contextSelections) {
-            SessionManager.updateSessionContext(activeSession.id, contextSelections);
-            setActiveSession(prev => prev ? { ...prev, contextSelections } : prev);
-            setSessions(SessionManager.getSessions());
+            const hasChanged = JSON.stringify(activeSession.contextSelections) !== JSON.stringify(contextSelections);
+            if (hasChanged) {
+                SessionManager.updateSessionContext(activeSession.id, contextSelections);
+                setActiveSession(prev => prev ? { ...prev, contextSelections } : prev);
+                setSessions(SessionManager.getSessions());
+            }
         }
-    }, [contextSelections]);
+    }, [contextSelections, activeSession?.id]);
 
     // Sync destinationDoc modifications to active session in localStorage
     useEffect(() => {
         if (activeSession && destinationDoc) {
-            SessionManager.updateSessionDestination(activeSession.id, destinationDoc);
-            setActiveSession(prev => prev ? { ...prev, destinationDoc } : prev);
-            setSessions(SessionManager.getSessions());
+            const hasChanged = JSON.stringify(activeSession.destinationDoc) !== JSON.stringify(destinationDoc);
+            if (hasChanged) {
+                SessionManager.updateSessionDestination(activeSession.id, destinationDoc);
+                setActiveSession(prev => prev ? { ...prev, destinationDoc } : prev);
+                setSessions(SessionManager.getSessions());
+            }
         }
-    }, [destinationDoc]);
+    }, [destinationDoc, activeSession?.id]);
 
     // Delete a specific message
     const deleteMessage = useCallback((messageId) => {

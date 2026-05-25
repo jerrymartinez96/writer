@@ -516,6 +516,39 @@ export const DataProvider = ({ children }) => {
         }
     }
 
+    const lazyLoadChapters = useCallback(async (chapterIds) => {
+        if (!activeBook || !chapterIds || chapterIds.length === 0) return;
+        const unloadedIds = chapterIds.filter(id => {
+            const ch = chapters.find(c => c.id === id);
+            return ch && !ch.isLoaded;
+        });
+
+        if (unloadedIds.length === 0) return;
+
+        try {
+            const fetched = await Promise.all(
+                unloadedIds.map(async (id) => {
+                    const fullCh = await getChapter(activeBook.id, id);
+                    if (fullCh) {
+                        const safeContent = sanitizeHtml(fullCh.content);
+                        return { ...fullCh, content: safeContent, isLoaded: true };
+                    }
+                    return null;
+                })
+            );
+
+            const validFetched = fetched.filter(Boolean);
+            if (validFetched.length > 0) {
+                setChapters(prev => prev.map(ch => {
+                    const found = validFetched.find(f => f.id === ch.id);
+                    return found ? found : ch;
+                }));
+            }
+        } catch (error) {
+            console.error("lazyLoadChapters failed", error);
+        }
+    }, [activeBook?.id, chapters, sanitizeHtml]);
+
     // --- Character Management ---
     const handleCreateCharacter = async (itemData) => {
         if (!activeBook) return;
@@ -890,6 +923,7 @@ export const DataProvider = ({ children }) => {
         updateBookData: handleUpdateBookData,
         deleteBook: handleDeleteBook,
         selectChapter: handleSelectChapter,
+        lazyLoadChapters,
         createChapter: handleCreateChapter,
         updateChapter: handleUpdateChapter,
         batchUpdateChapters: handleBatchUpdateChapters,

@@ -390,6 +390,19 @@ const IAStudioChat = ({
         window.dispatchEvent(new CustomEvent('ia-studio-fragment', { detail: fragmentValue }));
     }, [fragmentValue]);
 
+    // Auto-fetch suggestions when question changes in interview flow
+    useEffect(() => {
+        if (charFlow?.step === 'interview_questions') {
+            const qIdx = charFlow.currentQuestionIndex;
+            const hasSuggestions = answerSuggestions[qIdx] && answerSuggestions[qIdx].length > 0;
+            const isSugLoading = suggestionsLoading[qIdx] || false;
+            
+            if (!hasSuggestions && !isSugLoading) {
+                getAnswerSuggestions(qIdx);
+            }
+        }
+    }, [charFlow?.currentQuestionIndex, charFlow?.step]);
+
     // Sync compress context toggle
     const handleToggleCompress = () => {
         if (onToggleCompress) {
@@ -515,12 +528,18 @@ const IAStudioChat = ({
         try {
             const isRefining = charFlow?.mode === 'refine';
             const existingProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const bookContext = getBookContext();
+
             const prompt = buildChatQuestionsPrompt(
                 charName, 
                 selectedFocus, 
                 isRefining ? existingProfile : charIdea, 
                 isRefining,
-                isRefining ? refineAspectInput : ""
+                isRefining ? refineAspectInput : "",
+                docContent,
+                bookContext
             );
             const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
             const qs = extractJSON(response) || [];
@@ -564,6 +583,23 @@ const IAStudioChat = ({
 
     const chooseSuggestion = (qIdx, text) => {
         setCharAnswerInput(text);
+    };
+
+    const skipQuestion = () => {
+        const idx = charFlow.currentQuestionIndex;
+        const newAnswers = [...charFlow.answers];
+        newAnswers[idx] = '[OMITIDO]';
+
+        if (idx < charFlow.questions.length - 1) {
+            setCharFlow(prev => ({
+                ...prev,
+                answers: newAnswers,
+                currentQuestionIndex: idx + 1
+            }));
+            setCharAnswerInput('');
+        } else {
+            synthesizeProfile(newAnswers);
+        }
     };
 
     const nextQuestion = () => {
@@ -619,7 +655,11 @@ const IAStudioChat = ({
             const charName = charFlow.characterName;
             const qaList = charFlow.questions.map((q, i) => ({ question: q, answer: completedAnswers[i] }));
             const existingProfile = isRefining ? charFlow.selectedCharacter?.fragment_exacto : '';
-            const prompt = buildSynthesisPrompt(charName, selectedFocus, qaList, existingProfile);
+            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
+            const docContent = charDoc?.content || '';
+            const bookContext = getBookContext();
+
+            const prompt = buildSynthesisPrompt(charName, selectedFocus, qaList, existingProfile, docContent, bookContext);
             const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
             
             setCharFlow(prev => ({
@@ -1212,8 +1252,14 @@ const IAStudioChat = ({
                             </button>
                         )}
                         <button
+                            onClick={skipQuestion}
+                            className="px-5 py-3 border border-dashed border-[var(--border-main)] hover:border-orange-500/50 hover:bg-orange-500/5 text-orange-400 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                        >
+                            Omitir
+                        </button>
+                        <button
                             onClick={nextQuestion}
-                            className="flex-1 py-3 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99]"
+                            className="flex-1 py-3 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/10 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
                         >
                             {qIdx === charFlow.questions.length - 1 ? 'Generar Perfil' : 'Siguiente'}
                             <ArrowLeft size={14} className="rotate-180" />

@@ -4,18 +4,35 @@
  * Cada sesión guarda: contexto seleccionado, destino, mensajes e historial.
  */
 
-const STORAGE_KEY = 'ia_studio_sessions';
+const STORAGE_KEY_PREFIX = 'ia_studio_sessions';
 const MAX_SESSIONS = 10;
+
+let currentBookId = null;
+
+/**
+ * Establece el ID del libro actual para las sesiones
+ */
+export const setBookId = (bookId) => {
+    currentBookId = bookId;
+};
+
+/**
+ * Obtiene la clave de almacenamiento específica para el libro actual
+ */
+const getStoreKey = () => {
+    return currentBookId ? `${STORAGE_KEY_PREFIX}_${currentBookId}` : STORAGE_KEY_PREFIX;
+};
 
 /**
  * Obtiene el objeto completo de sesiones del localStorage
  */
 const getStore = () => {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const key = getStoreKey();
+        const raw = localStorage.getItem(key);
         if (!raw) {
             const defaultStore = { activeSessionId: null, sessions: [] };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultStore));
+            localStorage.setItem(key, JSON.stringify(defaultStore));
             return defaultStore;
         }
         return JSON.parse(raw);
@@ -30,11 +47,12 @@ const getStore = () => {
  */
 const saveStore = (store) => {
     try {
+        const key = getStoreKey();
         // Trim to max sessions
         if (store.sessions.length > MAX_SESSIONS) {
             store.sessions = store.sessions.slice(-MAX_SESSIONS);
         }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+        localStorage.setItem(key, JSON.stringify(store));
     } catch (e) {
         console.warn('[IAStudioSessionManager] Error saving store:', e);
     }
@@ -336,6 +354,7 @@ export const hasSessions = () => {
 };
 
 export default {
+    setBookId,
     createSession,
     deleteSession,
     renameSession,

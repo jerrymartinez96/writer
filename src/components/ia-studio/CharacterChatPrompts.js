@@ -266,7 +266,7 @@ REGLAS:
  * Prompt to generate exactly 3 diagnostic questions in a conversational wizard,
  * adapted to the character, focus, and whether they are new or being refined.
  */
-export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrExistingProfile = "", isRefining = false, customAspect = "") => {
+export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrExistingProfile = "", isRefining = false, customAspect = "", fullCast = "", bookContext = "") => {
     const focus = FOCUSES[focusId] || FOCUSES.general;
     
     const contextType = isRefining ? 'PERFIL ACTUAL DEL PERSONAJE' : 'IDEA INICIAL / ARQUETIPO';
@@ -278,31 +278,49 @@ export const buildChatQuestionsPrompt = (characterName, focusId, initialIdeaOrEx
         ? `\n--- ASPECTO / DETALLE ESPECÍFICO QUE EL AUTOR QUIERE REFINAR ---\n"${customAspect}"\n--------------------------------------------------------------`
         : '';
 
-    return `Actúa como un psicólogo de personajes, editor literario y consultor de narrativa experto.
-Tu tarea es formular exactamente 3 preguntas de diagnóstico psicológico y narrativo muy útiles, profundas y concretas para el personaje "${characterName}".
+    const castStr = fullCast 
+        ? `\n--- ELENCO DE PERSONAJES COMPLETO (Para coherencia y relaciones) ---\n${fullCast}\n------------------------------------------------------------------`
+        : '';
 
-Estas preguntas deben centrarse exclusivamente en el siguiente enfoque narrativo:
+    const bookStr = bookContext 
+        ? `\n--- CONTEXTO NARRATIVO GENERAL ---\n${bookContext}\n----------------------------------`
+        : '';
+
+    return `Actúa como un psicólogo de personajes, editor literario y consultor de narrativa experto en novelas de alta calidad.
+Tu tarea es formular un cuestionario de diagnóstico psicológico, estético y narrativo sumamente útil, directo y concreto para el personaje "${characterName}".
+
+Estas preguntas deben centrarse principalmente en el siguiente enfoque narrativo:
 ${isRefining && customAspect ? `ENFOQUE DE REFINAMIENTO PERSONALIZADO: "${customAspect}"` : `ENFOQUE: "${focus.title}"\nDESCRIPCIÓN: ${focus.description}`}
 ${contextStr}
 ${aspectStr}
+${castStr}
+${bookStr}
 
-INSTRUCCIONES DE DISEÑO DE PREGUNTAS:
-- ¡CRÍTICO! Evita por completo la cursilería, el melodrama teatral, la poesía pretenciosa, las metáforas góticas u oscuras exageradas (NO hagas preguntas del tipo "qué canción de cuna te cantas en la oscuridad para evadir el remordimiento" o "qué cicatriz fundacional llamas destino").
-- Escribe preguntas profesionales, realistas, directas y sumamente útiles para un escritor que está construyendo una novela. Las preguntas deben ser psicológicamente agudas y estimulantes, pero formuladas de manera natural y clara.
-- ${isRefining && customAspect 
-    ? `Dado que el autor desea refinar el aspecto específico: "${customAspect}", formula 3 preguntas concretas que exploren precisamente ese detalle, sus causas, sus contradicciones, cómo impacta a la psicología del personaje o cómo afecta sus interacciones con los demás. No te desvíes a otros temas.`
-    : `Si el enfoque es "Perfil General y Arquetipo", las preguntas deben ser fundacionales y centrarse en la identidad esencial del personaje, su función narrativa o rol en la trama, su rasgo de personalidad definitorio y sus principales fortalezas o debilidades iniciales.`}
-- Si es para REFINAR (isRefining = true), analiza lo que ya se conoce en su perfil actual y haz preguntas orientadas a profundizar en contradicciones, huecos de información o evolución de sus relaciones.
-- Si es para CREAR, haz preguntas que revelen su personalidad, motivaciones básicas y la forma en que se desenvuelve ante los conflictos.
+INSTRUCCIONES DE DISEÑO DE PREGUNTAS (TÉCNICAS Y CERTERAS):
+1. **Detección de Vacíos Físicos y Básicos**:
+   - Analiza minuciosamente el perfil actual o idea inicial de "${characterName}".
+   - Identifica si carece de datos físicos o básicos fundamentales: **edad, color de cabello, color de ojos, complexión física/tipo de cuerpo, rasgos clave de personalidad (gustos y disgustos cotidianos)**.
+   - Si faltan estos detalles, **DEBES formular preguntas explícitas, concretas y directas para rellenar estos vacíos** (ej: "¿Cuál es su edad exacta o aproximada, complexión física y color de pelo y ojos?", o "¿Cuáles son sus mayores gustos y aversiones diarias?").
+2. **Coherencia e Interconexión del Universo**:
+   - Utiliza el "ELENCO DE PERSONAJES COMPLETO" y el "CONTEXTO NARRATIVO GENERAL" para vincular al personaje con el resto de la historia de forma orgánica.
+   - Si el personaje tiene relaciones lógicas con otros personajes existentes (ej: ser hijo/a, hermano/a, subordinado/a, aliado/a o rival de alguien del elenco), **formula preguntas que interconecten directamente estas dinámicas familiares o de poder** (ej: si pertenece a la realeza como el Rey Van, indaga sobre su relación con él o sus títulos nobiliarios).
+3. **Cantidad Dinámica de Preguntas**:
+   - Determina dinámicamente cuántas preguntas formular (entre 3 y 6 preguntas) en función de cuántos vacíos o detalles falten en su perfil:
+     - Genera **3 preguntas** si es para un refinamiento muy específico sobre un personaje que ya está sumamente completo y detallado.
+     - Genera **4 o 5 preguntas** si faltan varios detalles físicos básicos o relaciones por aclarar.
+     - Genera **6 preguntas** si es un personaje nuevo creado desde cero o con una descripción inicial extremadamente escueta.
+4. **Tono y Estilo Profesional**:
+   - ¡CRÍTICO! Evita por completo la cursilería, el melodrama pretencioso, la poesía abstracta y las metáforas góticas u oscuras exageradas (NO preguntes "qué sombra de tu herida llama a la noche").
+   - Escribe preguntas profesionales, realistas, claras, directas y enfocadas en la técnica literaria. Deben ser psicológicamente agudas y estimulantes, pero formuladas de manera natural y fácil de entender.
 
 INSTRUCCIONES DE FORMATO:
-- Devuelve la respuesta ÚNICAMENTE en formato de array JSON de strings con exactamente 3 elementos:
+- Devuelve la respuesta ÚNICAMENTE en formato de array JSON de strings con la cantidad dinámica de elementos que hayas decidido (de 3 a 6 elementos):
 [
   "Pregunta 1...",
   "Pregunta 2...",
-  "Pregunta 3..."
+  ...
 ]
-- No incluyas preámbulos, introducciones ni explicaciones fuera del array.`;
+- No incluyas preámbulos, introducciones ni explicaciones fuera del array JSON.`;
 };
 
 /**
@@ -332,7 +350,7 @@ INSTRUCCIONES DE FORMATO:
 /**
  * Prompt to compile answers and generate/merge the final clean flat-text profile.
  */
-export const buildSynthesisPrompt = (characterName, focusId, questionsAndAnswers, existingProfile = "") => {
+export const buildSynthesisPrompt = (characterName, focusId, questionsAndAnswers, existingProfile = "", fullCast = "", bookContext = "") => {
     const focus = FOCUSES[focusId] || FOCUSES.general;
 
     const qaStr = questionsAndAnswers.map((item, idx) => {
@@ -341,28 +359,43 @@ export const buildSynthesisPrompt = (characterName, focusId, questionsAndAnswers
 
     const hasExisting = existingProfile && existingProfile.trim().length > 0;
     const existingStr = hasExisting 
-        ? `\n--- PERFIL ACTUAL DEL PERSONAJE (TEXTO PLANO / HTML EXISTENTE) ---\n${existingProfile}\n--------------------------------------------------------------`
+        ? `\n--- PERFIL ACTUAL DEL PERSONAJE (A PRESERVAR Y EDITAR) ---\n${existingProfile}\n--------------------------------------------------------------`
         : '';
 
-    return `Actúa como un editor literario, consultor de narrativa y creador de fichas de personajes experto.
-Tu misión es consolidar las respuestas de la entrevista psicológica y redactar el perfil técnico, descriptivo y detallado del personaje "${characterName}".
+    const castStr = fullCast 
+        ? `\n--- ELENCO DE PERSONAJES COMPLETO (Para consistencia y deducción) ---\n${fullCast}\n---------------------------------------------------------------`
+        : '';
+
+    const bookStr = bookContext 
+        ? `\n--- CONTEXTO GENERAL DEL LIBRO ---\n${bookContext}\n----------------------------------`
+        : '';
+
+    return `Actúa como un editor literario, consultor de narrativa y creador de fichas de personajes de élite.
+Tu misión es consolidar las respuestas de la entrevista y fusionarlas para redactar o actualizar el perfil técnico, descriptivo y tridimensional del personaje "${characterName}".
 
 --- RESPUESTAS DE LA ENTREVISTA ---
 ${qaStr}
 ------------------------------------
 ${existingStr}
+${castStr}
+${bookStr}
 
-INSTRUCCIONES CRÍTICAS DE REDACCIÓN Y FUSIÓN:
-- ¡EVITA EL LIRISMO VAGO Y LA PROSA POÉTICA NARRATIVA! No redactes el perfil como una historia corta, un cuento o un texto puramente lírico. El autor necesita una FICHA DE TRABAJO descriptiva, clara, estructurada y técnica en texto plano. Utiliza descripciones directas y listas con viñetas de Markdown simples, evitando tablas complejas u otros formatos que no sean texto plano legible.
-- ¡RESPETA Y PRESERVA AL 100% EL CONTENIDO Y ESTILO ORIGINAL! Si el personaje ya tiene un perfil (se adjunta arriba), NO debes reescribir ni alterar sus descripciones físicas, color de cabello, rasgos, edad u otros hechos ya definidos. Tu tarea es únicamente INTEGRAR y COMPLEMENTAR la información nueva de la entrevista como sutiles apoyos, agregando detalles a las secciones existentes o creando una subsección nueva al final, respetando absolutamente todo lo anterior.
-- Si es un personaje nuevo (desde cero), estructura la ficha de forma organizada utilizando el siguiente esquema claro:
-  - Datos Básicos (Nombre, Rol Dramático, Arquetipo)
-  - Apariencia Física y Detalles Concretos (Cabello, vestimenta, cicatrices, etc.)
-  - Perfil Psicológico y Motivaciones (Deseos, miedos, traumas revelados)
-  - Notas de Desarrollo (Detalles narrativos y evolución)
+INSTRUCCIONES CRÍTICAS DE REDACCIÓN, FUSIÓN Y EDICIÓN:
+1. **Consistencia Absoluta con el Universo (apellido, realeza, relaciones)**:
+   - Analiza el "ELENCO DE PERSONAJES COMPLETO" y el "CONTEXTO GENERAL DEL LIBRO".
+   - Asegúrate de deducir y plasmar datos coherentes del universo en la ficha de "${characterName}". Por ejemplo, si es hija del Rey Van Arcadia, su apellido es indudablemente "Arcadia", su título es "Princesa", y posee los rasgos divinos/físicos y el contexto de su hermandad compartidos en el libro. No digas "(apellido no especificado)" ni ignores su estatus real.
+2. **Respeto a Fichas Especiales y Formatos Únicos**:
+   - Si el personaje ya posee un perfil estructurado con secciones no estándar o métricas especiales (como las habilidades mágicas, maná total, recipientes y mecánicas de deidad de SUI o la Legión Blanca), **DEBES preservar y respetar estrictamente esa estructura y contenido intacto**. No homogeneices el perfil a una plantilla simple de datos básicos si esto destruye su formato original rico y único.
+3. **Respeto Absoluto a Omisiones (`[OMITIDO]`)**:
+   - Si el autor omitió responder una pregunta (marcada con la respuesta \`[OMITIDO]\` o descrita como omitida), **NO DEBES inventar, sugerir ni rellenar de forma artificial información para ese detalle o aspecto**. Deja esa característica física, dato biográfico o secreto como "no especificado" o "desconocido", o simplemente no agregues ninguna sección para ello si era un personaje nuevo. Respeta al 100% que el escritor quiere mantener ese detalle sin definir.
+4. **Soporte para Eliminaciones y Modificaciones Explícitas**:
+   - Si el autor indica explícitamente en alguna de las respuestas que desea **MODIFICAR** o **ELIMINAR** una característica física, sección, habilidad o dato que ya existía en el perfil anterior (ej: "elimina la cúpula aegis", "quítale las cicatrices" o "cambia su personalidad"), **DEBES ejecutar fielmente esa remoción o alteración en el texto final** en lugar de preservarlo a ciegas.
+5. **No Destructivo**:
+   - Integra y complementa la información nueva derivada de la entrevista de forma natural, enriqueciendo los párrafos existentes, añadiendo listas de viñetas claras o creando nuevas subsecciones coherentes al final.
+6. **Formato Técnico de Trabajo**:
+   - Evita el lirismo vago o la prosa poética abstracta. Redacta descripciones directas, técnicas y útiles para el proceso diario de escritura de un novelista.
+   - Utiliza títulos y subtítulos de Markdown limenos (ej: "## [Nombre]", "### Datos Básicos", "### Apariencia Física", "### Notas de Desarrollo"). Evita cajas de código Markdown (\`\`\`markdown) en tu respuesta.
 
 NORMAS DE FORMATO:
-- Estructura el perfil utilizando una jerarquía limpia de títulos planos de Markdown (ej. "## [Nombre]", "### Apariencia Física", "### Psicología y Fisuras").
-- Sé sumamente detallado, específico y concreto en lugar de usar metáforas abstractas o lenguaje poético vago.
-- **CRÍTICO:** Devuelve ÚNICAMENTE la ficha final redactada en texto/markdown plano. No incluyas cajas de código tipo \`\`\`markdown, ni preámbulos, ni explicaciones de "Aquí tienes tu ficha...". Devuelve directamente el texto de la ficha redactada.`;
+- Devuelve ÚNICAMENTE la ficha técnica final redactada en formato de texto plano/Markdown. No incluyas preámbulos, saludos, ni explicaciones adicionales.`;
 };
