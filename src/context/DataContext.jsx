@@ -38,6 +38,21 @@ import { uploadImageToCloudinary } from '../services/cloudinary';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import DOMPurify from 'dompurify';
+import {
+    saveLocalSnapshot,
+    getLocalSnapshots,
+    deleteLocalSnapshot,
+    deleteAllLocalSnapshots
+} from '../services/localDb';
+
+const detectSignificantChange = (oldHtml, newHtml) => {
+    if (!oldHtml) return false;
+    const oldLen = oldHtml.replace(/<[^>]*>/g, '').length;
+    const newLen = newHtml.replace(/<[^>]*>/g, '').length;
+    if (oldLen === 0) return (newLen > 100); 
+    const diffPercent = Math.abs(oldLen - newLen) / oldLen;
+    return diffPercent > 0.15;
+};
 
 const DataContext = createContext();
 
@@ -91,7 +106,7 @@ export const DataProvider = ({ children }) => {
         pendingSaves.current = {};
         for (const save of savesToRun) {
             if (save.fn) {
-                try { await save.fn(); }
+                try { await save.fn(true); }
                 catch (error) { console.error("Error flushing save", error); }
             }
         }
@@ -374,23 +389,32 @@ export const DataProvider = ({ children }) => {
         }
     };
 
-    const handleGetChapterSnapshots = async (chapterId) => {
-        if (!activeBook) return [];
+    const handleGetDocumentSnapshots = async (documentId) => {
         try {
-            return await getChapterSnapshotsApi(activeBook.id, chapterId);
+            return await getLocalSnapshots(documentId);
         } catch (error) {
-            console.error("Failed to get chapter snapshots", error);
+            console.error("Failed to get document snapshots", error);
             return [];
         }
     };
 
-    const handleSaveChapterSnapshot = async (chapterId, content) => {
-        if (!activeBook) return null;
+    const handleSaveDocumentSnapshot = async (documentId, content, triggerType = 'manual') => {
         try {
-            return await saveChapterSnapshotApi(activeBook.id, chapterId, content);
+            await saveLocalSnapshot(documentId, content, triggerType);
+            return true;
         } catch (error) {
-            console.error("Failed to save chapter snapshot", error);
+            console.error("Failed to save document snapshot", error);
             return null;
+        }
+    };
+
+    const handleDeleteDocumentSnapshot = async (snapshotId) => {
+        try {
+            await deleteLocalSnapshot(snapshotId);
+            return true;
+        } catch (error) {
+            console.error("Failed to delete document snapshot", error);
+            return false;
         }
     };
 
@@ -449,9 +473,8 @@ export const DataProvider = ({ children }) => {
     };
 
     const finalizeChapterCleanup = async (chapterId) => {
-        if (!activeBook) return;
         try {
-            await deleteAllSnapshotsApi(activeBook.id, chapterId);
+            await deleteAllLocalSnapshots(chapterId);
             return true;
         } catch (error) {
             console.error("Cleanup failed", error);
@@ -507,8 +530,20 @@ export const DataProvider = ({ children }) => {
         setActiveChapter(chapterToActivate);
         setActiveWorldDoc(null); // Clear any active world doc when selecting a chapter
         
-        if (chapterToActivate) {
+        if (chapterToActivate && chapterToActivate.id) {
             lastCloudContentRef.current[chapterToActivate.id] = chapterToActivate.content;
+            lastMajorBackupContentRef.current[chapterToActivate.id] = chapterToActivate.content;
+            
+            // Baseline Snapshot: if history is empty but document has content, save initial state
+            const docId = chapterToActivate.id;
+            const docContent = chapterToActivate.content || '';
+            if (docContent && docContent !== '<p></p>') {
+                getLocalSnapshots(docId).then(async (snaps) => {
+                    if (snaps.length === 0) {
+                        await saveLocalSnapshot(docId, docContent, 'auto');
+                    }
+                }).catch(err => console.error("Failed to save baseline snapshot", err));
+            }
         }
         setActiveView('editor');
         if (bookId && chapter) {
@@ -606,6 +641,18 @@ export const DataProvider = ({ children }) => {
         if (!item) return;
         setActiveChapter(null);
         setActiveWorldDoc({ id: item.id, title: item.title, content: item.content || '' });
+        lastMajorBackupContentRef.current[item.id] = item.content || '';
+        
+        // Baseline Snapshot: if history is empty but document has content, save initial state
+        const docContent = item.content || '';
+        if (docContent && docContent !== '<p></p>') {
+            getLocalSnapshots(item.id).then(async (snaps) => {
+                if (snaps.length === 0) {
+                    await saveLocalSnapshot(item.id, docContent, 'auto');
+                }
+            }).catch(err => console.error("Failed to save baseline snapshot", err));
+        }
+        
         setActiveView('editor');
     };
 
@@ -619,10 +666,22 @@ export const DataProvider = ({ children }) => {
         }
         const docId = activeWorldDoc.id;
         const bookId = activeBook?.id;
-        const fn = async () => {
+        const fn = async (forcedFlush = false) => {
             delete pendingSaves.current[saveKey];
+            const isFlushing = forcedFlush;
             try {
-                if (bookId) await updateWorldItemApi(bookId, docId, { content: html });
+                if (bookId) {
+                    await updateWorldItemApi(bookId, docId, { content: html });
+                    
+                    // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
+                    const lastMajor = lastMajorBackupContentRef.current[docId];
+                    const hasRealDifference = lastMajor !== undefined ? lastMajor !== html : true;
+                    
+                    if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', html))) {
+                        await saveLocalSnapshot(docId, html, 'auto');
+                        lastMajorBackupContentRef.current[docId] = html;
+                    }
+                }
             } catch (error) {
                 console.error('Failed to save world doc content', error);
             }
@@ -776,16 +835,6 @@ export const DataProvider = ({ children }) => {
         const debounceTime = contentSize > 20000 ? 30000 : 10000;
         const safetyLimit = 30000; // 30 seconds forced save
 
-        // Detection logic for significant change (>15%)
-        const detectSignificantChange = (oldHtml, newHtml) => {
-            if (!oldHtml) return false;
-            const oldLen = oldHtml.replace(/<[^>]*>/g, '').length;
-            const newLen = newHtml.replace(/<[^>]*>/g, '').length;
-            if (oldLen === 0) return (newLen > 100); 
-            const diffPercent = Math.abs(oldLen - newLen) / oldLen;
-            return diffPercent > 0.15;
-        };
-
         // Track when this specific save sequence started
         if (!pendingSaves.current[saveKey]) {
             pendingSaves.current[saveKey] = { startTime: Date.now() };
@@ -793,13 +842,14 @@ export const DataProvider = ({ children }) => {
         const timeElapsed = Date.now() - pendingSaves.current[saveKey].startTime;
 
         // Define the save function
-        const fn = async () => {
+        const fn = async (forcedFlush = false) => {
             const currentSave = pendingSaves.current[saveKey];
             if (currentSave && currentSave.timeoutId) {
                 clearTimeout(currentSave.timeoutId);
             }
             delete pendingSaves.current[saveKey];
             
+            const isFlushing = forcedFlush;
             try {
                 const expectedToken = activeChapter.lastSyncToken;
                 const newToken = await updateChapterContent(bookId, chapId, content, expectedToken, sessionId);
@@ -808,9 +858,12 @@ export const DataProvider = ({ children }) => {
                 setChapters(prev => prev.map(ch => ch.id === chapId ? { ...ch, lastSyncToken: newToken } : ch));
                 lastCloudContentRef.current[chapId] = content;
 
-                const lastMajor = lastMajorBackupContentRef.current[chapId] || activeChapter.content || '';
-                if (detectSignificantChange(lastMajor, content)) {
-                    await saveChapterSnapshotApi(bookId, chapId, content);
+                // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
+                const lastMajor = lastMajorBackupContentRef.current[chapId];
+                const hasRealDifference = lastMajor !== undefined ? lastMajor !== content : true;
+                
+                if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', content))) {
+                    await saveLocalSnapshot(chapId, content, 'auto');
                     lastMajorBackupContentRef.current[chapId] = content;
                 }
 
@@ -931,8 +984,11 @@ export const DataProvider = ({ children }) => {
         updateChapter: handleUpdateChapter,
         batchUpdateChapters: handleBatchUpdateChapters,
         deleteChapter: handleDeleteChapter,
-        getChapterSnapshots: handleGetChapterSnapshots,
-        saveChapterSnapshot: handleSaveChapterSnapshot,
+        getChapterSnapshots: handleGetDocumentSnapshots,
+        saveChapterSnapshot: handleSaveDocumentSnapshot,
+        getDocumentSnapshots: handleGetDocumentSnapshots,
+        saveDocumentSnapshot: handleSaveDocumentSnapshot,
+        deleteDocumentSnapshot: handleDeleteDocumentSnapshot,
         createCharacter: handleCreateCharacter,
         updateCharacter: handleUpdateCharacter,
         deleteCharacter: handleDeleteCharacter,

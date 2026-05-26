@@ -55,7 +55,7 @@ const IAStudio = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, characters, worldItems,
         saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter,
-        profile, updateBookData, lazyLoadChapters,
+        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot
     } = useData();
 
 
@@ -81,7 +81,7 @@ const IAStudio = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
-    const [selectedAction, setSelectedAction] = useState('escribir');
+    const [selectedAction, setSelectedAction] = useState('chat');
 
     // Modo sección: acumulación de secciones generadas
     const [sectionMode, setSectionMode] = useState(false);
@@ -1003,23 +1003,32 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
     };
 
     // Apply changes — supports regular content, patches, and section accumulation
-    const handleApplyChanges = useCallback((editedBlocks) => {
+    const handleApplyChanges = useCallback(async (editedBlocks) => {
         const blocks = (Array.isArray(editedBlocks) && editedBlocks.length > 0) ? editedBlocks : lastParsedBlocksRef.current;
         if (!blocks || blocks.length === 0) {
             return;
         }
 
-        blocks.forEach((block, idx) => {
+        for (const block of blocks) {
             if (block.mode === 'text') {
-                return;
+                continue;
+            }
+
+            // Save pre-AI failsafe checkpoint for any existing document being updated
+            const targetDoc = block.mode === 'manual' && block.docId
+                ? findDestinationDoc(block, chapters, worldItems)
+                : (activeChapter || activeWorldDoc || null);
+
+            if (block.mode !== 'new' && targetDoc && targetDoc.id) {
+                try {
+                    await saveDocumentSnapshot(targetDoc.id, targetDoc.content || '', 'ia');
+                } catch (err) {
+                    console.error("Failed to save pre-AI snapshot:", err);
+                }
             }
 
             // ── Patch mode ──
             if (block.isPatch) {
-                const targetDoc = block.mode === 'manual' && block.docId
-                    ? findDestinationDoc(block, chapters, worldItems)
-                    : (activeChapter || activeWorldDoc || null);
-
                 const targetHtml = targetDoc?.content || activeChapter?.content || activeWorldDoc?.content || '';
                 const { success, html: patchedHtml, method } = applyPatch(targetHtml, block.original, block.proposedContent);
 
@@ -1029,7 +1038,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                     window.dispatchEvent(new CustomEvent('ia-toast', {
                         detail: { message: '⚠️ No se encontró el fragmento exacto en el documento. Aplica el cambio manualmente.', type: 'warning' }
                     }));
-                    return;
+                    continue;
                 }
 
                 if (block.mode === 'manual' && block.docId) {
@@ -1053,7 +1062,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                         saveWorldDocContent(patchedHtml);
                     }
                 }
-                return;
+                continue;
             }
 
             // ── Section mode: apply accumulated sections ──
@@ -1092,15 +1101,11 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                         createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
                     }
                 }
-                return;
+                continue;
             }
 
             // ── Scene mode: apply accumulated/appended scene ──
             if (block.isScene) {
-                const targetDoc = block.mode === 'manual' && block.docId
-                    ? findDestinationDoc(block, chapters, worldItems)
-                    : (activeChapter || activeWorldDoc || null);
-
                 const currentHtml = targetDoc?.content || '';
                 const sceneHtml = ensureHtmlFormat(block.proposedContent);
                 
@@ -1135,7 +1140,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                         createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
                     }
                 }
-                return;
+                continue;
             }
 
             // ── Standard content mode ──
@@ -1168,7 +1173,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                 const title = block.title || 'Nuevo capítulo';
                 createChapter({ title, content: htmlContent });
             }
-        });
+        }
 
         if (activeResolution) {
             const { messageId, inconsistencyId, option, customText } = activeResolution;
