@@ -1027,6 +1027,9 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             return;
         }
 
+        // Mapa para acumular cambios en memoria por documento modificado y evitar múltiples snapshots
+        const modifiedDocs = {};
+
         for (const block of blocks) {
             if (block.mode === 'text') {
                 continue;
@@ -1049,7 +1052,13 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
 
             // ── Patch mode ──
             if (block.isPatch) {
-                const targetHtml = targetDoc?.content || '';
+                let targetHtml = '';
+                if (targetDoc?.id && modifiedDocs[targetDoc.id]) {
+                    targetHtml = modifiedDocs[targetDoc.id].finalHtml;
+                } else {
+                    targetHtml = targetDoc?.content || '';
+                }
+
                 const { success, html: patchedHtml, method } = applyPatch(targetHtml, block.original, block.proposedContent);
 
                 if (!success) {
@@ -1060,31 +1069,26 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                     continue;
                 }
 
-                // Apply to the resolved target document
                 if (targetDoc?.id) {
                     const isChapter = chapters?.some(c => c.id === targetDoc.id);
                     const isWorldItem = worldItems?.some(w => w.id === targetDoc.id);
-                    if (isChapter) {
-                        if (targetDoc.id === activeChapter?.id) {
-                            saveChapterContent(patchedHtml, 'ia');
-                        } else {
-                            updateChapter(targetDoc.id, { content: patchedHtml });
-                            await saveDocumentSnapshot(targetDoc.id, patchedHtml, 'ia');
-                        }
-                    } else if (isWorldItem) {
-                        if (targetDoc.id === activeWorldDoc?.id) {
-                            saveWorldDocContent(patchedHtml, 'ia');
-                        } else {
-                            updateWorldItem(targetDoc.id, { content: patchedHtml });
-                            await saveDocumentSnapshot(targetDoc.id, patchedHtml, 'ia');
-                        }
-                    }
+                    
+                    modifiedDocs[targetDoc.id] = {
+                        finalHtml: patchedHtml,
+                        targetDoc,
+                        isChapter,
+                        isWorldItem
+                    };
                 } else {
-                    // Fallback: no se resolvió — aplicar al doc activo
-                    if (activeChapter) {
-                        saveChapterContent(patchedHtml, 'ia');
-                    } else if (activeWorldDoc) {
-                        saveWorldDocContent(patchedHtml, 'ia');
+                    // Fallback sin id (se aplica al activo)
+                    const activeDoc = activeChapter || activeWorldDoc;
+                    if (activeDoc) {
+                        modifiedDocs[activeDoc.id] = {
+                            finalHtml: patchedHtml,
+                            targetDoc: activeDoc,
+                            isChapter: !!activeChapter,
+                            isWorldItem: !!activeWorldDoc
+                        };
                     }
                 }
                 continue;
@@ -1104,26 +1108,23 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                 const htmlContent = ensureHtmlFormat(combinedHtml);
 
                 if (block.mode === 'manual' && block.docId) {
-                    if (block.docType === 'chapter') {
-                        if (block.docId === activeChapter?.id) {
-                            saveChapterContent(htmlContent, 'ia');
-                        } else {
-                            updateChapter(block.docId, { content: htmlContent });
-                            await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
-                        }
-                    } else if (block.docType === 'worldItem') {
-                        if (block.docId === activeWorldDoc?.id) {
-                            saveWorldDocContent(htmlContent, 'ia');
-                        } else {
-                            updateWorldItem(block.docId, { content: htmlContent });
-                            await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
-                        }
-                    }
+                    const isChapter = block.docType === 'chapter';
+                    const isWorldItem = block.docType === 'worldItem';
+                    modifiedDocs[block.docId] = {
+                        finalHtml: htmlContent,
+                        targetDoc: { id: block.docId },
+                        isChapter,
+                        isWorldItem
+                    };
                 } else {
-                    if (activeChapter) {
-                        saveChapterContent(htmlContent, 'ia');
-                    } else if (activeWorldDoc) {
-                        saveWorldDocContent(htmlContent, 'ia');
+                    const activeDoc = activeChapter || activeWorldDoc;
+                    if (activeDoc) {
+                        modifiedDocs[activeDoc.id] = {
+                            finalHtml: htmlContent,
+                            targetDoc: activeDoc,
+                            isChapter: !!activeChapter,
+                            isWorldItem: !!activeWorldDoc
+                        };
                     } else {
                         createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
                     }
@@ -1133,7 +1134,13 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
 
             // ── Scene mode: apply accumulated/appended scene ──
             if (block.isScene) {
-                const currentHtml = targetDoc?.content || '';
+                let currentHtml = '';
+                if (targetDoc?.id && modifiedDocs[targetDoc.id]) {
+                    currentHtml = modifiedDocs[targetDoc.id].finalHtml;
+                } else {
+                    currentHtml = targetDoc?.content || '';
+                }
+
                 const sceneHtml = ensureHtmlFormat(block.proposedContent);
                 
                 // Separador personalizado: "Escena N: [Nombre]"
@@ -1145,26 +1152,23 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                     : `${divider}\n${sceneHtml}`;
 
                 if (block.mode === 'manual' && block.docId) {
-                    if (block.docType === 'chapter') {
-                        if (block.docId === activeChapter?.id) {
-                            saveChapterContent(combinedHtml, 'ia');
-                        } else {
-                            updateChapter(block.docId, { content: combinedHtml });
-                            await saveDocumentSnapshot(block.docId, combinedHtml, 'ia');
-                        }
-                    } else if (block.docType === 'worldItem') {
-                        if (block.docId === activeWorldDoc?.id) {
-                            saveWorldDocContent(combinedHtml, 'ia');
-                        } else {
-                            updateWorldItem(block.docId, { content: combinedHtml });
-                            await saveDocumentSnapshot(block.docId, combinedHtml, 'ia');
-                        }
-                    }
+                    const isChapter = block.docType === 'chapter';
+                    const isWorldItem = block.docType === 'worldItem';
+                    modifiedDocs[block.docId] = {
+                        finalHtml: combinedHtml,
+                        targetDoc: { id: block.docId },
+                        isChapter,
+                        isWorldItem
+                    };
                 } else {
-                    if (activeChapter) {
-                        saveChapterContent(combinedHtml, 'ia');
-                    } else if (activeWorldDoc) {
-                        saveWorldDocContent(combinedHtml, 'ia');
+                    const activeDoc = activeChapter || activeWorldDoc;
+                    if (activeDoc) {
+                        modifiedDocs[activeDoc.id] = {
+                            finalHtml: combinedHtml,
+                            targetDoc: activeDoc,
+                            isChapter: !!activeChapter,
+                            isWorldItem: !!activeWorldDoc
+                        };
                     } else {
                         createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
                     }
@@ -1176,26 +1180,23 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             const htmlContent = ensureHtmlFormat(block.proposedContent);
 
             if (block.mode === 'manual' && block.docId) {
-                if (block.docType === 'chapter') {
-                    if (block.docId === activeChapter?.id) {
-                        saveChapterContent(htmlContent, 'ia');
-                    } else {
-                        updateChapter(block.docId, { content: htmlContent });
-                        await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
-                    }
-                } else if (block.docType === 'worldItem') {
-                    if (block.docId === activeWorldDoc?.id) {
-                        saveWorldDocContent(htmlContent, 'ia');
-                    } else {
-                        updateWorldItem(block.docId, { content: htmlContent });
-                        await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
-                    }
-                }
+                const isChapter = block.docType === 'chapter';
+                const isWorldItem = block.docType === 'worldItem';
+                modifiedDocs[block.docId] = {
+                    finalHtml: htmlContent,
+                    targetDoc: { id: block.docId },
+                    isChapter,
+                    isWorldItem
+                };
             } else if (block.mode === 'auto') {
-                if (activeChapter) {
-                    saveChapterContent(htmlContent, 'ia');
-                } else if (activeWorldDoc) {
-                    saveWorldDocContent(htmlContent, 'ia');
+                const activeDoc = activeChapter || activeWorldDoc;
+                if (activeDoc) {
+                    modifiedDocs[activeDoc.id] = {
+                        finalHtml: htmlContent,
+                        targetDoc: activeDoc,
+                        isChapter: !!activeChapter,
+                        isWorldItem: !!activeWorldDoc
+                    };
                 } else {
                     const title = block.title || 'Nuevo capítulo';
                     createChapter({ title, content: htmlContent });
@@ -1203,6 +1204,27 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             } else if (block.mode === 'new') {
                 const title = block.title || 'Nuevo capítulo';
                 createChapter({ title, content: htmlContent });
+            }
+        }
+
+        // ── Ejecutar el guardado definitivo y único de todos los documentos modificados en este ciclo ──
+        for (const docId of Object.keys(modifiedDocs)) {
+            const { finalHtml, isChapter, isWorldItem } = modifiedDocs[docId];
+
+            if (isChapter) {
+                if (docId === activeChapter?.id) {
+                    saveChapterContent(finalHtml, 'ia');
+                } else {
+                    updateChapter(docId, { content: finalHtml });
+                    await saveDocumentSnapshot(docId, finalHtml, 'ia');
+                }
+            } else if (isWorldItem) {
+                if (docId === activeWorldDoc?.id) {
+                    saveWorldDocContent(finalHtml, 'ia');
+                } else {
+                    updateWorldItem(docId, { content: finalHtml });
+                    await saveDocumentSnapshot(docId, finalHtml, 'ia');
+                }
             }
         }
 
