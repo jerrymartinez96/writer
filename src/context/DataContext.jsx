@@ -656,7 +656,7 @@ export const DataProvider = ({ children }) => {
         setActiveView('editor');
     };
 
-    const saveWorldDocContent = useCallback((html) => {
+    const saveWorldDocContent = useCallback((html, triggerType = 'auto') => {
         if (!activeWorldDoc) return;
         setActiveWorldDoc(prev => ({ ...prev, content: html }));
         setWorldItems(prev => prev.map(item => item.id === activeWorldDoc.id ? { ...item, content: html } : item));
@@ -678,7 +678,7 @@ export const DataProvider = ({ children }) => {
                     const hasRealDifference = lastMajor !== undefined ? lastMajor !== html : true;
                     
                     if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', html))) {
-                        await saveLocalSnapshot(docId, html, 'auto');
+                        await saveLocalSnapshot(docId, html, triggerType);
                         lastMajorBackupContentRef.current[docId] = html;
                     }
                 }
@@ -686,10 +686,15 @@ export const DataProvider = ({ children }) => {
                 console.error('Failed to save world doc content', error);
             }
         };
-        pendingSaves.current[saveKey] = {
-            timeoutId: setTimeout(fn, 1500),
-            fn
-        };
+
+        if (triggerType === 'ia') {
+            fn(true);
+        } else {
+            pendingSaves.current[saveKey] = {
+                timeoutId: setTimeout(fn, 1500),
+                fn
+            };
+        }
     }, [activeWorldDoc, activeBook]);
 
     // --- World Management ---
@@ -806,7 +811,7 @@ export const DataProvider = ({ children }) => {
     };
 
     // Auto-save for chapters
-    const saveChapterContent = useCallback(async (content) => {
+    const saveChapterContent = useCallback(async (content, triggerType = 'auto') => {
         if (!activeBook || !activeChapter) return;
         
         // 1. Update In-Memory State Immediately for UI responsiveness
@@ -863,7 +868,7 @@ export const DataProvider = ({ children }) => {
                 const hasRealDifference = lastMajor !== undefined ? lastMajor !== content : true;
                 
                 if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', content))) {
-                    await saveLocalSnapshot(chapId, content, 'auto');
+                    await saveLocalSnapshot(chapId, content, triggerType);
                     lastMajorBackupContentRef.current[chapId] = content;
                 }
 
@@ -874,8 +879,8 @@ export const DataProvider = ({ children }) => {
         };
 
         // Decide: Normal debounce or Safety Force?
-        if (timeElapsed >= safetyLimit) {
-            fn();
+        if (timeElapsed >= safetyLimit || triggerType === 'ia') {
+            fn(true);
         } else {
             pendingSaves.current[saveKey].timeoutId = setTimeout(fn, debounceTime);
             pendingSaves.current[saveKey].fn = fn;

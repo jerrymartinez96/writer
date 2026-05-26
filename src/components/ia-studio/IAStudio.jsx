@@ -196,10 +196,27 @@ const IAStudio = () => {
                 currentContent = doc?.content || '';
                 title = block.title || doc?.title || 'Documento';
             } else if (block.mode === 'auto') {
-                const activeDoc = activeChapter || activeWorldDoc;
-                if (activeDoc) {
-                    currentContent = activeDoc.content || '';
-                    title = block.title || activeDoc.title || activeDoc.name || 'Documento activo';
+                // Para bloques de multi-patch sin docId resuelto, intentar buscar por título
+                if (block.title && block.isPatch) {
+                    // Buscar en worldItems por nombre
+                    const byTitle = [...(worldItems || []), ...(chapters || [])].find(d => {
+                        const dTitle = d.title || d.name || '';
+                        return dTitle.toLowerCase().trim() === block.title.toLowerCase().trim();
+                    });
+                    if (byTitle) {
+                        currentContent = byTitle.content || '';
+                        title = byTitle.title || byTitle.name || block.title;
+                    } else {
+                        const activeDoc = activeChapter || activeWorldDoc;
+                        currentContent = activeDoc?.content || '';
+                        title = block.title || activeDoc?.title || activeDoc?.name || 'Documento activo';
+                    }
+                } else {
+                    const activeDoc = activeChapter || activeWorldDoc;
+                    if (activeDoc) {
+                        currentContent = activeDoc.content || '';
+                        title = block.title || activeDoc.title || activeDoc.name || 'Documento activo';
+                    }
                 }
             }
 
@@ -892,8 +909,9 @@ DOCUMENTOS AFECTADOS (contenido actual):
 ${filesContextText}
 
 APLICA LA SOLUCIÓN: Edita SOLO las secciones necesarias de los documentos afectados.
-NUNCA reescribas un documento completo — usa SIEMPRE [ÁMBITO: parcial].
-Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIGINAL].`;
+NUNCA reescribas un documento completo — usa siempre la estructura de parches quirúrgicos.
+- Si debes modificar o eliminar múltiples secciones o documentos, genera bloques consecutivos [[parche]]...[[/parche]] cada uno con su respectivo [[DESTINO]], [[ORIGINAL]] y [[REEMPLAZO]].
+- Para eliminar un fragmento redundante o sobrante, escribe el texto a borrar dentro de [[ORIGINAL]] y deja el bloque [[REEMPLAZO]] completamente vacío (ej. [[REEMPLAZO]][[/REEMPLAZO]]).`;
 
             const aiMessages = [
                 { role: 'system', content: systemPrompt },
@@ -1014,52 +1032,59 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                 continue;
             }
 
-            // Save pre-AI failsafe checkpoint for any existing document being updated
-            const targetDoc = block.mode === 'manual' && block.docId
-                ? findDestinationDoc(block, chapters, worldItems)
-                : (activeChapter || activeWorldDoc || null);
-
-            if (block.mode !== 'new' && targetDoc && targetDoc.id) {
-                try {
-                    await saveDocumentSnapshot(targetDoc.id, targetDoc.content || '', 'ia');
-                } catch (err) {
-                    console.error("Failed to save pre-AI snapshot:", err);
-                }
+            // Resolve targetDoc: manual by docId, or by title for multi-patch with unresolved docId
+            let targetDoc = null;
+            if (block.mode === 'manual' && block.docId) {
+                targetDoc = findDestinationDoc(block, chapters, worldItems);
+            } else if (block.isPatch && block.title) {
+                // Multi-patch block without docId — buscar por título
+                targetDoc = [...(worldItems || []), ...(chapters || [])].find(d => {
+                    const dTitle = d.title || d.name || '';
+                    return dTitle.toLowerCase().trim() === block.title.toLowerCase().trim();
+                }) || null;
+            }
+            if (!targetDoc) {
+                targetDoc = activeChapter || activeWorldDoc || null;
             }
 
             // ── Patch mode ──
             if (block.isPatch) {
-                const targetHtml = targetDoc?.content || activeChapter?.content || activeWorldDoc?.content || '';
+                const targetHtml = targetDoc?.content || '';
                 const { success, html: patchedHtml, method } = applyPatch(targetHtml, block.original, block.proposedContent);
 
                 if (!success) {
                     console.warn(`[IAStudio] Patch not applied (method: ${method}). Fragment not found in document.`);
-                    // Fallback: alert the user via a toast or just skip
                     window.dispatchEvent(new CustomEvent('ia-toast', {
-                        detail: { message: '⚠️ No se encontró el fragmento exacto en el documento. Aplica el cambio manualmente.', type: 'warning' }
+                        detail: { message: `⚠️ No se encontró el fragmento en "${block.title || 'el documento'}". Aplica el cambio manualmente.`, type: 'warning' }
                     }));
                     continue;
                 }
 
-                if (block.mode === 'manual' && block.docId) {
-                    if (block.docType === 'chapter') {
-                        if (block.docId === activeChapter?.id) {
-                            saveChapterContent(patchedHtml);
+                // Apply to the resolved target document
+                if (targetDoc?.id) {
+                    const isChapter = chapters?.some(c => c.id === targetDoc.id);
+                    const isWorldItem = worldItems?.some(w => w.id === targetDoc.id);
+                    if (isChapter) {
+                        if (targetDoc.id === activeChapter?.id) {
+                            saveChapterContent(patchedHtml, 'ia');
                         } else {
-                            updateChapter(block.docId, { content: patchedHtml });
+                            updateChapter(targetDoc.id, { content: patchedHtml });
+                            await saveDocumentSnapshot(targetDoc.id, patchedHtml, 'ia');
                         }
-                    } else if (block.docType === 'worldItem') {
-                        if (block.docId === activeWorldDoc?.id) {
-                            saveWorldDocContent(patchedHtml);
+                    } else if (isWorldItem) {
+                        if (targetDoc.id === activeWorldDoc?.id) {
+                            saveWorldDocContent(patchedHtml, 'ia');
                         } else {
-                            updateWorldItem(block.docId, { content: patchedHtml });
+                            updateWorldItem(targetDoc.id, { content: patchedHtml });
+                            await saveDocumentSnapshot(targetDoc.id, patchedHtml, 'ia');
                         }
                     }
                 } else {
+                    // Fallback: no se resolvió — aplicar al doc activo
                     if (activeChapter) {
-                        saveChapterContent(patchedHtml);
+                        saveChapterContent(patchedHtml, 'ia');
                     } else if (activeWorldDoc) {
-                        saveWorldDocContent(patchedHtml);
+                        saveWorldDocContent(patchedHtml, 'ia');
                     }
                 }
                 continue;
@@ -1081,22 +1106,24 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                 if (block.mode === 'manual' && block.docId) {
                     if (block.docType === 'chapter') {
                         if (block.docId === activeChapter?.id) {
-                            saveChapterContent(htmlContent);
+                            saveChapterContent(htmlContent, 'ia');
                         } else {
                             updateChapter(block.docId, { content: htmlContent });
+                            await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
                         }
                     } else if (block.docType === 'worldItem') {
                         if (block.docId === activeWorldDoc?.id) {
-                            saveWorldDocContent(htmlContent);
+                            saveWorldDocContent(htmlContent, 'ia');
                         } else {
                             updateWorldItem(block.docId, { content: htmlContent });
+                            await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
                         }
                     }
                 } else {
                     if (activeChapter) {
-                        saveChapterContent(htmlContent);
+                        saveChapterContent(htmlContent, 'ia');
                     } else if (activeWorldDoc) {
-                        saveWorldDocContent(htmlContent);
+                        saveWorldDocContent(htmlContent, 'ia');
                     } else {
                         createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
                     }
@@ -1120,22 +1147,24 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                 if (block.mode === 'manual' && block.docId) {
                     if (block.docType === 'chapter') {
                         if (block.docId === activeChapter?.id) {
-                            saveChapterContent(combinedHtml);
+                            saveChapterContent(combinedHtml, 'ia');
                         } else {
                             updateChapter(block.docId, { content: combinedHtml });
+                            await saveDocumentSnapshot(block.docId, combinedHtml, 'ia');
                         }
                     } else if (block.docType === 'worldItem') {
                         if (block.docId === activeWorldDoc?.id) {
-                            saveWorldDocContent(combinedHtml);
+                            saveWorldDocContent(combinedHtml, 'ia');
                         } else {
                             updateWorldItem(block.docId, { content: combinedHtml });
+                            await saveDocumentSnapshot(block.docId, combinedHtml, 'ia');
                         }
                     }
                 } else {
                     if (activeChapter) {
-                        saveChapterContent(combinedHtml);
+                        saveChapterContent(combinedHtml, 'ia');
                     } else if (activeWorldDoc) {
-                        saveWorldDocContent(combinedHtml);
+                        saveWorldDocContent(combinedHtml, 'ia');
                     } else {
                         createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
                     }
@@ -1149,22 +1178,24 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
             if (block.mode === 'manual' && block.docId) {
                 if (block.docType === 'chapter') {
                     if (block.docId === activeChapter?.id) {
-                        saveChapterContent(htmlContent);
+                        saveChapterContent(htmlContent, 'ia');
                     } else {
                         updateChapter(block.docId, { content: htmlContent });
+                        await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
                     }
                 } else if (block.docType === 'worldItem') {
                     if (block.docId === activeWorldDoc?.id) {
-                        saveWorldDocContent(htmlContent);
+                        saveWorldDocContent(htmlContent, 'ia');
                     } else {
                         updateWorldItem(block.docId, { content: htmlContent });
+                        await saveDocumentSnapshot(block.docId, htmlContent, 'ia');
                     }
                 }
             } else if (block.mode === 'auto') {
                 if (activeChapter) {
-                    saveChapterContent(htmlContent);
+                    saveChapterContent(htmlContent, 'ia');
                 } else if (activeWorldDoc) {
-                    saveWorldDocContent(htmlContent);
+                    saveWorldDocContent(htmlContent, 'ia');
                 } else {
                     const title = block.title || 'Nuevo capítulo';
                     createChapter({ title, content: htmlContent });

@@ -302,14 +302,6 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                                         
                                         <div className="flex flex-wrap items-center gap-2.5">
                                             <button
-                                                onClick={() => setShowDiff(!showDiff)}
-                                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[9px] font-black uppercase tracking-[0.15em] transition-all shrink-0 ${showDiff ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/30' : 'bg-transparent border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-600'}`}
-                                            >
-                                                <Diff size={14} />
-                                                <span>{showDiff ? 'Ocultar Cambios' : 'Ver Cambios'}</span>
-                                            </button>
-
-                                            <button
                                                 onClick={handleRestoreAction}
                                                 className="bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-[0.15em] hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/30 active:scale-95 whitespace-nowrap shrink-0"
                                             >

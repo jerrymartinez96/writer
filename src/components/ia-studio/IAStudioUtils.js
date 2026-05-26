@@ -48,13 +48,7 @@ export const plainTextToHtml = (text) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Catálogo técnico de acciones para IA Studio.
- * Cada acción define de forma declarativa:
- * - responseType: tipo de respuesta primario
- * - outputFormat: plain_text | structured | patch
- * - rules: reglas de estilo aplicables (referencias a GENERAL_STYLE_RULES)
- * - formatInstructions: instrucciones específicas de formato
- * - promptTemplate: función que genera el prompt dinámico
+ * Catálogo técnico de acciones para la IA
  */
 export const ACTION_CATALOG = {
     escribir: {
@@ -64,39 +58,32 @@ export const ACTION_CATALOG = {
         defaultScope: 'auto',
         description: 'Genera contenido nuevo o modifica contenido existente preservando fidelidad',
         rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'preserve_fidelity', 'no_triple_backtick'],
-        formatInstructions: `[TIPO: contenido]
-[ÁMBITO: completo|parcial]
-[DESTINO: Nombre exacto del destino]
-[TÍTULO: Título sugerido (opcional)]`,
-        responseBody: 'Texto plano limpio con párrafos separados por \\n\\n. Usa [ÁMBITO: parcial] si solo devuelves secciones afectadas; [ÁMBITO: completo] si escribe todo el documento desde cero.',
+        formatInstructions: `[[TIPO: contenido]]
+[[ÁMBITO: completo|parcial]]
+[[DESTINO: Nombre exacto del destino]]
+[[TÍTULO: Título sugerido (opcional)]]`,
+        responseBody: 'Texto plano limpio con párrafos separados por \\n\\n. Usa [[ÁMBITO: parcial]] si solo devuelves secciones afectadas; [[ÁMBITO: completo]] si escribe todo el documento desde cero.',
         examples: {
             positive: `✅ RESPUESTA CORRECTA (crear desde cero):
-[TIPO: contenido]
-[ÁMBITO: completo]
-[DESTINO: Personajes]
-[TÍTULO: Perfil de nuevos personajes]
+[[TIPO: contenido]]
+[[ÁMBITO: completo]]
+[[DESTINO: Personajes]]
+[[TÍTULO: Perfil de nuevos personajes]]
 
 Nora es la mayor de las hermanas...
 
-✅ RESPUESTA CORRECTA (modificar existente, cambio pequeño → parcial):
-[TIPO: contenido]
-[ÁMBITO: parcial]
-[DESTINO: Personajes]
-
-Nora tiene 18 años, pelo plateado y... (solo las secciones modificadas con suficiente contexto)
-
 ✅ RESPUESTA CORRECTA (modificar existente, cambio grande → completo):
-[TIPO: contenido]
-[ÁMBITO: completo]
-[DESTINO: Personajes]
+[[TIPO: contenido]]
+[[ÁMBITO: completo]]
+[[DESTINO: Personajes]]
 
 [documento completo reescrito]`,
             negative: `❌ INCORRECTO — NO uses Markdown:
 **Nora** es la mayor de las *hermanas*... 
 
 ❌ INCORRECTO — NO resumas ni omitas secciones no modificadas:
-[TIPO: contenido]
-[ÁMBITO: parcial]
+[[TIPO: contenido]]
+[[ÁMBITO: parcial]]
 Nora (18 años). (pero omitiste todo el lore de las otras hermanas)
 
 ❌ INCORRECTO — NO uses HTML en el cuerpo:
@@ -110,30 +97,54 @@ Nora (18 años). (pero omitiste todo el lore de las otras hermanas)
         defaultScope: 'partial',
         description: 'Edita solo un fragmento o párrafo específico sin reescribir todo el documento',
         rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick', 'patch_original_block'],
-        formatInstructions: `[TIPO: fragmento]
-[DESTINO: Nombre exacto del destino]
-[CONTEXTO: Breve descripción del cambio]
-[ORIGINAL]
+        formatInstructions: `[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: Nombre exacto del destino]]
+[[CONTEXTO: Breve descripción del cambio]]
+[[ORIGINAL]]
 Texto EXACTO del fragmento original a reemplazar (tal cual del documento)
-[/ORIGINAL]`,
-        responseBody: 'Solo el texto de reemplazo, sin metadatos adicionales',
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+Texto nuevo de reemplazo, o vacío para eliminarlo
+[[/REEMPLAZO]]
+[[/parche]]`,
+        responseBody: 'Encapsula cada corrección dentro de un bloque [[parche]]. Si quieres eliminar el fragmento por completo, deja el bloque [[REEMPLAZO]] vacío.',
         examples: {
-            positive: `✅ RESPUESTA CORRECTA:
-[TIPO: fragmento]
-[DESTINO: Personajes]
-[CONTEXTO: Corregí la edad de Nora de 19 a 18 años]
-[ORIGINAL]
+            positive: `✅ RESPUESTA CORRECTA (Modificar texto):
+[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: Personajes]]
+[[CONTEXTO: Corregí la edad de Nora de 19 a 18 años]]
+[[ORIGINAL]]
 Nora, la mayor con 19 años
-[/ORIGINAL]
-Nora, la mayor con 18 años`,
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+Nora, la mayor con 18 años
+[[/REEMPLAZO]]
+[[/parche]]
+
+✅ RESPUESTA CORRECTA (Eliminar texto duplicado/sobrante):
+[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: Geopolítica]]
+[[CONTEXTO: Eliminar mención redundante al Vínculo Ancestral]]
+[[ORIGINAL]]
+El guardián guerrero murió en batalla dando paso al despertar del Vínculo Ancestral...
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+[[/REEMPLAZO]]
+[[/parche]]`,
             negative: `❌ INCORRECTO — NO reescribas todo el documento, solo el fragmento:
-[TIPO: contenido]
-[ÁMBITO: completo]
+[[TIPO: contenido]]
+[[ÁMBITO: completo]]
 Nora tiene 18 años... (devolviste el doc completo)
 
-❌ INCORRECTO — NO omitas el bloque [ORIGINAL]:
-[TIPO: fragmento]
-... (sin [ORIGINAL] no se puede hacer patch)`,
+❌ INCORRECTO — NO dejes el parche a medias sin REEMPLAZO ni contenedor:
+[[TIPO: fragmento]]
+[[ORIGINAL]]
+Nora, la mayor con 19 años
+[[/ORIGINAL]]
+(falta [[REEMPLAZO]] y [[parche]] de cierre)`,
         },
     },
     escena: {
@@ -143,27 +154,27 @@ Nora tiene 18 años... (devolviste el doc completo)
         defaultScope: 'partial',
         description: 'Co-escribe y acumula capítulo escena por escena de forma conversacional',
         rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'no_triple_backtick'],
-        formatInstructions: `[TIPO: escena]
-[ESCENA: Nombre de la escena]
-[NÚMERO: N]`,
+        formatInstructions: `[[TIPO: escena]]
+[[ESCENA: Nombre de la escena]]
+[[NÚMERO: N]]`,
         responseBody: 'Prosa narrativa en texto plano limpio.',
         examples: {
             positive: `✅ RESPUESTA CORRECTA (redactando):
-[TIPO: escena]
-[ESCENA: La llegada a la aldea]
-[NÚMERO: 3]
+[[TIPO: escena]]
+[[ESCENA: La llegada a la aldea]]
+[[NÚMERO: 3]]
 
 El sol se ocultaba tras las montañas cuando Kai divisó las primeras luces de la aldea...
 
 ✅ RESPUESTA CORRECTA (conversacional/debate):
-[TIPO: sugerencia]
+[[TIPO: sugerencia]]
 ¿Qué tal si situamos esta escena al atardecer? El conflicto podría centrarse en...`,
             negative: `❌ INCORRECTO — NO mezcles formato Markdown:
-[TIPO: escena]
+[[TIPO: escena]]
 # La llegada a la aldea (no uses #)
     
 ❌ INCORRECTO — NO devuelvas HTML:
-[TIPO: escena]
+[[TIPO: escena]]
 <h3>La llegada</h3>`,
         },
     },
@@ -174,11 +185,11 @@ El sol se ocultaba tras las montañas cuando Kai divisó las primeras luces de l
         defaultScope: 'complete',
         description: 'Analiza estilo, gramática, ritmo, tono, estructura y coherencia (inconsistencias)',
         rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick'],
-        formatInstructions: `[TIPO: analisis]`,
+        formatInstructions: `[[TIPO: analisis]]`,
         responseBody: 'Retroalimentación estructurada en texto plano con \\n\\n.',
         examples: {
             positive: `✅ RESPUESTA CORRECTA:
-[TIPO: analisis]
+[[TIPO: analisis]]
 
 ANÁLISIS DE ESTILO:
 El ritmo narrativo es adecuado para una escena de acción, pero los párrafos son demasiado largos...
@@ -186,12 +197,12 @@ El ritmo narrativo es adecuado para una escena de acción, pero los párrafos so
 GRAMÁTICA:
 Se detectaron 3 errores de concordancia en el diálogo de Nora...`,
             negative: `❌ INCORRECTO — NO uses HTML o Markdown en el análisis:
-[TIPO: analisis]
+[[TIPO: analisis]]
 <p>El ritmo es <strong>adecuado</strong></p>
 
 ❌ INCORRECTO — NO devuelvas contenido como si fuera para modificar:
-[TIPO: contenido]
-[ÁMBITO: completo]`,
+[[TIPO: contenido]]
+[[ÁMBITO: completo]]`,
         },
     },
     sugerir: {
@@ -201,11 +212,11 @@ Se detectaron 3 errores de concordancia en el diálogo de Nora...`,
         defaultScope: 'complete',
         description: 'Propone ideas y mejoras creativas',
         rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick'],
-        formatInstructions: `[TIPO: sugerencia]`,
+        formatInstructions: `[[TIPO: sugerencia]]`,
         responseBody: 'Sugerencias creativas en texto plano claro.',
         examples: {
             positive: `✅ RESPUESTA CORRECTA:
-[TIPO: sugerencia]
+[[TIPO: sugerencia]]
 
 GIRO ARGUMENTAL SUGERIDO:
 Podrías introducir un conflicto entre Nora y Misha por el uso de la magia...
@@ -213,14 +224,14 @@ Podrías introducir un conflicto entre Nora y Misha por el uso de la magia...
 DESARROLLO DE PERSONAJE:
 Riko podría tener un secreto...`,
             negative: `❌ INCORRECTO — NO uses Markdown:
-[TIPO: sugerencia]
+[[TIPO: sugerencia]]
 **Giro argumental:** *interesante*...
 
 ❌ INCORRECTO — NO devuelvas contenido narrativo directamente:
-[TIPO: contenido] (no es crear, es sugerir)`,
+[[TIPO: contenido]] (no es crear, es sugerir)`,
         },
     },
-        chat: {
+    chat: {
         id: 'chat',
         responseType: 'auto',
         outputFormat: 'auto',
@@ -229,21 +240,17 @@ Riko podría tener un secreto...`,
         rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick', 'preserve_fidelity'],
         formatInstructions: `No espera un visor de diferencias. Responde de forma natural, conversacional y directa.
 Auto-determina el tipo de respuesta:
-- ¿Duda/Pregunta/Explicación sobre el lore? → [TIPO: sugerencia] o texto plano
+- ¿Duda/Pregunta/Explicación sobre el lore? → [[TIPO: sugerencia]] o texto plano
 - ¿Crear algo rápido? → texto plano sin estructura de destino
-- ¿Analizar algo? → [TIPO: analisis]
-- ¿Buscar inconsistencias? → [TIPO: inconsistencias]`,
-        responseBody: 'Texto plano conversacional. Sin estructura de metadatos de destino. Sin [DESTINO:]. Sin [ÁMBITO:].',
+- ¿Analizar algo? → [[TIPO: analisis]]
+- ¿Buscar inconsistencias? → [[TIPO: inconsistencias]]`,
+        responseBody: 'Texto plano conversacional. Sin estructura de metadatos de destino. Sin [[DESTINO:]]. Sin [[ÁMBITO:]].',
         examples: {
             positive: `✅ RESPUESTA CORRECTA (duda): 
-[TIPO: sugerencia]
+[[TIPO: sugerencia]]
 
-Según el lore, Nora tiene 18 años y es la hermana mayor...
-
-✅ RESPUESTA CORRECTA (pregunta general):
-¡Claro! El conflicto principal de la historia gira en torno a...`,
-            negative: `❌ NO generes bloques [DESTINO:] ni [ÁMBITO:] — esto es un chat, no una edición.
-❌ NO esperes que se muestre un visor de diferencias.`,
+Según el lore, Nora tiene 18 años...`,
+            negative: `❌ NO generes bloques [[DESTINO:]] ni [[ÁMBITO:]].`,
         },
     },
     inconsistencia: {
@@ -253,37 +260,47 @@ Según el lore, Nora tiene 18 años y es la hermana mayor...
         defaultScope: 'partial',
         description: 'Resuelve inconsistencias de lore editando quirúrgicamente los documentos afectados, preservando el resto del contenido intacto',
         rules: ['no_markdown', 'no_html_in_prose', 'preserve_fidelity', 'no_triple_backtick', 'inconsistency_partial_only'],
-        formatInstructions: `[TIPO: contenido] o [TIPO: fragmento]
-[ÁMBITO: parcial]  → OBLIGATORIO. NUNCA uses [ÁMBITO: completo]
-[DESTINO: ID_del_documento o nombre exacto]
-[CONTEXTO: Breve descripción del cambio]`,
-        responseBody: 'SOLO las secciones modificadas con suficiente contexto alrededor. NUNCA reescribas el documento completo. Si el cambio es pequeño y localizado, prefiere [TIPO: fragmento] con su bloque [ORIGINAL].',
+        formatInstructions: `[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: ID_del_documento o nombre exacto]]
+[[CONTEXTO: Breve descripción del cambio]]
+[[ORIGINAL]]
+Texto EXACTO a modificar/eliminar del documento original
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+Texto de reemplazo, o vacío para eliminarlo
+[[/REEMPLAZO]]
+[[/parche]]`,
+        responseBody: 'Resuelve el lore de forma quirúrgica. Si debes corregir o eliminar partes en varios documentos, escribe múltiples bloques [[parche]]...[[/parche]] consecutivos, cada uno con su respectivo [[DESTINO]]. NUNCA uses [[ÁMBITO: completo]] en resoluciones de inconsistencias.',
         examples: {
-            positive: `✅ RESPUESTA CORRECTA (edición parcial de secciones específicas):
-[TIPO: contenido]
-[ÁMBITO: parcial]
-[DESTINO: Información General]
-[CONTEXTO: Añadiendo detalles sobre la estancia de las elfas en el bosque]
+            positive: `✅ RESPUESTA CORRECTA (Consolidar y eliminar duplicados en varios documentos):
+[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: Geopolítica]]
+[[CONTEXTO: Eliminar párrafo duplicado del guardián]]
+[[ORIGINAL]]
+El guardián guerrero murió en batalla dando paso al despertar del Vínculo Ancestral...
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+[[/REEMPLAZO]]
+[[/parche]]
 
-Hermanas Elfas: Elysia, Lirien, Sylphine y Vaelith... 
-(solo las secciones nuevas/modificadas sin eliminar las existentes)
-
-✅ RESPUESTA CORRECTA (patch quirúrgico para cambio pequeño):
-[TIPO: fragmento]
-[DESTINO: Información General]
-[CONTEXTO: Corrigiendo la edad de las elfas]
-[ORIGINAL]
-Elysia, la mayor con 15 años
-[/ORIGINAL]
-Elysia, la mayor con 18 años`,
+[[parche]]
+[[TIPO: fragmento]]
+[[DESTINO: Personajes]]
+[[CONTEXTO: Consolidar trasfondo del Vínculo Ancestral]]
+[[ORIGINAL]]
+Hermanas Elfas: Elysia de 18 años.
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+Hermanas Elfas: Elysia de 18 años. Su linaje está íntimamente ligado al Vínculo Ancestral.
+[[/REEMPLAZO]]
+[[/parche]]`,
             negative: `❌ INCORRECTO — NUNCA reescribas el documento completo:
-[TIPO: contenido]
-[ÁMBITO: completo]  ← PROHIBIDO en resoluciones de inconsistencia
-Hermanas Elfas: Elysia...  (esto sobrescribió todo: Información General, Sistema de Magia, Geopolítica, etc.)
-
+[[TIPO: contenido]]
 ❌ INCORRECTO — No omitiste las secciones no afectadas:
-[TIPO: contenido]
-[ÁMBITO: parcial]
+[[TIPO: contenido]]
+[[ÁMBITO: parcial]]
 Hermanas Elfas: Elysia de 18 años...  (pero eliminaste "Información General", "Sistema de Magia", etc.)`,
         },
     },
@@ -321,7 +338,7 @@ export const GENERAL_STYLE_RULES = [
     },
     {
         id: 'patch_original_block',
-        rule: '📌 En modo fragmento, incluye siempre el bloque [ORIGINAL]...[/ORIGINAL] con el texto EXACTO del fragmento original a reemplazar (tal cual del documento, sin formato).',
+        rule: '📌 En modo fragmento, encapsula siempre el cambio dentro de [[parche]]...[[/parche]]. Incluye el bloque [[ORIGINAL]]...[[/ORIGINAL]] con el texto EXACTO a reemplazar, y el bloque [[REEMPLAZO]]...[[/REEMPLAZO]] con el nuevo texto (deja [[REEMPLAZO]] vacío si quieres eliminar el texto).',
     },
     {
         id: 'natural_quotes',
@@ -330,15 +347,15 @@ export const GENERAL_STYLE_RULES = [
     {
         id: 'inconsistency_partial_only',
         rule: `📌 REGLA CRÍTICA PARA RESOLUCIÓN DE INCONSISTENCIAS:
-- Queda ESTRICTAMENTE PROHIBIDO usar [ÁMBITO: completo] en resoluciones de inconsistencias.
-- Debes usar SIEMPRE [ÁMBITO: parcial] para devolver SOLO las secciones modificadas.
+- Queda ESTRICTAMENTE PROHIBIDO usar [[ÁMBITO: completo]] en resoluciones de inconsistencias.
+- Debes usar SIEMPRE [[ÁMBITO: parcial]] para devolver SOLO las secciones modificadas.
 - NUNCA reescribas el documento completo.
 - Si el documento es extenso (1000+ palabras) y solo modificas una sección, devuelve UNICAMENTE esa sección con contexto mínimo alrededor.
 - Contraejemplo explícito de lo que NO debes hacer:
   INPUT: Documento de 1000 palabras con secciones "Información General", "Sistema de Magia", "Geopolítica"
   INSTRUCCIÓN: Agregar lore sobre las hermanas elfas
-  OUTPUT INCORRECTO: [ÁMBITO: completo] + solo "Hermanas Elfas..." (¡borraste todo el resto!)
-  OUTPUT CORRECTO: [ÁMBITO: parcial] + solo la sección "Hermanas Elfas" añadida,
+  OUTPUT INCORRECTO: [[ÁMBITO: completo]] + solo "Hermanas Elfas..." (¡borraste todo el resto!)
+  OUTPUT CORRECTO: [[ÁMBITO: parcial]] + solo la sección "Hermanas Elfas" añadida,
   preservando "Información General", "Sistema de Magia" y "Geopolítica" intactas en el documento.`,
     },
 ];
@@ -1106,14 +1123,70 @@ export const tryParseAIXml = (text) => {
 
     const lowerText = text.toLowerCase();
     
-    // ── 1. PARSEADOR PRIMARIO: Formato de Corchetes Rectos [TIPO: ...] ──
-    const hasBracketMetadata = lowerText.includes('[tipo:') || lowerText.includes('[tipo :') || lowerText.includes('[tipo:inconsistencias') || lowerText.includes('[tipo :inconsistencias');
+    // ── 0. PARSEADOR MULTI-PARCHE: Soporte para múltiples [[parche]]...[[/parche]] ──
+    const hasMultiPatch = lowerText.includes('[[parche]]') || lowerText.includes('[parche]');
+    if (hasMultiPatch) {
+        const patches = [];
+        // Regex para buscar bloques [[parche]]...[[/parche]] o [parche]...[/parche]
+        const patchBlockRegex = /\[+parche\]+([\s\S]*?)\[+\/parche\]+/gi;
+        let match;
+        
+        while ((match = patchBlockRegex.exec(text)) !== null) {
+            const blockContent = match[1];
+            
+            // Extraer metadatos individuales del bloque
+            const typeMatch = /\[+TIPO\s*:\s*([^\]]+)\]+/i.exec(blockContent);
+            const targetMatch = /\[+DESTINO\s*:\s*([^\]]+)\]+/i.exec(blockContent);
+            const contextMatch = /\[+CONTEXTO\s*:\s*([^\]]+)\]+/i.exec(blockContent);
+            const originalMatch = /\[+ORIGINAL\]+([\s\S]*?)\[+\/ORIGINAL\]+/i.exec(blockContent);
+            const replacementMatch = /\[+REEMPLAZO\]+([\s\S]*?)\[+\/REEMPLAZO\]+/i.exec(blockContent);
+            
+            if (originalMatch) {
+                const typeVal = typeMatch ? typeMatch[1].trim().toLowerCase() : 'fragmento';
+                if (typeVal === 'fragmento' || typeVal === 'parche' || typeVal === 'patch') {
+                    let replacementRaw = '';
+                    if (replacementMatch) {
+                        replacementRaw = replacementMatch[1];
+                    } else {
+                        // Fallback: si no hay REEMPLAZO explícito, usar todo el texto después de [/original] o [[/original]]
+                        let origCloseIdx = blockContent.toLowerCase().indexOf('[[/original]]');
+                        let tagLength = '[[/original]]'.length;
+                        if (origCloseIdx === -1) {
+                            origCloseIdx = blockContent.toLowerCase().indexOf('[/original]');
+                            tagLength = '[/original]'.length;
+                        }
+                        if (origCloseIdx !== -1) {
+                            replacementRaw = blockContent.substring(origCloseIdx + tagLength);
+                        }
+                    }
+                    
+                    patches.push({
+                        target: targetMatch ? targetMatch[1].trim() : '',
+                        context: contextMatch ? contextMatch[1].trim() : '',
+                        original: originalMatch[1].trim(),
+                        replacementText: replacementRaw.trim(),
+                        replacement: plainTextToHtml(replacementRaw).trim()
+                    });
+                }
+            }
+        }
+        
+        if (patches.length > 0) {
+            return {
+                type: 'multi_patch',
+                patches
+            };
+        }
+    }
+
+    // ── 1. PARSEADOR PRIMARIO: Formato de Corchetes Rectos [[TIPO: ...]] o [TIPO: ...] ──
+    const hasBracketMetadata = lowerText.includes('[tipo:') || lowerText.includes('[tipo :') || lowerText.includes('[[tipo:') || lowerText.includes('[[tipo :');
 
     if (hasBracketMetadata) {
         const parsed = {};
         
-        // Extraer todos los pares [CLAVE: VALOR] de las líneas del texto
-        const bracketRegex = /^\s*\[([a-záéíóúüñ\-_]+)\s*:\s*([^\]]+)\]/gim;
+        // Extraer todos los pares [[CLAVE: VALOR]] o [CLAVE: VALOR] de las líneas del texto
+        const bracketRegex = /^\s*\[+([a-záéíóúüñ\-_]+)\s*:\s*([^\]]+)\]+/gim;
         let match;
         const metadataLines = [];
         
@@ -1124,8 +1197,8 @@ export const tryParseAIXml = (text) => {
             metadataLines.push(match[0]);
         }
 
-        // Buscar bloques multilínea de fragmentos como [ORIGINAL] ... [/ORIGINAL]
-        const originalBlockRegex = /\[original\]([\s\S]*?)\[\/original\]/i;
+        // Buscar bloques multilínea de fragmentos como [[ORIGINAL]] ... [[/ORIGINAL]] o [ORIGINAL] ... [/ORIGINAL]
+        const originalBlockRegex = /\[+original\]+([\s\S]*?)\[+\/original\]+/i;
         const origMatch = originalBlockRegex.exec(text);
         if (origMatch) {
             parsed.original = origMatch[1].trim();
@@ -1174,8 +1247,33 @@ export const tryParseAIXml = (text) => {
                 finalParsed.text = bodyText;
             } else if (type === 'patch') {
                 finalParsed.original = parsed.original || '';
-                finalParsed.replacement = plainTextToHtml(bodyText).trim();
-                finalParsed.replacementText = bodyText;
+                
+                // Primero verificar si hay una etiqueta REEMPLAZO explícita (para soporte de eliminaciones o parches exactos)
+                const replacementBlockRegex = /\[+REEMPLAZO\]+([\s\S]*?)\[+\/REEMPLAZO\]+/i;
+                const repMatch = replacementBlockRegex.exec(text);
+                
+                let replacementRaw = '';
+                if (repMatch) {
+                    replacementRaw = repMatch[1].trim();
+                } else {
+                    // Fallback a comportamiento heredado: todo el texto después de [/original] o [[/original]]
+                    let origCloseIdx = text.toLowerCase().indexOf('[[/original]]');
+                    let tagLength = '[[/original]]'.length;
+                    if (origCloseIdx === -1) {
+                        origCloseIdx = text.toLowerCase().indexOf('[/original]');
+                        tagLength = '[/original]'.length;
+                    }
+                    if (origCloseIdx !== -1) {
+                        replacementRaw = text.substring(origCloseIdx + tagLength).trim();
+                        // Clean up any other trailing metadata bracket if present
+                        replacementRaw = replacementRaw.replace(/^\s*\[+([a-záéíóúüñ\-_]+)\s*:\s*([^\]]+)\]+/gim, '').trim();
+                    } else {
+                        replacementRaw = bodyText;
+                    }
+                }
+                
+                finalParsed.replacement = plainTextToHtml(replacementRaw).trim();
+                finalParsed.replacementText = replacementRaw;
                 finalParsed.context = parsed.contexto || parsed.context || '';
             } else if (type === 'section' || type === 'scene') {
                 finalParsed.html = plainTextToHtml(bodyText).trim();
@@ -1465,6 +1563,38 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
             context: parsed.context || '',
         }];
         return blocks;
+    }
+
+    // ── Multi-patch response (múltiples fragmentos modificados) ──
+    if (responseType === 'multi_patch' && parsed.patches) {
+        return parsed.patches.map(patch => {
+            // Para multi-patch, SIEMPRE intentar resolver el destino individualmente
+            // desde el [[DESTINO]] del propio bloque del parche, ignorando el destinationDoc
+            // configurado externamente (que apuntaría a un único documento)
+            let dest = { mode: 'auto' };
+
+            if (patch.target) {
+                const resolved = resolveTargetDoc(patch.target, chapters, worldItems);
+                if (resolved) {
+                    dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
+                } else {
+                    // Si no se pudo resolver, usar el target como nombre visible pero sin docId
+                    dest = { mode: 'auto', docTitle: patch.target };
+                }
+            }
+
+            return {
+                docType: dest.docType || null,
+                docId: dest.docId || null,
+                mode: dest.mode || 'auto',
+                title: dest.docTitle || patch.target || 'Fragmento',
+                content: patch.replacement,
+                original: patch.original,
+                responseType: 'patch',
+                isPatch: true,
+                context: patch.context || '',
+            };
+        });
     }
 
     // ── Content response (documento completo o parcial) ──
@@ -1834,13 +1964,13 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
     if (dest.mode === 'new') {
         return {
             docDescription: 'Nuevo documento',
-            contentInstruction: `Genera el contenido en texto plano limpio completo del nuevo documento. Sugiere un título dentro del bloque de metadatos inicial como [TÍTULO: Tu Título].`,
+            contentInstruction: `Genera el contenido en texto plano limpio completo del nuevo documento. Sugiere un título dentro del bloque de metadatos inicial como [[TÍTULO: Tu Título]].`,
             targetsStr,
         };
     }
     return {
         docDescription: 'Automático (La IA determina el destino)',
-        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc o a un capítulo específico, indica el título exacto de ese documento dentro del bloque de metadatos inicial como [DESTINO: Nombre Exacto] (ej. [DESTINO: Personajes]).${targetsStr}`,
+        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc o a un capítulo específico, indica el título exacto de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]]).${targetsStr}`,
         targetsStr,
     };
 };
@@ -1863,9 +1993,9 @@ export const buildSystemPrompt = (action, context, destinationDoc, activeChapter
 ${contentInstruction}
 
 ESTRATEGIA DE RESPUESTA:
-- ¿Crear desde cero? → usa [ÁMBITO: completo] devolviendo todo el documento en texto plano limpio.
-- ¿Modificar contenido existente? → usa [ÁMBITO: parcial] si solo cambias algunas secciones; [ÁMBITO: completo] si reescribes la mayoría del documento.
-- ¿Expandir/Añadir? → usa [ÁMBITO: parcial] devolviendo SOLO las secciones añadidas/modificadas.
+- ¿Crear desde cero? → usa [[ÁMBITO: completo]] devolviendo todo el documento en texto plano limpio.
+- ¿Modificar contenido existente? → usa [[ÁMBITO: parcial]] si solo cambias algunas secciones; [[ÁMBITO: completo]] si reescribes la mayoría del documento.
+- ¿Expandir/Añadir? → usa [[ÁMBITO: parcial]] devolviendo SOLO las secciones añadidas/modificadas.
 
 ⚠️ DIRECTRICES DE FIDELIDAD NARRATIVA:
 - NUNCA resumas, omitas ni abrevies la información que sí devuelves.
@@ -1884,7 +2014,7 @@ ${context}`,
 
 ${dest.mode === 'auto' ? `INSTRUCCIÓN DE DESTINO:
 Como el destino es automático, debes determinar a qué capítulo o sección del Master Doc va dirigida esta corrección.
-Indica obligatoriamente el título exacto de ese documento dentro del bloque de metadatos inicial como [DESTINO: Nombre Exacto] (ej. [DESTINO: Personajes]).
+Indica obligatoriamente el título exacto de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]]).
 
 ${targetsStr}` : ''}
 
@@ -1908,7 +2038,7 @@ ${context}`,
 Estás asistiendo activamente en la creación de un capítulo escena por escena de manera conversacional y altamente colaborativa.
 
 Tu objetivo actual es planificar, debatir o redactar la escena actual en diálogo constante con el escritor:
-1. Si el escritor está debatiendo ideas, haciendo preguntas, pidiendo sugerencias o planificando el enfoque de la escena, responde en tono de mentor creativo y de forma conversacional. Propón alternativas interesantes, haz de 1 a 3 preguntas estratégicas cortas (por ejemplo: ¿desde la perspectiva de quién narramos?, ¿cuál es el conflicto de esta escena?, ¿qué detalles de lore del Master Doc queremos introducir?). Para esta fase conversacional, tu respuesta debe ser del tipo de metadatos [TIPO: sugerencia].
+1. Si el escritor está debatiendo ideas, haciendo preguntas, pidiendo sugerencias o planificando el enfoque de la escena, responde en tono de mentor creativo y de forma conversacional. Propón alternativas interesantes, haz de 1 a 3 preguntas estratégicas cortas (por ejemplo: ¿desde la perspectiva de quién narramos?, ¿cuál es el conflicto de esta escena?, ¿qué detalles de lore del Master Doc queremos introducir?). Para esta fase conversacional, tu respuesta debe ser del tipo de metadatos [[TIPO: sugerencia]].
 2. Si el escritor te pide redactar la escena de forma explícita ("escribe la escena", "redacta la escena", etc.) o si se presiona el atajo de redactar, debes generar la prosa narrativa final de la escena.
 
 ${getActionTechnicalDescription('escena')}
@@ -1925,7 +2055,7 @@ Lleva a cabo un análisis del contexto proporcionado.
 INSTRUCCIÓN CRÍTICA DE INCONSISTENCIAS — FORMATO ESTRICTO:
 Si el escritor te solicita explícitamente auditar la coherencia, buscar inconsistencias, contradicciones, vacíos, huecos de lore o dudas entre el Master Doc y sus capítulos:
 1. Realiza una auditoría sumamente detallada.
-2. Responde estrictamente usando [TIPO: inconsistencias].
+2. Responde estrictamente usando [[TIPO: inconsistencias]].
 3. CADA inconsistencia debe usar el formato de doble corchete ESTRUCTURADO con [[inconsistencia id="N" archivos="..."]].
 4. Siempre proporciona al menos 2 opciones de solución por inconsistencia.
 
@@ -1944,7 +2074,7 @@ Si el escritor te solicita explícitamente auditar la coherencia, buscar inconsi
    [[/inconsistencia]]
 
 De lo contrario, para análisis de estilo, gramática, ritmo, tono o estructura:
-1. Responde con [TIPO: analisis].
+1. Responde con [[TIPO: analisis]].
 2. Escribe tu retroalimentación en texto plano claro y estructurado con saltos de línea dobles (\\n\\n).
 
 ${getActionTechnicalDescription('analizar')}
@@ -1977,9 +2107,9 @@ Estás guiando al escritor en la creación de un personaje nuevo en un proceso p
 Tu objetivo es:
 1. Haz preguntas estratégicas una a la vez (nunca más de 2-3 por turno) para ir construyendo el personaje de forma orgánica: nombre, rol/apariencia, personalidad/rasgos, historia/motivación, arco narrativo.
 2. Cuando tengas suficiente información, resume el perfil completo del personaje usando:
-[TIPO: contenido]
-[ÁMBITO: completo]
-[DESTINO: Personajes]
+[[TIPO: contenido]]
+[[ÁMBITO: completo]]
+[[DESTINO: Personajes]]
 El contenido debe ser una ficha de personaje en texto plano bien estructurada, con secciones separadas por \\n\\n.
 3. Sé creativo y sugiere ideas interesantes, pero respeta las decisiones del escritor.
 
@@ -1997,8 +2127,8 @@ ${context}`,
 El escritor ha detectado y seleccionado una solución para una inconsistencia de lore.
 Tu tarea es modificar SOLO las secciones afectadas de los documentos, preservando TODO el resto del contenido intacto.
 
-⚠️ REGLA CRÍTICA: NUNCA uses [ÁMBITO: completo]. Siempre usa [ÁMBITO: parcial].
-⚠️ Si el cambio es pequeño y localizado, prefiere [TIPO: fragmento] con el bloque [ORIGINAL].
+⚠️ REGLA CRÍTICA: NUNCA uses [[ÁMBITO: completo]]. Siempre usa [[ÁMBITO: parcial]].
+⚠️ Si el cambio es pequeño y localizado, prefiere [[TIPO: fragmento]] con el bloque [[ORIGINAL]].
 ⚠️ Si modificas múltiples documentos, devuelve bloques consecutivos con sus respectivos metadatos.
 
 ${getActionTechnicalDescription('inconsistencia')}
@@ -2013,14 +2143,14 @@ ${context}`,
 Responde de forma natural, conversacional y directa. No esperes un visor de diferencias ni estructures la respuesta para edición.
 
 Auto-determina el tipo de respuesta según la pregunta:
-- ¿Duda/Pregunta/Explicación sobre el lore? → [TIPO: sugerencia] o texto plano
+- ¿Duda/Pregunta/Explicación sobre el lore? → [[TIPO: sugerencia]] o texto plano
 - ¿Crear algo rápido (un nombre, un dato)? → texto plano sin estructura de destino
-- ¿Analizar algo? → [TIPO: analisis]
-- ¿Buscar inconsistencias? → [TIPO: inconsistencias] con formato [[ ]]
+- ¿Analizar algo? → [[TIPO: analisis]]
+- ¿Buscar inconsistencias? → [[TIPO: inconsistencias]] con formato [[ ]]
 - ¿Consultar un detalle del contexto? → texto plano directo
 
 ⚠️ IMPORTANTE:
-- NO uses [DESTINO:] ni [ÁMBITO:] — esto es un chat, no edición de documentos.
+- NO uses [[DESTINO:]] ni [[ÁMBITO:]] — esto es un chat, no edición de documentos.
 - No esperes que se muestre un visor de diferencias.
 - Puedes usar emojis de forma sutil y natural si es relevante.
 
