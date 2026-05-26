@@ -648,6 +648,9 @@ export const DataProvider = ({ children }) => {
     const handleUpdateWorldItem = async (itemId, updateData) => {
         if (!activeBook) return;
         setWorldItems(prev => prev.map(item => item.id === itemId ? { ...item, ...updateData } : item));
+        if (activeWorldDoc && activeWorldDoc.id === itemId) {
+            setActiveWorldDoc(prev => ({ ...prev, ...updateData }));
+        }
 
         const saveKey = `world_${itemId}`;
         if (pendingSaves.current[saveKey]) {

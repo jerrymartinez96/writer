@@ -564,7 +564,7 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
                             </h3>
                             {currentBlock.title && (
                                 <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500">
-                                    {isPatchMode ? '✂️ Modo Patch' : isSectionMode ? `📄 ${accumulatedSections.length} sección(es) listas` : `Destino: ${currentBlock.title}`}
+                                    {isPatchMode ? `✂️ Modo Patch · Destino: ${currentBlock.title}` : isSectionMode ? `📄 ${accumulatedSections.length} sección(es) listas · Destino: ${currentBlock.title}` : `Destino: ${currentBlock.title}`}
                                 </p>
                             )}
                         </div>

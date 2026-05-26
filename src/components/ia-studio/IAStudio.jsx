@@ -53,8 +53,8 @@ const sanitizeMessageForHistory = (content) => {
 
 const IAStudio = () => {
     const {
-        activeBook, activeChapter, chapters, characters, worldItems,
-        saveChapterContent, updateChapter, updateWorldItem, createChapter,
+        activeBook, activeChapter, activeWorldDoc, chapters, characters, worldItems,
+        saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter,
         profile, updateBookData, lazyLoadChapters,
     } = useData();
 
@@ -187,7 +187,7 @@ const IAStudio = () => {
         const actionableBlocks = parsedBlocks.filter(b => b.mode !== 'text');
         if (actionableBlocks.length === 0) return;
 
-        const blocks = actionableBlocks.map(block => {
+        const blocks = actionableBlocks.map((block, idx) => {
             let currentContent = '';
             let title = block.title || 'Documento';
 
@@ -195,9 +195,12 @@ const IAStudio = () => {
                 const doc = findDestinationDoc(block, chapters, worldItems);
                 currentContent = doc?.content || '';
                 title = block.title || doc?.title || 'Documento';
-            } else if (block.mode === 'auto' && activeChapter) {
-                currentContent = activeChapter.content || '';
-                title = block.title || activeChapter.title || 'Capítulo activo';
+            } else if (block.mode === 'auto') {
+                const activeDoc = activeChapter || activeWorldDoc;
+                if (activeDoc) {
+                    currentContent = activeDoc.content || '';
+                    title = block.title || activeDoc.title || activeDoc.name || 'Documento activo';
+                }
             }
 
             let proposedContent = block.content;
@@ -241,7 +244,7 @@ const IAStudio = () => {
 
         lastParsedBlocksRef.current = blocks;
         setDiffBlocks(blocks);
-    }, [chapters, worldItems, activeChapter]);
+    }, [chapters, worldItems, activeChapter, activeWorldDoc]);
 
 
     // Get API key
@@ -257,15 +260,222 @@ const IAStudio = () => {
 
     // Send message
     const handleSend = useCallback(async (userMessage, overrideAction = null) => {
-        const apiKey = getApiKey();
         let effectiveAction = overrideAction || selectedAction;
 
         // BUG FIX: Si el Modo Extenso (Secciones) está activo, forzamos la acción
         // efectiva a 'seccion' para activar el prompt y parser correctos.
         if (effectiveAction === 'escribir' && sectionMode) {
-
             effectiveAction = 'seccion';
         }
+
+        // --- MOCK INTERCEPTOR PARA SEGUIMIENTO Y TESTEO ---
+        if (userMessage.trim().startsWith('/mock')) {
+            const trimmedMessage = userMessage.trim();
+            const mockArgs = trimmedMessage.substring(5).trim(); // Remueve "/mock"
+            
+            let mockType = 'content';
+            let targetDocName = '';
+            
+            if (mockArgs.startsWith('patch')) {
+                mockType = 'patch';
+                targetDocName = mockArgs.substring(5).trim();
+            } else if (mockArgs.startsWith('section')) {
+                mockType = 'section';
+                targetDocName = mockArgs.substring(7).trim();
+            } else if (mockArgs.startsWith('scene')) {
+                mockType = 'scene';
+                targetDocName = mockArgs.substring(5).trim();
+            } else if (mockArgs.startsWith('content')) {
+                mockType = 'content';
+                targetDocName = mockArgs.substring(7).trim();
+            } else {
+                mockType = 'content';
+                targetDocName = mockArgs;
+            }
+            
+            // Buscar documento por título o ID
+            let targetDoc = null;
+            if (targetDocName) {
+                const searchName = targetDocName.toLowerCase().trim();
+                targetDoc = chapters?.find(c => c.title?.toLowerCase() === searchName || c.id === targetDocName) ||
+                            worldItems?.find(w => w.title?.toLowerCase() === searchName || w.id === targetDocName);
+            }
+            
+            // Si no se encuentra, usar el activo
+            if (!targetDoc) {
+                targetDoc = activeChapter || activeWorldDoc;
+            }
+            
+            const docTitle = targetDoc?.title || targetDoc?.name || 'Capítulo Activo';
+            const docContent = targetDoc?.content || '<p>Érase una vez en un reino muy lejano...</p>';
+            
+            const userMsgId = generateMsgId();
+            const aiMsgId = generateMsgId();
+            
+            const userMsg = { id: userMsgId, role: 'user', content: userMessage, timestamp: Date.now() };
+            const aiMsg = { id: aiMsgId, role: 'assistant', content: 'Generando simulación...', isStreaming: true, timestamp: Date.now() };
+            
+            setMessages(prev => [...prev, userMsg, aiMsg]);
+            if (activeSession) {
+                SessionManager.addMessage(activeSession.id, userMsg);
+                SessionManager.addMessage(activeSession.id, aiMsg);
+                setSessions(SessionManager.getSessions());
+            }
+            
+            setIsLoading(true);
+            await new Promise(resolve => setTimeout(resolve, 800)); // Simular latencia de red
+            
+            let fakeResponse = '';
+            
+            if (mockType === 'patch') {
+                // Modo Patch: extraer un fragmento del texto activo y añadirle el paréntesis con el nombre al final
+                // Usamos cleanHtmlToPlainText para preservar los saltos de párrafo/línea en el texto plano
+                let plainText = cleanHtmlToPlainText(docContent);
+                let originalFragment = '';
+                
+                if (plainText.length > 50) {
+                    // Tomar los primeros 3 párrafos del texto para simular un fragmento multi-párrafo real
+                    const paragraphs = plainText.split(/\n\n+/);
+                    if (paragraphs.length > 1) {
+                        originalFragment = paragraphs.slice(0, 3).join('\n\n');
+                    } else {
+                        const sentences = plainText.split(/[.!?]/);
+                        originalFragment = sentences.find(s => s.trim().length > 10)?.trim() || plainText.substring(0, 80);
+                    }
+                } else {
+                    originalFragment = plainText || 'el texto original';
+                }
+                
+                const replacementText = `${originalFragment} (prueba de ${docTitle})`;
+                fakeResponse = `<response_type>patch</response_type>
+<target_doc>${docTitle}</target_doc>
+<context>Corrección de prueba simulada para ${docTitle}</context>
+<original>${originalFragment}</original>
+<replacement_text>${replacementText}</replacement_text>`;
+            } else if (mockType === 'section') {
+                const updatedContent = `${docContent} <p>(prueba de ${docTitle})</p>`;
+                fakeResponse = `<response_type>section</response_type>
+<target_doc>${docTitle}</target_doc>
+<section_index>1</section_index>
+<total_sections>1</total_sections>
+<title>Sección de Pruebas en ${docTitle}</title>
+<content_text>${updatedContent.replace(/<[^>]*>/g, '\n').trim()}</content_text>`;
+            } else if (mockType === 'scene') {
+                const updatedContent = `${docContent} <p>(prueba de ${docTitle})</p>`;
+                fakeResponse = `<response_type>scene</response_type>
+<target_doc>${docTitle}</target_doc>
+<section_index>1</section_index>
+<title>Escena de Pruebas en ${docTitle}</title>
+<content_text>${updatedContent.replace(/<[^>]*>/g, '\n').trim()}</content_text>`;
+            } else {
+                const updatedContent = `${docContent} <p>(prueba de ${docTitle})</p>`;
+                fakeResponse = `<response_type>content</response_type>
+<target_doc>${docTitle}</target_doc>
+<title>${docTitle} (Prueba)</title>
+<content_text>${updatedContent.replace(/<[^>]*>/g, '\n').trim()}</content_text>`;
+            }
+            
+            let streamResponseType = 'analysis';
+            if (mockType === 'patch') streamResponseType = 'patch';
+            else if (mockType === 'section') streamResponseType = 'section';
+            else if (mockType === 'scene') streamResponseType = 'scene';
+            else if (mockType === 'content') streamResponseType = 'content';
+            
+            setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { ...m, content: fakeResponse, responseType: streamResponseType } : m
+            ));
+            
+            if (activeSession) {
+                SessionManager.updateLastAssistantMessage(activeSession.id, fakeResponse, false, streamResponseType);
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 400));
+            
+            const parsedBlocks = parseDestinationsFromResponse(fakeResponse, destinationDoc, chapters, worldItems);
+            const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
+            const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
+            const patchBlocks = parsedBlocks.filter(b => b.isPatch);
+            const sectionBlocks = parsedBlocks.filter(b => b.isSection);
+            const sceneBlocks = parsedBlocks.filter(b => b.isScene);
+            
+            let displayContent = fakeResponse;
+            let responseType = streamResponseType;
+            
+            if (patchBlocks.length > 0) {
+                responseType = 'patch';
+                const patch = patchBlocks[0];
+                const originalPreview = (patch.original || '').substring(0, 120);
+                const replacementWords = cleanText(patch.content || '').split(/\s+/).filter(Boolean).length;
+                displayContent = `✂️ **Fragmento editado (MOCK)** — ${replacementWords} palabras en el reemplazo\n\n${patch.context ? `> ${patch.context}` : ''}`;
+                if (originalPreview) {
+                    displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
+                }
+            } else if (sceneBlocks.length > 0) {
+                responseType = 'scene';
+                const scene = sceneBlocks[0];
+                const wordCount = cleanText(scene.content || '').split(/\s+/).filter(Boolean).length;
+                displayContent = `🎬 **Escena (MOCK) ${scene.sceneIndex || 1}: ${scene.titleOriginal || 'Nueva Escena'}** generada — ${wordCount} palabras`;
+            } else if (sectionBlocks.length > 0) {
+                responseType = 'section';
+                const section = sectionBlocks[0];
+                const wordCount = cleanText(section.content || '').split(/\s+/).filter(Boolean).length;
+                displayContent = `📄 **Sección (MOCK) ${section.sectionIndex} de ${section.totalSections}** generada — ${wordCount} palabras`;
+                
+                const newSection = { sectionIndex: section.sectionIndex, html: section.content, title: section.title };
+                setAccumulatedSections(prev => {
+                    const updated = [...prev.filter(s => s.sectionIndex !== section.sectionIndex), newSection];
+                    return updated.sort((a, b) => a.sectionIndex - b.sectionIndex);
+                });
+            } else if (htmlBlocks.length > 0) {
+                responseType = 'content';
+                const parsed = tryParseAIJsonExported(fakeResponse);
+                if (parsed?.html) {
+                    const preview = cleanText(parsed.html);
+                    displayContent = preview.substring(0, 400) + (preview.length > 400 ? '…' : '');
+                } else {
+                    displayContent = htmlBlocks.map(b => {
+                        const actionLabel = b.mode === 'new' ? '🆕 Nuevo documento' : `✏️ ${b.title}`;
+                        return actionLabel;
+                    }).join('\n');
+                }
+            }
+            
+            setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { 
+                    ...m, 
+                    content: displayContent, 
+                    rawResponse: fakeResponse, 
+                    isStreaming: false, 
+                    responseType,
+                    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+                } : m
+            ));
+            
+            if (activeSession) {
+                SessionManager.updateLastAssistantMessage(
+                    activeSession.id, 
+                    displayContent, 
+                    true, 
+                    responseType, 
+                    fakeResponse, 
+                    { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+                    undefined
+                );
+                setActiveSession(SessionManager.getSession(activeSession.id));
+                setSessions(SessionManager.getSessions());
+            }
+            
+            const shouldShowDiff = htmlBlocks.length > 0 || patchBlocks.length > 0 || sectionBlocks.length > 0 || sceneBlocks.length > 0;
+            if (shouldShowDiff) {
+                handleShowDiff(parsedBlocks);
+            }
+            
+            setIsLoading(false);
+            return;
+        }
+        // --- FIN MOCK INTERCEPTOR ---
+
+        const apiKey = getApiKey();
 
         if (!apiKey) {
             const apiName = selectedApi === 'google_direct' ? 'Google' : selectedApi === 'deepseek' ? 'DeepSeek' : 'OpenRouter';
@@ -327,7 +537,7 @@ const IAStudio = () => {
             effectiveAction,
             contextText,
             destinationDoc,
-            activeChapter,
+            activeChapter || activeWorldDoc,
             extraOptions
         );
 
@@ -667,7 +877,7 @@ const IAStudio = () => {
                 'inconsistencia',
                 contextText,
                 destinationDoc,
-                activeChapter,
+                activeChapter || activeWorldDoc,
                 extraOptions
             );
 
@@ -800,15 +1010,17 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
         }
 
         blocks.forEach((block, idx) => {
-            if (block.mode === 'text') return;
+            if (block.mode === 'text') {
+                return;
+            }
 
             // ── Patch mode ──
             if (block.isPatch) {
                 const targetDoc = block.mode === 'manual' && block.docId
                     ? findDestinationDoc(block, chapters, worldItems)
-                    : (activeChapter || null);
+                    : (activeChapter || activeWorldDoc || null);
 
-                const targetHtml = targetDoc?.content || activeChapter?.content || '';
+                const targetHtml = targetDoc?.content || activeChapter?.content || activeWorldDoc?.content || '';
                 const { success, html: patchedHtml, method } = applyPatch(targetHtml, block.original, block.proposedContent);
 
                 if (!success) {
@@ -828,10 +1040,18 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                             updateChapter(block.docId, { content: patchedHtml });
                         }
                     } else if (block.docType === 'worldItem') {
-                        updateWorldItem(block.docId, { content: patchedHtml });
+                        if (block.docId === activeWorldDoc?.id) {
+                            saveWorldDocContent(patchedHtml);
+                        } else {
+                            updateWorldItem(block.docId, { content: patchedHtml });
+                        }
                     }
-                } else if (activeChapter) {
-                    saveChapterContent(patchedHtml);
+                } else {
+                    if (activeChapter) {
+                        saveChapterContent(patchedHtml);
+                    } else if (activeWorldDoc) {
+                        saveWorldDocContent(patchedHtml);
+                    }
                 }
                 return;
             }
@@ -856,11 +1076,21 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                         } else {
                             updateChapter(block.docId, { content: htmlContent });
                         }
+                    } else if (block.docType === 'worldItem') {
+                        if (block.docId === activeWorldDoc?.id) {
+                            saveWorldDocContent(htmlContent);
+                        } else {
+                            updateWorldItem(block.docId, { content: htmlContent });
+                        }
                     }
-                } else if (activeChapter) {
-                    saveChapterContent(htmlContent);
                 } else {
-                    createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
+                    if (activeChapter) {
+                        saveChapterContent(htmlContent);
+                    } else if (activeWorldDoc) {
+                        saveWorldDocContent(htmlContent);
+                    } else {
+                        createChapter({ title: block.title || 'Nuevo capítulo', content: htmlContent });
+                    }
                 }
                 return;
             }
@@ -869,7 +1099,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
             if (block.isScene) {
                 const targetDoc = block.mode === 'manual' && block.docId
                     ? findDestinationDoc(block, chapters, worldItems)
-                    : (activeChapter || null);
+                    : (activeChapter || activeWorldDoc || null);
 
                 const currentHtml = targetDoc?.content || '';
                 const sceneHtml = ensureHtmlFormat(block.proposedContent);
@@ -890,12 +1120,20 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                             updateChapter(block.docId, { content: combinedHtml });
                         }
                     } else if (block.docType === 'worldItem') {
-                        updateWorldItem(block.docId, { content: combinedHtml });
+                        if (block.docId === activeWorldDoc?.id) {
+                            saveWorldDocContent(combinedHtml);
+                        } else {
+                            updateWorldItem(block.docId, { content: combinedHtml });
+                        }
                     }
-                } else if (activeChapter) {
-                    saveChapterContent(combinedHtml);
                 } else {
-                    createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
+                    if (activeChapter) {
+                        saveChapterContent(combinedHtml);
+                    } else if (activeWorldDoc) {
+                        saveWorldDocContent(combinedHtml);
+                    } else {
+                        createChapter({ title: block.title || 'Nuevo capítulo', content: combinedHtml });
+                    }
                 }
                 return;
             }
@@ -911,11 +1149,17 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
                         updateChapter(block.docId, { content: htmlContent });
                     }
                 } else if (block.docType === 'worldItem') {
-                    updateWorldItem(block.docId, { content: htmlContent });
+                    if (block.docId === activeWorldDoc?.id) {
+                        saveWorldDocContent(htmlContent);
+                    } else {
+                        updateWorldItem(block.docId, { content: htmlContent });
+                    }
                 }
             } else if (block.mode === 'auto') {
                 if (activeChapter) {
                     saveChapterContent(htmlContent);
+                } else if (activeWorldDoc) {
+                    saveWorldDocContent(htmlContent);
                 } else {
                     const title = block.title || 'Nuevo capítulo';
                     createChapter({ title, content: htmlContent });
@@ -974,7 +1218,7 @@ Si el cambio es pequeño y localizado, usa [TIPO: fragmento] con el bloque [ORIG
         }
 
         setDiffBlocks(null);
-    }, [saveChapterContent, updateChapter, updateWorldItem, createChapter, activeChapter, chapters, worldItems, accumulatedSections, activeResolution, setMessages, activeSession, setSessions]);
+    }, [saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter, activeChapter, activeWorldDoc, chapters, worldItems, accumulatedSections, activeResolution, setMessages, activeSession, setSessions]);
 
 
     // Export conversation

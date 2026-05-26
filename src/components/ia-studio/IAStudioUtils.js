@@ -780,7 +780,9 @@ export const estimateContextWeight = (chapters, selectedChapterIds, worldItems, 
  * @returns {{ docType: string, docId: string, title: string } | null}
  */
 export const resolveTargetDoc = (targetStr, chapters = [], worldItems = []) => {
-    if (!targetStr || typeof targetStr !== 'string') return null;
+    if (!targetStr || typeof targetStr !== 'string') {
+        return null;
+    }
 
     const norm = targetStr.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
@@ -1451,7 +1453,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
             }
         }
 
-        return [{
+        const blocks = [{
             docType: dest.docType || 'chapter',
             docId: dest.docId || null,
             mode: dest.mode || 'auto',
@@ -1462,6 +1464,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
             isPatch: true,
             context: parsed.context || '',
         }];
+        return blocks;
     }
 
     // ── Content response (documento completo o parcial) ──
@@ -1550,8 +1553,17 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
  * @returns {{ success: boolean, html: string, method: string }}
  */
 export const applyPatch = (chapterHtml, original, replacement) => {
-    if (!chapterHtml || !original) {
+    if (!original) {
         return { success: false, html: chapterHtml, method: 'none' };
+    }
+
+    // Si el documento de destino está vacío, aplicamos el parche directamente como contenido nuevo
+    if (!chapterHtml || chapterHtml.trim() === '' || chapterHtml === '<p></p>') {
+        return {
+            success: true,
+            html: replacement,
+            method: 'empty_document_fallback',
+        };
     }
 
     // 1. Intento exacto en HTML
@@ -1563,7 +1575,150 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         };
     }
 
-    // 2. Búsqueda por texto plano normalizado
+    // 2. Tokenización y búsqueda por secuencia de palabras exacta/fuzzy (multi-párrafo)
+    try {
+        const tokenizeHtml = (html) => {
+            const tokens = [];
+            let i = 0;
+            const len = html.length;
+
+            while (i < len) {
+                const char = html[i];
+                if (char === '<') {
+                    const endIdx = html.indexOf('>', i);
+                    if (endIdx !== -1) {
+                        tokens.push({ type: 'tag', text: html.substring(i, endIdx + 1), index: i });
+                        i = endIdx + 1;
+                        continue;
+                    }
+                }
+                if (/\s/.test(char)) {
+                    let start = i;
+                    while (i < len && /\s/.test(html[i])) i++;
+                    tokens.push({ type: 'whitespace', text: html.substring(start, i), index: start });
+                    continue;
+                }
+                let start = i;
+                while (i < len && html[i] !== '<' && !/\s/.test(html[i])) i++;
+                tokens.push({ type: 'word', text: html.substring(start, i), index: start });
+            }
+            return tokens;
+        };
+
+        const normalizeWord = (w) => {
+            return w.trim().toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9]/g, "");
+        };
+
+        const htmlTokens = tokenizeHtml(chapterHtml);
+        const htmlWords = [];
+        for (let idx = 0; idx < htmlTokens.length; idx++) {
+            const t = htmlTokens[idx];
+            if (t.type === 'word') {
+                const norm = normalizeWord(t.text);
+                if (norm) {
+                    htmlWords.push({
+                        normalized: norm,
+                        tokenIndex: idx,
+                        charIndex: t.index
+                    });
+                }
+            }
+        }
+
+        const originalTokens = tokenizeHtml(original);
+        const originalWords = [];
+        for (const t of originalTokens) {
+            if (t.type === 'word') {
+                const norm = normalizeWord(t.text);
+                if (norm) originalWords.push(norm);
+            }
+        }
+
+        if (originalWords.length > 0 && htmlWords.length >= originalWords.length) {
+            let matchStartIndex = -1;
+            let matchEndIndex = -1;
+            const wordLen = originalWords.length;
+
+            // Búsqueda exacta de secuencia
+            for (let i = 0; i <= htmlWords.length - wordLen; i++) {
+                let match = true;
+                for (let j = 0; j < wordLen; j++) {
+                    if (htmlWords[i + j].normalized !== originalWords[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    matchStartIndex = htmlWords[i].tokenIndex;
+                    matchEndIndex = htmlWords[i + wordLen - 1].tokenIndex;
+                    break;
+                }
+            }
+
+            // Fallback: Búsqueda difusa de secuencia
+            if (matchStartIndex === -1) {
+                let bestScore = 0;
+                let bestStart = -1;
+                let bestEnd = -1;
+
+                for (let i = 0; i <= htmlWords.length - wordLen; i++) {
+                    let score = 0;
+                    for (let j = 0; j < wordLen; j++) {
+                        if (htmlWords[i + j].normalized === originalWords[j]) {
+                            score++;
+                        }
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestStart = htmlWords[i].tokenIndex;
+                        bestEnd = htmlWords[i + wordLen - 1].tokenIndex;
+                    }
+                }
+
+                if (bestScore / wordLen >= 0.70) {
+                    matchStartIndex = bestStart;
+                    matchEndIndex = bestEnd;
+                }
+            }
+
+            if (matchStartIndex !== -1 && matchEndIndex !== -1) {
+                const startCharIndex = htmlTokens[matchStartIndex].index;
+                const endToken = htmlTokens[matchEndIndex];
+                const endCharIndex = endToken.index + endToken.text.length;
+
+                // Si el reemplazo está completamente envuelto en un tag <p>...</p>, lo removemos para evitar
+                // anidación de párrafos y saltos de línea innecesarios al inyectar en el HTML existente.
+                let cleanReplacement = replacement;
+                const trimmedRep = replacement.trim();
+                if (trimmedRep.toLowerCase().startsWith('<p>') && trimmedRep.toLowerCase().endsWith('</p>')) {
+                    // Extraer el contenido interior
+                    cleanReplacement = trimmedRep.substring(3, trimmedRep.length - 4);
+                } else if (trimmedRep.toLowerCase().startsWith('<p ') && trimmedRep.toLowerCase().endsWith('</p>')) {
+                    const firstClose = trimmedRep.indexOf('>');
+                    if (firstClose !== -1) {
+                        cleanReplacement = trimmedRep.substring(firstClose + 1, trimmedRep.length - 4);
+                    }
+                }
+
+                const newHtml = chapterHtml.substring(0, startCharIndex)
+                    + cleanReplacement
+                    + chapterHtml.substring(endCharIndex);
+
+                return {
+                    success: true,
+                    html: newHtml,
+                    method: 'word_sequence_mapping'
+                };
+            }
+        }
+    } catch (err) {
+        // Ignorar silenciado en producción
+    }
+
+    // 3. Búsqueda difusa por párrafos individuales (Legacy fallback)
     const originalClean = cleanText(original).toLowerCase().replace(/\s+/g, ' ').trim();
 
     // Extraer párrafos del HTML del capítulo
@@ -1601,7 +1756,6 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         return { success: true, html: newHtml, method: 'fuzzy_paragraph' };
     }
 
-    // 3. Fallback: no encontrado — retornar sin cambios
     return { success: false, html: chapterHtml, method: 'not_found' };
 };
 
@@ -1727,6 +1881,12 @@ ${context}`,
 
 🎯 ACCIÓN: EDITAR FRAGMENTO (patch mode).
 📌 Destino: ${docDescription}
+
+${dest.mode === 'auto' ? `INSTRUCCIÓN DE DESTINO:
+Como el destino es automático, debes determinar a qué capítulo o sección del Master Doc va dirigida esta corrección.
+Indica obligatoriamente el título exacto de ese documento dentro del bloque de metadatos inicial como [DESTINO: Nombre Exacto] (ej. [DESTINO: Personajes]).
+
+${targetsStr}` : ''}
 
 El usuario ha seleccionado un fragmento específico de su texto para que lo modifiques.
 Tu tarea es:

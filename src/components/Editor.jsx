@@ -744,7 +744,7 @@ const Editor = () => {
                 setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
             }
         }
-    }, [activeChapter?.id, activeChapter?.lastSyncToken, activeWorldDoc?.id, editor]);
+    }, [activeChapter?.id, activeChapter?.content, activeChapter?.lastSyncToken, activeWorldDoc?.id, activeWorldDoc?.content, editor]);
 
     // Handle Editable state (Focus Mode + Real-time Lock + Finalized Status)
     useEffect(() => {

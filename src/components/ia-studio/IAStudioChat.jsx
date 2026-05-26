@@ -72,6 +72,70 @@ const IAStudioChat = ({
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [editSessionName, setEditSessionName] = useState('');
 
+    // --- COMANDOS MOCK DE PRUEBA ---
+    const COMMANDS = [
+        { id: '/mock patch', label: '✂️ /mock patch', description: 'Simular patch (fragmento)' },
+        { id: '/mock section', label: '📄 /mock section', description: 'Simular sección de capítulo' },
+        { id: '/mock scene', label: '🎬 /mock scene', description: 'Simular escena agregada' },
+        { id: '/mock content', label: '✏️ /mock content', description: 'Simular contenido completo' }
+    ];
+
+    const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
+    const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+
+    const getFilteredCommands = () => {
+        const trimmedVal = inputValue.toLowerCase().trim();
+        
+        // Expresión regular para detectar si están escribiendo "/mock [cmd] [doc]" o si acaban de escribir "/mock [cmd]"
+        const matchMockCmd = /^\/mock\s+(patch|section|scene|content)\s+(.*)/i.exec(inputValue);
+        const matchMockStart = /^\/mock\s+(patch|section|scene|content)\s*$/i.test(inputValue);
+        
+        if (matchMockCmd || matchMockStart) {
+            const cmdType = matchMockCmd ? matchMockCmd[1].toLowerCase() : inputValue.trim().split(/\s+/)[1].toLowerCase();
+            const filterDocName = matchMockCmd ? matchMockCmd[2].toLowerCase() : '';
+            
+            const docs = [
+                ...(chapters || []).filter(c => !c.isVolume).map(c => ({ id: c.title, label: c.title, type: 'chapter' })),
+                ...(worldItems || []).map(w => ({ id: w.title, label: w.title, type: 'world' }))
+            ];
+            
+            const filteredDocs = docs.filter(d => d.label.toLowerCase().includes(filterDocName));
+            
+            return filteredDocs.map(d => ({
+                id: `/mock ${cmdType} ${d.label}`,
+                label: `${cmdType === 'patch' ? '✂️' : cmdType === 'section' ? '📄' : cmdType === 'scene' ? '🎬' : '✏️'} /mock ${cmdType} ${d.label}`,
+                description: `Simular en: ${d.label} (${d.type === 'chapter' ? 'Capítulo' : 'Master Doc'})`
+            }));
+        }
+        
+        return COMMANDS.filter(cmd => 
+            cmd.id.startsWith(inputValue.toLowerCase())
+        );
+    };
+
+    const filteredCommands = getFilteredCommands();
+
+    const isMatch = filteredCommands.length === 1 && filteredCommands[0].id === inputValue;
+    const shouldShowAutocomplete = showCommandAutocomplete && filteredCommands.length > 0 && !isMatch;
+
+    const handleInputChange = (val) => {
+        setInputValue(val);
+        if (val.startsWith('/')) {
+            setShowCommandAutocomplete(true);
+            setSelectedCommandIndex(0);
+        } else {
+            setShowCommandAutocomplete(false);
+        }
+    };
+
+    const selectCommand = (cmdId) => {
+        setInputValue(cmdId + ' ');
+        setShowCommandAutocomplete(false);
+        if (inputRef.current) {
+            inputRef.current.focus();
+        }
+    };
+
     // Conversational Character Creator State
     const { profile, updateWorldItem } = useData();
     const [charFlow, setCharFlow] = useState(null);
@@ -441,6 +505,29 @@ const IAStudioChat = ({
     };
 
     const handleKeyDown = (e) => {
+        if (shouldShowAutocomplete) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+                return;
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                selectCommand(filteredCommands[selectedCommandIndex].id);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setShowCommandAutocomplete(false);
+                return;
+            }
+        }
+
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -1829,6 +1916,35 @@ const IAStudioChat = ({
 
                     {/* Input + Send (unified, fused, responsive) */}
                     <div className="flex items-center gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-3 pr-4 py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
+                        {/* Autocomplete Dropdown de Comandos de Pruebas */}
+                        {shouldShowAutocomplete && (
+                            <div className="absolute bottom-full left-0 mb-3 w-64 bg-[var(--bg-editor)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-50 overflow-hidden p-1.5 space-y-0.5 animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200">
+                                <div className="px-2.5 py-1 text-[8px] font-black text-[var(--text-muted)] uppercase tracking-wider">Comandos de Pruebas</div>
+                                {filteredCommands.map((cmd, idx) => {
+                                    const isSelected = idx === selectedCommandIndex;
+                                    return (
+                                        <button
+                                            key={cmd.id}
+                                            onClick={() => selectCommand(cmd.id)}
+                                            onMouseEnter={() => setSelectedCommandIndex(idx)}
+                                            className={`w-full text-left px-3 py-2 text-xs transition-all flex items-center justify-between rounded-xl border border-transparent ${
+                                                isSelected
+                                                    ? 'bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 font-bold border-indigo-500/20'
+                                                    : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50'
+                                            }`}
+                                        >
+                                            <div className="flex flex-col min-w-0">
+                                                <span className="font-semibold truncate">{cmd.label}</span>
+                                                <span className="text-[9px] text-[var(--text-muted)] opacity-60 truncate">{cmd.description}</span>
+                                            </div>
+                                            {isSelected && (
+                                                <span className="text-[8px] opacity-40 px-1 bg-indigo-500/20 text-indigo-600 rounded">Tab</span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                         {/* Action Selector - Custom Dropdown */}
                         <div className="relative shrink-0 select-none">
                             {(() => {
@@ -1902,9 +2018,9 @@ const IAStudioChat = ({
                             <textarea
                                 ref={inputRef}
                                 value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
+                                onChange={(e) => handleInputChange(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Escribe tu mensaje... (Enter para enviar)"
+                                placeholder="Escribe tu mensaje... (Enter para enviar o '/' para comandos)"
                                 className="flex-1 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
                                 rows={1}
                                 disabled={isLoading}
