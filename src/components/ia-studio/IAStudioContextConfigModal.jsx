@@ -213,8 +213,8 @@ const IAStudioContextConfigModal = ({
                                 </div>
                             </div>
 
-                            {/* Responsive grid of small, ultra-compact selectable cards (fixed 3 columns) */}
-                            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            {/* Responsive grid of small, ultra-compact selectable cards (adaptable columns) */}
+                            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                                 {SYSTEM_WORLD_ITEM_IDS.map(wid => {
                                     const label = SYSTEM_WORLD_ITEM_LABELS[wid] || wid;
                                     const iconMap = { system_personajes: Users, system_estructura: Layers, system_core: Bookmark };

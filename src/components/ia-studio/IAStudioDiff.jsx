@@ -472,8 +472,22 @@ const IAStudioDiff = ({
         ]);
     }
 
+    const [isMobile, setIsMobile] = useState(false);
     const [viewMode, setViewMode] = useState('sidebyside'); // 'semantic' | 'sidebyside'
     const [cherryPickState, setCherryPickState] = useState({ selectedIds: null, groups: null });
+
+    useEffect(() => {
+        const checkMobile = () => {
+            const mobile = window.innerWidth < 640;
+            setIsMobile(mobile);
+            if (mobile) {
+                setViewMode('semantic');
+            }
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     // Memorize cherry-pick callback to avoid React infinite update loop
     const handleCherryPickChange = useCallback((selectedIds, groups) => {
@@ -583,7 +597,7 @@ const IAStudioDiff = ({
 
                     <div className="flex items-center gap-2">
                         {/* View mode toggle — only for regular content */}
-                        {!isPatchMode && !isSectionMode && (
+                        {!isPatchMode && !isSectionMode && !isMobile && (
                             <div className="flex items-center bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl p-0.5 text-[8px] font-black uppercase tracking-widest">
                                 <button
                                     onClick={() => setViewMode('semantic')}
@@ -658,12 +672,12 @@ const IAStudioDiff = ({
                                         </div>
 
                                         {!isMatched && (
-                                            <div className="flex flex-wrap gap-2 shrink-0">
+                                            <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
                                                 {onAutoCorrectPatch && (
                                                     <button
                                                         onClick={() => onAutoCorrectPatch(activeIndex, currentBlock)}
                                                         disabled={isLoadingAutoCorrect}
-                                                        className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center gap-1.5"
+                                                        className="w-full sm:w-auto bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center justify-center gap-1.5"
                                                     >
                                                         {isLoadingAutoCorrect ? (
                                                             <>
@@ -683,7 +697,7 @@ const IAStudioDiff = ({
                                                     <button
                                                         onClick={() => onApplyToSelection(activeIndex, currentBlock)}
                                                         disabled={isLoadingAutoCorrect}
-                                                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center gap-1.5"
+                                                        className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center justify-center gap-1.5"
                                                         title="Sombrea el texto en tu editor y pulsa este botón"
                                                     >
                                                         <GitMerge size={12} />
@@ -791,19 +805,19 @@ const IAStudioDiff = ({
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                         <button
                             onClick={onRegenerate}
-                            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all border border-[var(--border-main)]"
+                            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all border border-[var(--border-main)]"
                         >
-                            <RotateCcw size={13} />
+                            <RotateCcw size={12} />
                             Regenerar
                         </button>
                         <button
                             onClick={handleApply}
-                            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+                            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
                         >
-                            <Check size={13} />
+                            <Check size={12} />
                             {isPatchMode ? 'Aplicar Patch' : isSectionMode ? 'Aplicar Secciones' : 'Aplicar Cambios'}
                         </button>
                     </div>

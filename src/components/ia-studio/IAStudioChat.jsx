@@ -1546,11 +1546,11 @@ const IAStudioChat = ({
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-app)]">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 lg:px-6 py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
-                <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                     <button
                         onClick={() => setShowSettingsModal(true)}
-                        className="group flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)]/75 hover:bg-[var(--accent-soft)] hover:border-indigo-500/30 transition-all shadow-sm active:scale-[0.98] text-left min-w-0"
+                        className="group flex items-center gap-1.5 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)]/75 hover:bg-[var(--accent-soft)] hover:border-indigo-500/30 transition-all shadow-sm active:scale-[0.98] text-left min-w-0"
                         title="Ajustes de la conversación"
                     >
                         <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-600/10 border border-indigo-500/20 group-hover:from-indigo-500 group-hover:to-purple-600 flex items-center justify-center shadow-sm shrink-0 transition-all duration-300">
@@ -1558,7 +1558,7 @@ const IAStudioChat = ({
                         </div>
                         <div className="min-w-0">
                             <span className="block text-[8px] font-black uppercase tracking-wider text-[var(--text-muted)] opacity-60 leading-none">IA Studio</span>
-                            <span className="block text-xs font-black text-[var(--text-main)] truncate max-w-[120px] sm:max-w-[200px] mt-0.5 group-hover:text-indigo-500 transition-colors leading-tight">
+                            <span className="block text-xs font-black text-[var(--text-main)] truncate max-w-[80px] sm:max-w-[200px] mt-0.5 group-hover:text-indigo-500 transition-colors leading-tight">
                                 {activeSession?.name || 'Conversación'}
                             </span>
                         </div>
@@ -1571,13 +1571,13 @@ const IAStudioChat = ({
                     <div className="relative shrink-0">
                         <button
                             onClick={() => setShowModelDropdown(!showModelDropdown)}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] text-[11px] font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--border-main)]/80 transition-all shadow-sm"
+                            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] text-[11px] font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--border-main)]/80 transition-all shadow-sm"
                             title="Cambiar modelo activo"
                         >
-                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none shrink-0">
+                            <span className="px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none shrink-0 hidden xs:inline">
                                 DeepSeek
                             </span>
-                            <span className="truncate max-w-[80px] sm:max-w-[140px] font-medium text-[var(--text-main)]">
+                            <span className="truncate max-w-[65px] sm:max-w-[140px] font-medium text-[var(--text-main)]">
                                 {selectedModelName}
                             </span>
                             <ChevronDown size={12} className="opacity-70 text-[var(--text-muted)] shrink-0" />
@@ -1585,9 +1585,19 @@ const IAStudioChat = ({
                         
                         {showModelDropdown && (
                             <>
-                                <div className="fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
-                                <div className="absolute top-full right-0 mt-1.5 w-64 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-xl z-45 overflow-hidden animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-200 p-1.5 space-y-0.5">
-                                    {/* Reasoning Mode Switch */}
+                                {/* Mobile Bottom Sheet Backdrop */}
+                                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 sm:hidden animate-in fade-in duration-300" onClick={() => setShowModelDropdown(false)} />
+                                
+                                {/* Desktop Backdrop */}
+                                <div className="hidden sm:block fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
+                                
+                                {/* Dropdown / Bottom Sheet Container */}
+                                <div className="fixed bottom-0 left-0 right-0 top-auto w-full rounded-t-3xl border-t border-[var(--border-main)] bg-[var(--bg-editor)] shadow-[0_-10px_40px_rgba(0,0,0,0.35)] z-[100] animate-in slide-in-from-bottom duration-300 p-4 space-y-3 sm:absolute sm:bottom-auto sm:left-auto sm:top-full sm:right-0 sm:mt-1.5 sm:w-64 sm:rounded-2xl sm:border sm:shadow-xl sm:z-45 sm:animate-in sm:fade-in sm:slide-in-from-top-1 sm:zoom-in-95 sm:duration-200 sm:p-1.5 sm:space-y-0.5">
+                                    {/* Bottom Sheet Drag Indicator (only mobile) */}
+                                    <div className="flex justify-center sm:hidden mb-1">
+                                        <div className="w-12 h-1 bg-[var(--border-main)] rounded-full opacity-60" />
+                                    </div>
+                                    
                                     {onReasoningModeChange && (
                                         <div className="px-2.5 py-2 border-b border-[var(--border-main)]/30 space-y-2">
                                             <div className="flex items-center justify-between">
@@ -1650,7 +1660,7 @@ const IAStudioChat = ({
                                                 <button
                                                     key={model.id}
                                                     onClick={() => handleModelSelect(model.id)}
-                                                    className={`w-full text-left px-2.5 py-2 text-[10px] transition-all flex items-center justify-between rounded-xl ${
+                                                    className={`w-full text-left px-2.5 py-2.5 sm:py-2 text-[10px] transition-all flex items-center justify-between rounded-xl ${
                                                         isSelected
                                                             ? 'bg-indigo-500/10 text-indigo-500 font-bold'
                                                             : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'
@@ -1676,15 +1686,7 @@ const IAStudioChat = ({
                         )}
                     </div>
 
-                    {/* Contexto y Destino button */}
-                    <button
-                        onClick={onOpenContext}
-                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-[11px] font-bold text-indigo-500 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition-all shadow-sm shrink-0"
-                        title="Configurar Contexto y Destino"
-                    >
-                        <Sparkles size={12} className="text-indigo-500" />
-                        <span className="hidden sm:inline">Contexto y Destino</span>
-                    </button>
+
 
                     {/* Export button */}
                     {messages.length > 0 && onExport && (
@@ -1723,11 +1725,11 @@ const IAStudioChat = ({
                             </div>
 
                             {/* Contextual Quick Prompts */}
-                            <div className="w-full max-w-xl mx-auto">
+                            <div className="w-full max-w-xl mx-auto px-1">
                                 <p className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 mb-3 text-left pl-1 flex items-center gap-1.5">
                                     <Sparkles size={10} className="text-indigo-500" /> sugerencias contextuales
                                 </p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-left">
+                                <div className="flex overflow-x-auto sm:grid sm:grid-cols-2 gap-2 text-left scrollbar-hide snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
                                     {getContextualPrompts().map((item, idx) => (
                                         <button
                                             key={idx}
@@ -1735,10 +1737,10 @@ const IAStudioChat = ({
                                                 setInputValue(item.prompt);
                                                 if (inputRef.current) inputRef.current.focus();
                                             }}
-                                            className="group flex gap-3 p-3 bg-[var(--bg-editor)] border border-[var(--border-main)]/60 hover:border-indigo-500/40 hover:bg-indigo-500/[0.02] rounded-xl transition-all text-xs text-[var(--text-main)] active:scale-[0.99] shadow-sm hover:shadow"
+                                            className="group flex gap-3 p-3 bg-[var(--bg-editor)] border border-[var(--border-main)]/60 hover:border-indigo-500/40 hover:bg-indigo-500/[0.02] rounded-xl transition-all text-xs text-[var(--text-main)] active:scale-[0.99] shadow-sm hover:shadow shrink-0 w-[240px] sm:w-auto snap-center"
                                         >
                                             <span className="text-base shrink-0 group-hover:scale-110 transition-transform">{item.icon}</span>
-                                            <div className="flex-1 min-w-0">
+                                            <div className="flex-1 min-w-0 text-left">
                                                 <p className="font-semibold truncate text-[11px] group-hover:text-indigo-500 transition-colors">{item.text}</p>
                                                 <p className="text-[9px] text-[var(--text-muted)] opacity-60 truncate mt-0.5">{item.prompt}</p>
                                             </div>
@@ -1768,46 +1770,6 @@ const IAStudioChat = ({
             {/* Input Area */}
             <div className="px-4 lg:px-6 py-4 border-t border-[var(--border-main)] bg-[var(--bg-app)]">
                 <div className="max-w-3xl mx-auto space-y-3">
-                    
-                    {/* Stats Bar */}
-                    <div className="flex md:hidden flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-2 text-[10px] text-[var(--text-muted)] opacity-85 border-b border-[var(--border-main)]/25 pb-2.5">
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 w-full sm:w-auto">
-                            <span className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy && isEstimated ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
-                                {isEstimated ? 'Contexto:' : 'Entrada (Real):'} <strong className={`font-semibold ${contextWeight.isHeavy && isEstimated ? 'text-amber-500' : 'text-[var(--text-main)]'}`}>{((isEstimated ? contextTokens : (cumulativeUsage?.promptTokens || 0)) / 1000).toFixed(1)}k</strong> tkn
-                                {contextWeight.isHeavy && isEstimated && (
-                                    <button
-                                        onClick={handleToggleCompress}
-                                        title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
-                                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest transition-all ${
-                                            compressContext
-                                                ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
-                                                : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
-                                        }`}
-                                    >
-                                        <Zap size={7} />
-                                        {compressContext ? 'Resumido' : 'Comprimir'}
-                                    </button>
-                                )}
-                            </span>
-                            <span className="flex items-center gap-1">
-                                {isEstimated ? 'Conversación:' : 'Salida (Real):'} <strong className="text-[var(--text-main)] font-semibold">{((isEstimated ? displayMessagesTokens : (cumulativeUsage?.completionTokens || 0)) / 1000).toFixed(1)}k</strong> tkn
-                            </span>
-                            <span className="flex items-center gap-1">
-                                {isEstimated ? 'Total est.:' : 'Total real:'} <strong className="text-[var(--text-main)] font-semibold">{(displayTotalTokens / 1000).toFixed(1)}k</strong> tkn
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-1.5 sm:pt-0 border-t border-[var(--border-main)]/10 sm:border-0">
-                            <span>{isEstimated ? 'Costo est. (Siguiente consulta):' : 'Costo acumulado (Exacto):'}</span>
-                            <span 
-                                className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold tracking-wider shrink-0 cursor-help"
-                                title={`Costo calculado con tarifas de:\nEntrada: $${inputTokenCost}/1M tokens\nSalida: $${outputTokenCost}/1M tokens`}
-                            >
-                                ${totalCost < 0.0001 && totalCost > 0 ? '<$0.0001' : totalCost.toFixed(5)}
-                            </span>
-                        </div>
-                    </div>
-
                     {/* ── Modo Fragmento — Textarea de fragmento ── */}
                     {selectedAction === 'fragmento' && (
                         <div className="animate-in fade-in slide-in-from-top-2 duration-200">
@@ -1948,25 +1910,35 @@ const IAStudioChat = ({
 
                     {/* Summary Bar */}
                     <div className="text-[10px] text-[var(--text-muted)] font-medium flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 px-1">
-                        <span className="flex items-center gap-1">
+                        <button
+                            type="button"
+                            onClick={onOpenContext}
+                            className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
+                            title="Configurar Contexto y Destino"
+                        >
                             <BookOpen size={11} className="text-indigo-500" /> 
                             Contexto: 
                             <strong className="text-indigo-600 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/15">
                                 {selectedChapterIds.length + selectedWorldItemIds.length} elem
                             </strong>
-                        </span>
+                        </button>
                         <span className="opacity-30 hidden xs:inline">·</span>
-                        <span className="flex items-center gap-1">
+                        <button
+                            type="button"
+                            onClick={onOpenContext}
+                            className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
+                            title="Configurar Contexto y Destino"
+                        >
                             <Target size={11} className="text-emerald-500" /> 
                             Destino: 
                             <strong className="text-emerald-600 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/15 truncate max-w-[150px]" title={currentDestLabel()}>
                                 {destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Crear Nuevo' : destinationDoc?.docTitle || 'Manual'}
                             </strong>
-                        </span>
+                        </button>
                     </div>
 
                     {/* Input + Send (unified, fused, responsive) */}
-                    <div className="flex items-center gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-3 pr-4 py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
+                    <div className="flex items-center gap-2 sm:gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-2 sm:pl-3 pr-2.5 sm:pr-4 py-2.5 sm:py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
                         {/* Autocomplete Dropdown de Comandos de Pruebas */}
                         {shouldShowAutocomplete && (
                             <div className="absolute bottom-full left-0 mb-3 w-64 bg-[var(--bg-editor)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-50 overflow-hidden p-1.5 space-y-0.5 animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200">
@@ -2014,7 +1986,7 @@ const IAStudioChat = ({
                                     <>
                                         <button
                                             onClick={() => setShowActionDropdown(!showActionDropdown)}
-                                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 ${activeColorClass}`}
+                                            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 ${activeColorClass}`}
                                         >
                                             <span className="text-xs transition-transform duration-300">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
                                             <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim() || 'Chat'}</span>
@@ -2023,8 +1995,23 @@ const IAStudioChat = ({
 
                                         {showActionDropdown && (
                                             <>
-                                                <div className="fixed inset-0 z-30" onClick={() => setShowActionDropdown(false)} />
-                                                <div className="absolute bottom-full left-0 mb-2.5 w-64 bg-[var(--bg-editor)]/95 backdrop-blur-2xl border border-[var(--border-main)]/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-40 overflow-hidden animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200 p-1.5 space-y-0.5">
+                                                {/* Mobile Bottom Sheet Backdrop */}
+                                                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 sm:hidden animate-in fade-in duration-300" onClick={() => setShowActionDropdown(false)} />
+                                                
+                                                {/* Desktop Backdrop */}
+                                                <div className="hidden sm:block fixed inset-0 z-30" onClick={() => setShowActionDropdown(false)} />
+                                                
+                                                {/* Dropdown / Bottom Sheet Container */}
+                                                <div className="fixed bottom-0 left-0 right-0 top-auto w-full rounded-t-3xl border-t border-[var(--border-main)] bg-[var(--bg-editor)] shadow-[0_-10px_40px_rgba(0,0,0,0.35)] z-[100] animate-in slide-in-from-bottom duration-300 p-4 space-y-3 sm:absolute sm:bottom-full sm:top-auto sm:left-0 sm:right-auto sm:mb-2.5 sm:w-64 sm:rounded-2xl sm:border sm:shadow-[0_20px_50px_rgba(0,0,0,0.3)] sm:z-40 sm:animate-in sm:fade-in sm:slide-in-from-bottom-2 sm:zoom-in-95 sm:duration-200 sm:p-1.5 sm:space-y-0.5">
+                                                    {/* Bottom Sheet Drag Indicator (only mobile) */}
+                                                    <div className="flex justify-center sm:hidden mb-1">
+                                                        <div className="w-12 h-1 bg-[var(--border-main)] rounded-full opacity-60" />
+                                                    </div>
+                                                    
+                                                    <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1 sm:hidden">
+                                                        Seleccionar Acción
+                                                    </div>
+                                                    
                                                     {QUICK_ACTIONS?.map(action => {
                                                         const isSelected = action.id === selectedAction;
                                                         return (
@@ -2034,7 +2021,7 @@ const IAStudioChat = ({
                                                                     handleActionChange(action.id);
                                                                     setShowActionDropdown(false);
                                                                 }}
-                                                                className={`w-full text-left px-3 py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent ${
+                                                                className={`w-full text-left px-3 py-2.5 sm:py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent ${
                                                                     isSelected
                                                                         ? `${actionColors[action.id] || 'bg-indigo-500/10 text-indigo-500'} font-bold`
                                                                         : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 hover:translate-x-0.5'
