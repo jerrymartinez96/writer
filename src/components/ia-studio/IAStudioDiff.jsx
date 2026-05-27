@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { X, Check, RotateCcw, FileText, ChevronDown, ChevronUp, Scissors, Layers, GitMerge, AlertTriangle } from 'lucide-react';
-import { cleanText, cleanHtmlToPlainText, computeWordDiff } from './IAStudioUtils';
+import { cleanText, cleanHtmlToPlainText, computeWordDiff, applyPatch } from './IAStudioUtils';
 import DiffMatchPatch from 'diff-match-patch';
 
 // ─── Diff engine ─────────────────────────────────────────────────────────────
@@ -440,7 +440,18 @@ const SectionAccumulatorView = ({ blocks, accumulatedSections }) => {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destinationTitle, accumulatedSections = [], activeResolution = null }) => {
+const IAStudioDiff = ({ 
+    diffBlocks = [], 
+    onApply, 
+    onClose, 
+    onRegenerate, 
+    destinationTitle, 
+    accumulatedSections = [], 
+    activeResolution = null,
+    onAutoCorrectPatch = null,
+    onApplyToSelection = null,
+    isLoadingAutoCorrect = false
+}) => {
     const [activeIndex, setActiveIndex] = useState(0);
 
     // Adjust state when props change during render to avoid cascading renders and ESLint errors
@@ -622,11 +633,75 @@ const IAStudioDiff = ({ diffBlocks = [], onApply, onClose, onRegenerate, destina
 
                     {/* ── Patch mode ── */}
                     {isPatchMode && (
-                        <PatchDiffView
-                            original={currentBlock.original}
-                            proposedContent={currentBlock.proposedContent}
-                            context={currentBlock.context}
-                        />
+                        <div className="space-y-4">
+                            {/* Match Check Badge / Panel */}
+                            {(() => {
+                                const patchStatus = applyPatch(currentBlock.currentContent || '', currentBlock.original || '', currentBlock.proposedContent || '');
+                                const isMatched = patchStatus.success;
+
+                                return (
+                                    <div className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300 ${isMatched ? 'bg-emerald-500/[0.02] border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/[0.02] border-rose-500/20 text-rose-600 dark:text-rose-400'}`}>
+                                        <div className="flex items-start gap-3 min-w-0">
+                                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${isMatched ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                                {isMatched ? <Check size={14} strokeWidth={3} /> : <AlertTriangle size={14} className="animate-bounce" />}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-bold leading-snug">
+                                                    {isMatched ? 'Coincidencia Lista para Inyección' : 'No se Encontró el Fragmento Original Exacto'}
+                                                </p>
+                                                <p className="text-[10px] opacity-75 mt-1 leading-relaxed max-w-xl truncate sm:whitespace-normal">
+                                                    {isMatched 
+                                                        ? 'El motor de parches localizó con precisión el texto original. Al hacer clic en "Aplicar Cambios", se inyectará de forma quirúrgica.' 
+                                                        : 'El buscador no pudo emparejar este fragmento debido a sutiles diferencias de formato, comillas o paráfrasis. Elige una alternativa:'}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {!isMatched && (
+                                            <div className="flex flex-wrap gap-2 shrink-0">
+                                                {onAutoCorrectPatch && (
+                                                    <button
+                                                        onClick={() => onAutoCorrectPatch(activeIndex, currentBlock)}
+                                                        disabled={isLoadingAutoCorrect}
+                                                        className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center gap-1.5"
+                                                    >
+                                                        {isLoadingAutoCorrect ? (
+                                                            <>
+                                                                <span className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0" />
+                                                                <span>Corrigiendo...</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <RotateCcw size={12} className="animate-spin-once" />
+                                                                <span>Auto-Corregir con IA</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                )}
+                                                
+                                                {onApplyToSelection && (
+                                                    <button
+                                                        onClick={() => onApplyToSelection(activeIndex, currentBlock)}
+                                                        disabled={isLoadingAutoCorrect}
+                                                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/15 disabled:opacity-40 disabled:pointer-events-none active:scale-95 flex items-center gap-1.5"
+                                                        title="Sombrea el texto en tu editor y pulsa este botón"
+                                                    >
+                                                        <GitMerge size={12} />
+                                                        <span>Aplicar en mi Selección</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
+                            <PatchDiffView
+                                original={currentBlock.original}
+                                proposedContent={currentBlock.proposedContent}
+                                context={currentBlock.context}
+                            />
+                        </div>
                     )}
 
                     {/* ── Section accumulator mode ── */}

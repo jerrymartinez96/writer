@@ -35,7 +35,6 @@ const IAStudioChat = ({
     onOpenSessions,
     onExport,
     QUICK_ACTIONS,
-    selectedApi = 'openrouter',
     selectedModel = '',
     contextSelections,
     activeBook,
@@ -60,6 +59,11 @@ const IAStudioChat = ({
     accumulatedSections = [],
     destinationDoc = null,
     onResolveInconsistency = null,
+    onReopenInconsistency = null,
+    chatReasoningMode = false,
+    onReasoningModeChange = null,
+    chatReasoningEffort = 'high',
+    onReasoningEffortChange = null,
 }) => {
     const [inputValue, setInputValue] = useState('');
     const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -175,7 +179,7 @@ const IAStudioChat = ({
         };
     }, [charFlow?.step]);
 
-    const apiSelected = selectedApi;
+    const apiSelected = 'deepseek';
     const modelSelected = selectedModel;
 
     useEffect(() => {
@@ -199,9 +203,7 @@ const IAStudioChat = ({
         fetchModels();
     }, []);
 
-    const filteredModels = selectedApi === 'openrouter'
-        ? availableModels.filter(m => m.provider === 'OpenRouter')
-        : AIService.getModelsForProvider(selectedApi);
+    const filteredModels = availableModels;
 
     const selectedModelObj = filteredModels.find(m => m.id === selectedModel);
     const selectedModelName = selectedModelObj?.name || selectedModel?.split('/').pop() || '—';
@@ -382,9 +384,9 @@ const IAStudioChat = ({
     const outputTokens = Math.ceil(assistantCharCount / 3.8);
 
     // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
-    const aiSettings = activeBook?.aiSettings || {};
-    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
-    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
+    const aiConfig = profile?.aiConfig || {};
+    const inputTokenCost = aiConfig.inputTokenCost ?? 0.075;
+    const outputTokenCost = aiConfig.outputTokenCost ?? 0.15;
 
     // Híbrido Estimado-Acumulado (Para todos los proveedores de IA)
     const cumulativeUsage = activeSession?.cumulativeUsage;
@@ -535,13 +537,8 @@ const IAStudioChat = ({
     };
 
     const getLocalApiKey = () => {
-        if (apiSelected === 'google_direct') {
-            return activeBook?.aiSettings?.googleApiKey || profile?.googleApiKey || localStorage.getItem('googleApiKey');
-        }
-        if (apiSelected === 'deepseek') {
-            return activeBook?.aiSettings?.deepseekApiKey || profile?.deepseekApiKey || localStorage.getItem('deepseekApiKey');
-        }
-        return activeBook?.aiSettings?.openRouterKey || profile?.openRouterKey || localStorage.getItem('openRouterKey');
+        const aiConfig = profile?.aiConfig || {};
+        return aiConfig.deepseekApiKey || profile?.deepseekApiKey || localStorage.getItem('deepseekApiKey') || '';
     };
 
     const getBookContext = () => {
@@ -1578,7 +1575,7 @@ const IAStudioChat = ({
                             title="Cambiar modelo activo"
                         >
                             <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none shrink-0">
-                                {API_LABELS[selectedApi] || selectedApi}
+                                DeepSeek
                             </span>
                             <span className="truncate max-w-[80px] sm:max-w-[140px] font-medium text-[var(--text-main)]">
                                 {selectedModelName}
@@ -1590,8 +1587,61 @@ const IAStudioChat = ({
                             <>
                                 <div className="fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
                                 <div className="absolute top-full right-0 mt-1.5 w-64 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl shadow-xl z-45 overflow-hidden animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-200 p-1.5 space-y-0.5">
+                                    {/* Reasoning Mode Switch */}
+                                    {onReasoningModeChange && (
+                                        <div className="px-2.5 py-2 border-b border-[var(--border-main)]/30 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Zap size={13} className={chatReasoningMode ? 'text-yellow-500 animate-pulse' : 'text-[var(--text-muted)]'} />
+                                                    <span className="text-[10px] font-bold text-[var(--text-main)]">Razonamiento Profundo</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onReasoningModeChange(!chatReasoningMode)}
+                                                    className={`w-8 h-4.5 rounded-full p-0.5 transition-colors focus:outline-none flex items-center relative ${
+                                                        chatReasoningMode ? 'bg-indigo-600' : 'bg-[var(--border-main)]'
+                                                    }`}
+                                                    style={{ width: '2rem', height: '1.125rem' }}
+                                                    title="Modo Razonamiento"
+                                                >
+                                                    <div
+                                                        className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform transform ${
+                                                            chatReasoningMode ? 'translate-x-3.5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+
+                                            {/* Thinking Effort Control (Only if reasoning mode is enabled) */}
+                                            {chatReasoningMode && onReasoningEffortChange && (
+                                                <div className="flex items-center justify-between bg-[var(--bg-app)] border border-[var(--border-main)]/50 rounded-lg p-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                    <span className="text-[8px] font-black uppercase text-[var(--text-muted)] tracking-wider pl-1">Esfuerzo:</span>
+                                                    <div className="flex gap-1 shrink-0">
+                                                        {['high', 'max'].map(effort => {
+                                                            const isSelected = chatReasoningEffort === effort;
+                                                            return (
+                                                                <button
+                                                                    key={effort}
+                                                                    type="button"
+                                                                    onClick={() => onReasoningEffortChange(effort)}
+                                                                    className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase transition-all ${
+                                                                        isSelected
+                                                                            ? 'bg-indigo-500 text-white shadow-sm font-black'
+                                                                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                                                                    }`}
+                                                                >
+                                                                    {effort === 'high' ? 'Alto' : 'Max'}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    
                                     <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1">
-                                        Modelos de {API_LABELS[selectedApi] || selectedApi}
+                                        Modelos de DeepSeek
                                     </div>
                                     <div className="max-h-60 overflow-y-auto space-y-0.5">
                                         {filteredModels.map(model => {
@@ -1707,6 +1757,7 @@ const IAStudioChat = ({
                                 onDelete={() => onDeleteMessage && onDeleteMessage(msg.id)}
                                 isLast={i === messages.length - 1}
                                 onResolveInconsistency={onResolveInconsistency}
+                                onReopenInconsistency={onReopenInconsistency}
                             />
                         ))
                     )}
@@ -2043,6 +2094,7 @@ const IAStudioChat = ({
                                 <span className="hidden xs:inline">Redactar Escena</span>
                             </button>
                         )}
+
 
                         {/* Send / Stop button */}
                         <button

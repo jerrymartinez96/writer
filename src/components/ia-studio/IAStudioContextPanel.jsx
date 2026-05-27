@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Check, FileText, Globe, BookOpen, Layers, User, Bookmark, Users, X, ChevronRight, Target, AlertTriangle, Zap } from 'lucide-react';
 import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS, estimateContextWeight, buildContextFromSelections } from './IAStudioUtils';
 import { useIAStudioContext } from '../../context/IAStudioContext';
+import { useData } from '../../context/DataContext';
 
 const IAStudioContextPanel = ({
     chapters = [],
@@ -11,6 +12,7 @@ const IAStudioContextPanel = ({
     compressContext = false,
     onToggleCompress = null,
 }) => {
+    const { profile } = useData();
     const { contextSelections, destinationDoc, onContextChange, onDestinationChange, messages = [], activeSession } = useIAStudioContext();
     const [showQuickSelect, setShowQuickSelect] = useState(false);
     const [showDestDropdown, setShowDestDropdown] = useState(false);
@@ -47,17 +49,15 @@ const IAStudioContextPanel = ({
         .reduce((sum, m) => sum + (m.content || '').length, 0);
     const outputTokens = Math.ceil(assistantCharCount / 4.2);
 
-    // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
-    const aiSettings = activeBook?.aiSettings || {};
-    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
-    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
-    const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
+    // Custom Token Costs from profile settings or DeepSeek V4 defaults
+    const aiConfig = profile?.aiConfig || {};
+    const inputTokenCost = aiConfig.inputTokenCost ?? 0.14;
+    const outputTokenCost = aiConfig.outputTokenCost ?? 0.28;
+    const selectedModel = aiConfig.defaultModel || 'deepseek-v4-flash';
 
-    // Híbrido Estimado-Acumulado (Solo para DeepSeek Directo)
-    const selectedApi = aiSettings.selectedApi || 'openrouter';
-    const isDeepSeek = selectedApi === 'deepseek';
+    // Híbrido Estimado-Acumulado (Exclusivo DeepSeek)
     const cumulativeUsage = activeSession?.cumulativeUsage;
-    const hasCumulativeCost = isDeepSeek && cumulativeUsage && cumulativeUsage.cost > 0;
+    const hasCumulativeCost = cumulativeUsage && cumulativeUsage.cost > 0;
 
     let displayMessagesTokens = messagesTokens;
     let displayTotalTokens = totalInputTokens + outputTokens;

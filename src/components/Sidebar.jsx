@@ -109,7 +109,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         books, activeBook, selectBook, createBook,
         chapters, activeChapter, selectChapter, createChapter, deleteChapter,
         activeView, setActiveView, reorderChapters,
-        activeWorldDoc, openWorldDoc, characters, worldItems,
+        activeWorldDoc, openWorldDoc, characters, worldItems, profile
     } = useData();
     const { 
         contextSelections, 
@@ -182,14 +182,13 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         .reduce((sum, m) => sum + (m.content || '').length, 0);
     const outputTokens = Math.ceil(assistantCharCount / 3.8);
 
-    // Custom Token Costs from activeBook settings or Gemini 2.0 Flash defaults
-    const aiSettings = activeBook?.aiSettings || {};
-    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
-    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
-    const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
+    // Custom Token Costs from profile settings or DeepSeek V4 defaults
+    const aiConfig = profile?.aiConfig || {};
+    const inputTokenCost = aiConfig.inputTokenCost ?? 0.14;
+    const outputTokenCost = aiConfig.outputTokenCost ?? 0.28;
+    const selectedModel = aiConfig.defaultModel || 'deepseek-v4-flash';
 
-    // Híbrido Estimado-Acumulado (Para todos los proveedores de IA)
-    const selectedApi = aiSettings.selectedApi || 'openrouter';
+    // Híbrido Estimado-Acumulado (Exclusivo DeepSeek)
     const cumulativeUsage = activeSession?.cumulativeUsage;
     const hasCumulativeCost = cumulativeUsage && (cumulativeUsage.cost > 0 || cumulativeUsage.totalTokens > 0);
 

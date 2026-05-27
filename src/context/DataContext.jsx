@@ -84,6 +84,7 @@ export const DataProvider = ({ children }) => {
         return newId;
     });
     const [chapterLock, setChapterLock] = useState({ isLocked: false, activeEditorId: null, deviceName: 'Esta computadora' });
+    const [sharedEditor, setSharedEditor] = useState(null);
 
     // XSS Protection - Sanitize HTML content
     const sanitizeHtml = useCallback((html) => {
@@ -1016,7 +1017,9 @@ export const DataProvider = ({ children }) => {
         authLoading,
         logout: handleLogout,
         updateProfile: handleUpdateProfile,
-        uploadCover: handleUploadCover
+        uploadCover: handleUploadCover,
+        editor: sharedEditor,
+        setSharedEditor
     };
 
     return (

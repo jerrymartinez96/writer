@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { User, Bot, FileDiff, Copy, Check, RotateCw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2, Film, AlertTriangle, Wrench, CheckCircle2 } from 'lucide-react';
+import { User, Bot, FileDiff, Copy, Check, RotateCw, RotateCcw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2, Film, AlertTriangle, Wrench, CheckCircle2 } from 'lucide-react';
 import { parseInconsistenciesFromResponse, SYSTEM_WORLD_ITEM_LABELS } from './IAStudioUtils';
 
 /**
  * Renders an interactive view for inconsistency and plot-hole cards inside the chat message.
  */
-const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
+const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenInconsistency }) => {
     const inconsistencies = useMemo(() => {
         if (message.inconsistencies) return message.inconsistencies;
         return parseInconsistenciesFromResponse(message.rawResponse || message.content) || [];
@@ -158,7 +158,7 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
             {inconsistencies.map(inc => {
                 const state = cardStates[inc.id] || { selectedOption: null, customText: '', showCustom: false, isResolving: false };
                 const isResolved = inc.resolved;
-                const appliedOption = inc.selectedOption;
+                const wasResolved = inc.wasResolved;
                 const labelList = inc.files.map(fId => {
                     return SYSTEM_WORLD_ITEM_LABELS[fId] || fId;
                 }).join(' y ');
@@ -169,12 +169,14 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
                         className={`rounded-2xl border-2 transition-all duration-300 overflow-hidden ${
                             isResolved
                                 ? 'border-emerald-500/30 bg-emerald-500/[0.02] shadow-sm shadow-emerald-500/[0.02]'
-                                : 'border-[var(--border-main)] bg-[var(--bg-editor)]/40 hover:border-amber-500/20'
+                                : wasResolved
+                                    ? 'border-amber-500/40 bg-amber-500/[0.02] hover:border-amber-500/60'
+                                    : 'border-[var(--border-main)] bg-[var(--bg-editor)]/40 hover:border-amber-500/20'
                         }`}
                     >
                         {/* Card Header */}
                         <div className={`px-4 py-3 border-b flex items-start justify-between gap-3 ${
-                            isResolved ? 'border-emerald-500/10 bg-emerald-500/[0.04]' : 'border-[var(--border-main)]/40 bg-[var(--accent-soft)]/10'
+                            isResolved ? 'border-emerald-500/10 bg-emerald-500/[0.04]' : wasResolved ? 'border-amber-500/10 bg-amber-500/[0.04]' : 'border-[var(--border-main)]/40 bg-[var(--accent-soft)]/10'
                         }`}>
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
@@ -183,13 +185,19 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
                                     }`}>
                                         {isResolved ? 'Resuelto' : 'Pendiente'}
                                     </span>
+                                    {wasResolved && !isResolved && (
+                                        <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 flex items-center gap-1">
+                                            <RotateCcw size={8} strokeWidth={3} />
+                                            Reabierta
+                                        </span>
+                                    )}
                                     {inc.files.map(fId => (
                                         <span key={fId} className="text-[8px] font-bold bg-[var(--border-main)]/40 text-[var(--text-muted)] px-1.5 py-0.5 rounded">
                                             📁 {SYSTEM_WORLD_ITEM_LABELS[fId] || fId}
                                         </span>
                                     ))}
                                 </div>
-                                <h4 className={`text-xs font-bold leading-snug ${isResolved ? 'text-emerald-500' : 'text-[var(--text-main)]'}`}>
+                                <h4 className={`text-xs font-bold leading-snug ${isResolved ? 'text-emerald-500' : wasResolved ? 'text-amber-400' : 'text-[var(--text-main)]'}`}>
                                     {inc.title}
                                 </h4>
                             </div>
@@ -263,34 +271,69 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
                                         )}
                                     </div>
 
-                                    {/* Action button */}
-                                    <button
-                                        onClick={() => handleResolve(inc.id)}
-                                        disabled={!state.selectedOption || state.isResolving}
-                                        className="w-full py-2.5 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest text-white bg-amber-500 hover:bg-amber-600 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none transition-all shadow-md shadow-amber-500/10 flex items-center justify-center gap-2"
-                                    >
-                                        {state.isResolving ? (
-                                            <>
-                                                <span className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0" />
-                                                <span>Procesando...</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Wrench size={11} className="shrink-0" />
-                                                <span>Procesar Solución con la IA</span>
-                                            </>
-                                        )}
-                                    </button>
+                                    {/* Action buttons */}
+                                    <div className="flex gap-2 w-full">
+                                        <button
+                                            onClick={() => handleResolve(inc.id)}
+                                            disabled={!state.selectedOption || state.isResolving}
+                                            className="flex-1 py-2.5 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest text-white bg-amber-500 hover:bg-amber-600 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none transition-all shadow-md shadow-amber-500/10 flex items-center justify-center gap-2"
+                                        >
+                                            {state.isResolving ? (
+                                                <>
+                                                    <span className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0" />
+                                                    <span>Procesando...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Wrench size={11} className="shrink-0" />
+                                                    <span>Procesar con IA</span>
+                                                </>
+                                            )}
+                                        </button>
+
+                                        <button
+                                            onClick={async () => {
+                                                if (onResolveInconsistency) {
+                                                    await onResolveInconsistency(message.id, inc.id, 'OMIT', 'Omitido / Ignorado por el escritor');
+                                                }
+                                            }}
+                                            disabled={state.isResolving}
+                                            className="px-4 py-2.5 rounded-xl border border-[var(--border-main)] hover:bg-rose-500/10 hover:border-rose-500/30 text-rose-500 hover:text-rose-600 disabled:opacity-40 disabled:pointer-events-none text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
+                                            title="Omitir e ignorar esta inconsistencia"
+                                        >
+                                            <span>Omitir</span>
+                                        </button>
+                                    </div>
                                 </div>
                             ) : (
-                                <div className="bg-emerald-500/[0.03] border border-emerald-500/10 rounded-xl p-3 text-xs leading-relaxed text-emerald-600 dark:text-emerald-400">
-                                    <p className="font-bold flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-emerald-500 mb-1">
-                                        <CheckCircle2 size={10} className="shrink-0" />
-                                        Solución Aplicada a {labelList}:
-                                    </p>
-                                    <p className="italic">
-                                        {appliedOption === 'CUSTOM' ? inc.customText : (inc.options.find(o => o.letter === appliedOption)?.text || 'Aplicado')}
-                                    </p>
+                                <div className="space-y-3">
+                                    <div className={`${inc.selectedOption === 'OMIT' ? 'bg-amber-500/[0.03] border-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/[0.03] border-emerald-500/10 text-emerald-600 dark:text-emerald-400'} border rounded-xl p-3 text-xs leading-relaxed`}>
+                                        <p className={`font-bold flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest ${inc.selectedOption === 'OMIT' ? 'text-amber-500' : 'text-emerald-500'} mb-1`}>
+                                            {inc.selectedOption === 'OMIT' ? (
+                                                <>
+                                                    <AlertTriangle size={10} className="shrink-0" />
+                                                    Inconsistencia Omitida:
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <CheckCircle2 size={10} className="shrink-0" />
+                                                    Solución Aplicada a {labelList}:
+                                                </>
+                                            )}
+                                        </p>
+                                        <p className="italic">
+                                            {inc.selectedOption === 'OMIT' ? 'Esta alerta de lore ha sido omitida e ignorada por el escritor.' : (inc.selectedOption === 'CUSTOM' ? inc.customText : (inc.options.find(o => o.letter === inc.selectedOption)?.text || 'Aplicado'))}
+                                        </p>
+                                    </div>
+                                    {/* Reopen button */}
+                                    <button
+                                        onClick={() => onReopenInconsistency && onReopenInconsistency(message.id, inc.id)}
+                                        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.04] hover:bg-indigo-500/10 hover:border-indigo-500/40 text-indigo-400 hover:text-indigo-300 text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.98] duration-200"
+                                        title="Volver a poner como pendiente"
+                                    >
+                                        <RotateCcw size={10} strokeWidth={3} />
+                                        <span>Reabrir como pendiente</span>
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -310,7 +353,7 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency }) => {
  * - 'error'      → plain text red message
  * - default      → whitespace-pre-wrap (streaming / unknown)
  */
-const MessageContent = ({ message, content, responseType: rawResponseType, isStreaming, onResolveInconsistency }) => {
+const MessageContent = ({ message, content, responseType: rawResponseType, isStreaming, onResolveInconsistency, onReopenInconsistency }) => {
     const responseType = useMemo(() => {
         if (rawResponseType === 'analysis' && content && (content.includes('<inconsistencia') || content.includes('<inconsistencias') || content.includes('[[inconsistencia'))) {
             return 'inconsistencies';
@@ -481,6 +524,7 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
                 <InconsistencyCardsView
                     message={message}
                     onResolveInconsistency={onResolveInconsistency}
+                    onReopenInconsistency={onReopenInconsistency}
                 />
             </div>
         );
@@ -498,7 +542,7 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
     return <div className="whitespace-pre-wrap">{content}</div>;
 };
 
-const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, onResolveInconsistency }) => {
+const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, onResolveInconsistency, onReopenInconsistency }) => {
     const isUser = message.role === 'user';
     const isStreaming = message.isStreaming;
     const rawResponseType = message.responseType || 'analysis';
@@ -621,6 +665,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                             responseType={responseType}
                             isStreaming={isStreaming}
                             onResolveInconsistency={onResolveInconsistency}
+                            onReopenInconsistency={onReopenInconsistency}
                         />
 
                         {/* Gradient Fade-out Mask */}

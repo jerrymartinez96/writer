@@ -1,7 +1,6 @@
 /**
- * Service to handle AI interactions via OpenRouter, Google Direct, DeepSeek Direct
+ * Service to handle AI interactions exclusively via DeepSeek Direct API
  */
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 /**
@@ -11,9 +10,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Helper: retry a fetch with exponential backoff for rate-limited requests (429).
- * Calls fetchFn repeatedly until success or maxRetries exhausted.
- * Between retries, waits: initialDelay * 2^attempt (with jitter).
- * For non-429 errors, throws immediately.
  */
 const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) => {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -21,12 +17,10 @@ const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) =>
         if (response.ok) return response;
 
         if (response.status !== 429) {
-            // Not a rate-limit error; throw immediately
             return response;
         }
 
         if (attempt < maxRetries) {
-            // Exponential backoff with jitter: baseDelay * 2^attempt + random(0, 1000)
             const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
             console.warn(
                 `[AIService] Rate limited (429) on attempt ${attempt + 1}/${maxRetries}. ` +
@@ -35,13 +29,11 @@ const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) =>
             await sleep(delay);
         }
     }
-    // All retries exhausted
     return await fetchFn();
 };
 
 /**
  * The JSON schema that the AI should return for structured responses.
- * Used for Gemini responseSchema and as documentation in system prompts.
  */
 export const AI_RESPONSE_SCHEMA = {
     type: "object",
@@ -69,71 +61,25 @@ export const AI_RESPONSE_SCHEMA = {
 
 export const AIService = {
     /**
-     * Models available (fallback)
+     * Models available (DeepSeek V4 updated list)
      */
     MODELS: [
-        // OpenRouter Free Models
-        { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash (OR Gratis)", provider: "OpenRouter", context_length: 1048576 },
-        { id: "google/gemini-2.0-flash-lite-preview-02-05:free", name: "Gemini 2.0 Lite (OR Gratis)", provider: "OpenRouter", context_length: 1048576 },
-        { id: "google/gemini-2.0-pro-exp-02-05:free", name: "Gemini 2.0 Pro (OR Gratis)", provider: "OpenRouter", context_length: 1048576 },
-        { id: "google/gemini-1.5-flash:free", name: "Gemini 1.5 Flash (OR Gratis)", provider: "OpenRouter", context_length: 1048576 },
-        { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Gratis)", provider: "OpenRouter", context_length: 64000 },
-        { id: "mistralai/mistral-7b-instruct:free", name: "Mistral 7B (Gratis)", provider: "OpenRouter", context_length: 32000 },
-
-        // Direct Google AI Studio Models
-        { id: "google_direct/gemini-2.5-flash-preview-04-17", name: "Gemini 2.5 Flash (Google Directo)", provider: "Google", context_length: 1048576 },
-        { id: "google_direct/gemini-2.0-flash-exp", name: "Gemini 2.0 Flash (Google Directo)", provider: "Google", context_length: 1048576 },
-
-        // Direct DeepSeek Models
         { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "DeepSeek", context_length: 1048576 },
         { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "DeepSeek", context_length: 1048576 },
     ],
 
     /**
-     * Returns models for a given provider
+     * Returns models for a given provider (always returns all DeepSeek models now)
      */
     getModelsForProvider(provider) {
-        switch (provider) {
-            case 'google_direct':
-                return this.MODELS.filter(m => m.id.startsWith('google_direct/'));
-            case 'deepseek':
-                return this.MODELS.filter(m => m.provider === 'DeepSeek');
-            case 'openrouter':
-            default:
-                return this.MODELS.filter(m => m.provider === 'OpenRouter');
-        }
+        return this.MODELS;
     },
 
     /**
-     * Fetches current free models from OpenRouter
+     * Fetches current free models (simplified to return available DeepSeek models)
      */
     async getFreeModels() {
-        try {
-            const response = await fetch("https://openrouter.ai/api/v1/models");
-            if (!response.ok) throw new Error("Error fetching models");
-            const data = await response.json();
-
-            const orModels = data.data
-                .filter(model =>
-                    parseFloat(model.pricing.prompt) === 0 &&
-                    parseFloat(model.pricing.completion) === 0
-                )
-                .map(model => ({
-                    id: model.id,
-                    name: model.name + " (OR Gratis)",
-                    provider: "OpenRouter",
-                    context_length: model.context_length
-                }));
-
-            return [
-                ...this.MODELS.filter(m => m.id.startsWith('google_direct/')),
-                ...this.MODELS.filter(m => m.provider === 'DeepSeek'),
-                ...orModels
-            ];
-        } catch (error) {
-            console.error("Error fetching free models:", error);
-            return this.MODELS;
-        }
+        return this.MODELS;
     },
 
     /**
@@ -145,130 +91,17 @@ export const AIService = {
     },
 
     /**
-     * Sends a prompt to OpenRouter or Google Directly (non-streaming, single prompt)
-     */
-    /**
-     * Sends a prompt to OpenRouter, Google Directly or DeepSeek Directly (non-streaming)
+     * Sends a non-streaming prompt to DeepSeek
      * Supports both a single prompt string and an array of message objects [{role, content}]
      */
     async sendMessage(prompt, apiKey, options = {}) {
-        const modelId = options.model || "google/gemini-2.0-flash-exp:free";
-        const isGoogleDirect = modelId.startsWith('google_direct/') || options.apiSelected === 'google_direct';
-        const isDeepSeekDirect = options.apiSelected === 'deepseek' || modelId === 'deepseek-v4-flash' || modelId === 'deepseek-v4-pro';
-
-        if (isGoogleDirect) {
-            const googleKey = options.googleApiKey || apiKey;
-            const modelName = modelId.includes('/') ? modelId.split('/')[1] : modelId;
-            return this.sendGeminiMessage(prompt, googleKey, modelName, options);
-        }
-
-        if (isDeepSeekDirect) {
-            const deepseekKey = options.deepseekApiKey || apiKey;
-            return this.sendDeepSeekMessage(prompt, deepseekKey, modelId, options);
-        }
-
-        if (!apiKey) {
-            throw new Error("API Key no configurada.");
-        }
-
-        const temperature = options.temperature ?? 0.7;
-
-        try {
-            const messagesList = Array.isArray(prompt) ? prompt : [{ role: "user", content: prompt }];
-            const response = await retryOnRateLimit(async () => {
-                return await fetch(OPENROUTER_URL, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`,
-                        "HTTP-Referer": window.location.origin,
-                        "X-Title": "Writer IA Studio",
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: modelId,
-                        messages: messagesList,
-                        temperature: temperature,
-                        max_tokens: options.max_tokens || 8192,
-                    })
-                });
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData?.error?.message || `Error en OpenRouter (${response.status})`);
-            }
-
-            const data = await response.json();
-            return data.choices[0].message.content || "";
-        } catch (error) {
-            console.error("AIService.sendMessage Error:", error);
-            throw error;
-        }
-    },
-
-    /**
-     * Direct call to Google AI Studio (Gemini) API (non-streaming)
-     * Supports both a single prompt string and an array of message objects [{role, content}]
-     */
-    async sendGeminiMessage(prompt, apiKey, model, options = {}) {
-        if (!apiKey) {
-            throw new Error("API Key de Google Gemini no configurada.");
-        }
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-        try {
-            const payload = {
-                generationConfig: {
-                    temperature: options.temperature ?? 0.7,
-                    maxOutputTokens: options.max_tokens || 8192,
-                }
-            };
-
-            if (Array.isArray(prompt)) {
-                // Filtrar mensajes del sistema para colocarlos en systemInstruction
-                payload.contents = prompt
-                    .filter(m => m.role !== 'system')
-                    .map(m => ({
-                        role: m.role === 'assistant' ? 'model' : 'user',
-                        parts: [{ text: m.content }]
-                    }));
-
-                const systemMsg = prompt.find(m => m.role === 'system');
-                if (systemMsg) {
-                    payload.systemInstruction = {
-                        parts: [{ text: systemMsg.content }]
-                    };
-                }
-            } else {
-                payload.contents = [{ parts: [{ text: prompt }] }];
-            }
-
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData?.error?.message || `Error en Google Gemini (${response.status})`);
-            }
-
-            const data = await response.json();
-            if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
-                return data.candidates[0].content.parts[0].text;
-            }
-            throw new Error("Respuesta de Gemini malformada.");
-        } catch (error) {
-            console.error("AIService.sendGeminiMessage Error:", error);
-            throw error;
-        }
+        const modelId = options.model || "deepseek-v4-flash";
+        const deepseekKey = options.deepseekApiKey || apiKey;
+        return this.sendDeepSeekMessage(prompt, deepseekKey, modelId, options);
     },
 
     /**
      * Direct call to DeepSeek API (non-streaming)
-     * Supports both a single prompt string and an array of message objects [{role, content}]
      */
     async sendDeepSeekMessage(prompt, apiKey, model, options = {}) {
         if (!apiKey) {
@@ -289,6 +122,16 @@ export const AIService = {
             // Enable JSON mode if requested
             if (options.useJsonMode) {
                 body.response_format = { type: "json_object" };
+            }
+
+            // Inyectar Reasoning y Effort si están configurados
+            if (options.reasoningMode) {
+                body.thinking = { type: "enabled" };
+                if (options.reasoningEffort) {
+                    body.reasoning_effort = options.reasoningEffort;
+                }
+            } else {
+                body.thinking = { type: "disabled" };
             }
 
             const response = await retryOnRateLimit(async () => {
@@ -319,260 +162,123 @@ export const AIService = {
     },
 
     /**
-     * Generates a streaming response from the AI (supports OpenRouter, Google Direct, DeepSeek Direct)
+     * Generates a streaming response exclusively from DeepSeek Direct
      * @param {Array} messages - Array of message objects {role, content}
-     * @param {Object} settings - AI settings (apiKey, model, temperature, useJsonMode, etc)
+     * @param {Object} settings - AI settings (apiKey, model, temperature, useJsonMode, reasoningMode, reasoningEffort)
      * @param {Function} onChunk - Callback for each text chunk
      */
     async generateStream(messages, settings, onChunk, onUsage) {
-        const modelId = settings?.selectedAiModel || "google/gemini-2.0-flash-exp:free";
-        const selectedApi = settings?.selectedApi || 'openrouter';
+        const modelId = settings?.selectedAiModel || "deepseek-v4-flash";
         const temperature = settings?.temperature ?? 0.7;
         const useJsonMode = settings?.useJsonMode ?? false;
 
-        if (selectedApi === 'deepseek') {
-            // DeepSeek Direct SSE Stream
-            const apiKey = settings?.deepseekApiKey;
-            if (!apiKey) throw new Error("API Key de DeepSeek no configurada.");
+        console.log(
+            `%c🚀 [AIService.generateStream] INICIANDO PETICIÓN STREAM %c\n` +
+            `• API: DeepSeek\n` +
+            `• Modelo: ${modelId}\n` +
+            `• Modo Razonamiento (reasoningMode): ${!!settings?.reasoningMode}\n` +
+            `• Esfuerzo de Razonamiento (reasoningEffort): ${settings?.reasoningEffort || 'high'}\n` +
+            `• Temperatura: ${temperature}\n` +
+            `• JSON Mode: ${useJsonMode}`,
+            "background: #4f46e5; color: white; padding: 3px 6px; border-radius: 4px; font-weight: bold;",
+            "color: inherit;"
+        );
+        console.log("📨 Mensajes enviados al modelo:", messages);
 
-            const body = {
-                model: modelId,
-                messages: messages,
-                stream: true,
-                stream_options: { include_usage: true },
-                temperature: temperature,
-                max_tokens: 32768
-            };
+        // Decorate onChunk to also log the returned chunks at the end
+        let fullResponseText = "";
+        const originalOnChunk = onChunk;
+        onChunk = (chunk) => {
+            fullResponseText += chunk;
+            originalOnChunk(chunk);
+        };
 
-            // Enable JSON mode if requested
-            if (useJsonMode) {
-                body.response_format = { type: "json_object" };
-            }
+        const apiKey = settings?.deepseekApiKey;
+        if (!apiKey) throw new Error("API Key de DeepSeek no configurada.");
 
-            // Enable reasoning (thinking) mode for DeepSeek V4 if configured
-            if (settings?.reasoningMode) {
-                body.thinking = { type: "enabled" };
-            }
+        const body = {
+            model: modelId,
+            messages: messages,
+            stream: true,
+            stream_options: { include_usage: true },
+            temperature: temperature,
+            max_tokens: 32768
+        };
 
-            const response = await fetch(DEEPSEEK_URL, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body),
-                signal: settings?.signal
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData?.error?.message || `Error DeepSeek (${response.status})`);
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const dataStr = line.slice(6).trim();
-                        if (dataStr === '[DONE]' || !dataStr) continue;
-                        try {
-                            const data = JSON.parse(dataStr);
-                            const text = data.choices?.[0]?.delta?.content || '';
-                            if (text) onChunk(text);
-
-                            // Capture usage data if returned in stream
-                            if (data.usage && onUsage) {
-                                onUsage({
-                                    promptTokens: data.usage.prompt_tokens,
-                                    completionTokens: data.usage.completion_tokens,
-                                    totalTokens: data.usage.total_tokens,
-                                    reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens || 0
-                                });
-                            }
-                        } catch (e) {
-                            console.warn("DeepSeek SSE parse error:", e);
-                        }
-                    }
-                }
-            }
-            return;
+        // Enable JSON mode if requested
+        if (useJsonMode) {
+            body.response_format = { type: "json_object" };
         }
 
-        const isGoogleDirect = modelId.startsWith('google_direct/');
-        const apiKey = isGoogleDirect ? settings?.googleApiKey : settings?.openRouterKey;
-
-        if (!apiKey) {
-            throw new Error(`API Key de ${isGoogleDirect ? 'Google' : 'OpenRouter'} no configurada.`);
-        }
-
-        if (isGoogleDirect) {
-            // Google Direct SSE Stream — with optional JSON mode via responseMimeType
-            const model = modelId.split('/')[1] + ":streamGenerateContent";
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?alt=sse&key=${apiKey}`;
-
-            const generationConfig = {
-                temperature: temperature,
-                maxOutputTokens: 32768
-            };
-
-            // Enable JSON mode for Gemini if requested
-            if (useJsonMode) {
-                generationConfig.responseMimeType = "application/json";
-                generationConfig.responseSchema = AI_RESPONSE_SCHEMA;
-            }
-
-            const payload = {
-                contents: messages
-                    .filter(m => m.role !== 'system')
-                    .map(m => ({
-                        role: m.role === 'assistant' ? 'model' : 'user',
-                        parts: [{ text: m.content }]
-                    })),
-                generationConfig
-            };
-
-            // Inject system prompt as systemInstruction for Gemini
-            const systemMsg = messages.find(m => m.role === 'system');
-            if (systemMsg) {
-                payload.systemInstruction = {
-                    parts: [{ text: systemMsg.content }]
-                };
-            }
-
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-                signal: settings?.signal
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error("❌ [AIService] Error de Google:", {
-                    status: response.status,
-                    statusText: response.statusText,
-                    modelId: modelId,
-                    details: errorData?.error?.message || "Sin detalles"
-                });
-                throw new Error(`Error en Google Gemini Stream (${response.status}): ${errorData?.error?.message || response.statusText}`);
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const dataStr = line.slice(6).trim();
-                        if (!dataStr) continue;
-                        try {
-                            const data = JSON.parse(dataStr);
-                            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                            if (text) onChunk(text);
-
-                            // Capture exact usage data if returned by Google Gemini
-                            if (data.usageMetadata && onUsage) {
-                                onUsage({
-                                    promptTokens: data.usageMetadata.promptTokenCount || 0,
-                                    completionTokens: data.usageMetadata.candidatesTokenCount || 0,
-                                    totalTokens: data.usageMetadata.totalTokenCount || 0
-                                });
-                            }
-                        } catch (e) {
-                            console.warn("Gemini SSE JSON parse error:", e);
-                        }
-                    }
-                }
+        // Enable reasoning (thinking) mode for DeepSeek V4 if configured
+        if (settings?.reasoningMode) {
+            body.thinking = { type: "enabled" };
+            if (settings?.reasoningEffort) {
+                body.reasoning_effort = settings.reasoningEffort; // 'high' o 'max'
             }
         } else {
-            // OpenRouter SSE Stream (with retry on rate-limit)
-            // Some OpenRouter models support response_format; pass it when useJsonMode is true
-            const body = {
-                model: modelId,
-                messages: messages,
-                stream: true,
-                stream_options: { include_usage: true },
-                temperature: temperature,
-                max_tokens: 32768,
-            };
+            body.thinking = { type: "disabled" };
+        }
 
-            if (useJsonMode) {
-                body.response_format = { type: "json_object" };
-            }
+        const response = await fetch(DEEPSEEK_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body),
+            signal: settings?.signal
+        });
 
-            const response = await retryOnRateLimit(async () => {
-                return await fetch(OPENROUTER_URL, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`,
-                        "HTTP-Referer": window.location.origin,
-                        "X-Title": "Writer IA Studio",
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(body),
-                    signal: settings?.signal
-                });
-            });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData?.error?.message || `Error DeepSeek (${response.status})`);
+        }
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(`Error en OpenRouter Stream (${response.status}): ${errorData?.error?.message || 'Error desconocido'}`);
-            }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]' || !dataStr) continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const text = data.choices?.[0]?.delta?.content || '';
+                        if (text) onChunk(text);
 
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const dataStr = line.slice(6).trim();
-                        if (dataStr === '[DONE]' || !dataStr) continue;
-                        try {
-                            const data = JSON.parse(dataStr);
-                            const text = data.choices?.[0]?.delta?.content;
-                            if (text) onChunk(text);
-
-                            // Capture exact usage data if returned by OpenRouter
-                            if (data.usage && onUsage) {
-                                onUsage({
-                                    promptTokens: data.usage.prompt_tokens,
-                                    completionTokens: data.usage.completion_tokens,
-                                    totalTokens: data.usage.total_tokens
-                                });
-                            }
-                        } catch (e) {
-                            console.warn("OpenRouter SSE JSON parse error:", e);
+                        // Capture usage data if returned in stream
+                        if (data.usage && onUsage) {
+                            onUsage({
+                                promptTokens: data.usage.prompt_tokens,
+                                completionTokens: data.usage.completion_tokens,
+                                totalTokens: data.usage.total_tokens,
+                                reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens || 0
+                            });
                         }
+                    } catch (e) {
+                        console.warn("DeepSeek SSE parse error:", e);
                     }
                 }
             }
         }
+
+        console.log(
+            `%c✅ [AIService.generateStream] FLUJO FINALIZADO CON ÉXITO %c\n` +
+            `• Longitud del texto recibido: ${fullResponseText.length} caracteres`,
+            "background: #10b981; color: white; padding: 3px 6px; border-radius: 4px; font-weight: bold;",
+            "color: inherit;"
+        );
+        console.log("📝 Respuesta completa devuelta:", fullResponseText);
     }
 };
 

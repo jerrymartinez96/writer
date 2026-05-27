@@ -123,7 +123,8 @@ const Editor = () => {
         activeBook, profile,
         worldItems, updateCharacter, createCharacter, deleteCharacter,
         updateWorldItem, createWorldItem, deleteWorldItem,
-        activeWorldDoc, saveWorldDocContent
+        activeWorldDoc, saveWorldDocContent,
+        setSharedEditor
     } = useData();
     const isWorldDocMode = !!activeWorldDoc && !activeChapter;
     const toast = useToast();
@@ -724,7 +725,16 @@ const Editor = () => {
                 }
             }, 1500);
         }
-    })
+    });
+
+    useEffect(() => {
+        if (editor) {
+            setSharedEditor(editor);
+        }
+        return () => {
+            setSharedEditor(null);
+        };
+    }, [editor, setSharedEditor]);
 
     // Whenever the active chapter or world doc changes, reset editor content
     useEffect(() => {

@@ -55,7 +55,8 @@ const IAStudio = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, characters, worldItems,
         saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter,
-        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot
+        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot,
+        editor
     } = useData();
 
 
@@ -79,6 +80,7 @@ const IAStudio = () => {
     } = useIAStudioContext();
 
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingAutoCorrect, setIsLoadingAutoCorrect] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
     const [selectedAction, setSelectedAction] = useState('chat');
@@ -99,11 +101,24 @@ const IAStudio = () => {
     const lastParsedBlocksRef = useRef([]);
     const abortControllerRef = useRef(null);
 
-    // AI settings
-    const aiSettings = activeBook?.aiSettings || {};
-    const selectedApi = aiSettings.selectedApi || 'openrouter';
-    const selectedModel = aiSettings.selectedAiModel || 'google/gemini-2.0-flash-exp:free';
-    const temperature = aiSettings.temperature ?? 0.7;
+    // AI settings resolved from profile.aiConfig
+    const aiConfig = profile?.aiConfig || {};
+    const defaultModel = aiConfig.defaultModel || 'deepseek-v4-flash';
+    const temperature = aiConfig.temperature ?? 0.7;
+
+    // Local overrides for model, reasoning mode and reasoning effort in the active chat session
+    const [chatModel, setChatModel] = useState('');
+    const [chatReasoningMode, setChatReasoningMode] = useState(false);
+    const [chatReasoningEffort, setChatReasoningEffort] = useState('high');
+
+    // Sync overrides with user defaults when profile is loaded
+    useEffect(() => {
+        if (profile?.aiConfig) {
+            setChatModel(profile.aiConfig.defaultModel || 'deepseek-v4-flash');
+            setChatReasoningMode(profile.aiConfig.reasoningMode ?? false);
+            setChatReasoningEffort(profile.aiConfig.reasoningEffort || 'high');
+        }
+    }, [profile]);
 
     // Listen for action changes from sidebar
     useEffect(() => {
@@ -266,14 +281,9 @@ const IAStudio = () => {
 
     // Get API key
     const getApiKey = useCallback(() => {
-        if (selectedApi === 'google_direct') {
-            return aiSettings.googleApiKey || profile?.googleApiKey || localStorage.getItem('googleApiKey');
-        }
-        if (selectedApi === 'deepseek') {
-            return aiSettings.deepseekApiKey || profile?.deepseekApiKey || localStorage.getItem('deepseekApiKey');
-        }
-        return aiSettings.openRouterKey || profile?.openRouterKey || localStorage.getItem('openRouterKey');
-    }, [selectedApi, aiSettings, profile]);
+        const aiConfig = profile?.aiConfig || {};
+        return aiConfig.deepseekApiKey || profile?.deepseekApiKey || localStorage.getItem('deepseekApiKey') || '';
+    }, [profile]);
 
     // Send message
     const handleSend = useCallback(async (userMessage, overrideAction = null) => {
@@ -495,8 +505,7 @@ const IAStudio = () => {
         const apiKey = getApiKey();
 
         if (!apiKey) {
-            const apiName = selectedApi === 'google_direct' ? 'Google' : selectedApi === 'deepseek' ? 'DeepSeek' : 'OpenRouter';
-            const errorMsg = `❌ API Key de ${apiName} no configurada. Ve a Ajustes > Inteligencia para configurarla.`;
+            const errorMsg = `❌ API Key de DeepSeek no configurada. Ve a Ajustes > Mi Cuenta para configurarla.`;
 
             const userMsg = { id: generateMsgId(), role: 'user', content: userMessage, timestamp: Date.now() };
             const aiMsg = { id: generateMsgId(), role: 'assistant', content: errorMsg, timestamp: Date.now(), responseType: 'error' };
@@ -595,12 +604,10 @@ const IAStudio = () => {
             let finalUsage = null;
 
             await AIService.generateStream(aiMessages, {
-                selectedAiModel: selectedModel,
-                selectedApi: selectedApi,
-                openRouterKey: selectedApi === 'openrouter' ? apiKey : null,
-                googleApiKey: selectedApi === 'google_direct' ? apiKey : null,
-                deepseekApiKey: selectedApi === 'deepseek' ? apiKey : null,
-                reasoningMode: aiSettings.reasoningMode ?? false,
+                selectedAiModel: chatModel || defaultModel,
+                deepseekApiKey: apiKey,
+                reasoningMode: chatReasoningMode,
+                reasoningEffort: chatReasoningEffort,
                 temperature: temperature,
                 useJsonMode: useJsonMode,
                 signal: abortControllerRef.current.signal,
@@ -645,6 +652,10 @@ const IAStudio = () => {
             }, (usage) => {
                 finalUsage = usage;
             });
+
+            if (!fullResponse || fullResponse.trim().length === 0) {
+                throw new Error("La IA cerró la conexión sin devolver ningún contenido. Esto puede deberse a límites de cuota, filtros de seguridad del proveedor o inestabilidad en la red.");
+            }
 
             const isEchoingContext = fullResponse.trim().startsWith('<book>') || fullResponse.trim().startsWith('=== ');
 
@@ -750,8 +761,8 @@ const IAStudio = () => {
 
 
                 if (activeSession && finalUsage) {
-                    const inputTokenCost = aiSettings.inputTokenCost ?? 0.075;
-                    const outputTokenCost = aiSettings.outputTokenCost ?? 0.15;
+                    const inputTokenCost = aiConfig.inputTokenCost ?? 0.075;
+                    const outputTokenCost = aiConfig.outputTokenCost ?? 0.15;
                     SessionManager.addSessionCumulativeUsage(activeSession.id, finalUsage, inputTokenCost, outputTokenCost);
                 }
 
@@ -824,12 +835,55 @@ const IAStudio = () => {
             abortControllerRef.current = null;
         }
     }, [messages, activeBook, chapters, characters, worldItems, contextSelections, destinationDoc, selectedAction,
-        selectedApi, selectedModel, temperature, aiSettings, getApiKey, handleShowDiff, activeSession, setMessages,
+        chatModel, defaultModel, temperature, aiConfig, chatReasoningMode, chatReasoningEffort, getApiKey, handleShowDiff, activeSession, setMessages,
         setSessions, compressContext, activeFragment, sectionConfig, sectionMode, currentSectionIndex, accumulatedSections,
         activeChapter]);
 
     // Resolve an inconsistency by requesting the IA to edit the affected documents
     const handleResolveInconsistency = useCallback(async (messageId, inconsistencyId, option, solutionText, isRetry = false) => {
+        // OMITIR: Resolver localmente sin llamar a la IA y persistir en la sesión de inmediato
+        if (option === 'OMIT') {
+            setMessages(prev => prev.map(m => {
+                if (m.id === messageId) {
+                    const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                    const updated = currentInconsistencies.map(inc => {
+                        if (inc.id === inconsistencyId) {
+                            return { ...inc, resolved: true, selectedOption: 'OMIT', customText: 'Omitido / Ignorado por el escritor' };
+                        }
+                        return inc;
+                    });
+                    return { ...m, inconsistencies: updated };
+                }
+                return m;
+            }));
+
+            if (activeSession) {
+                setTimeout(() => {
+                    const currentSession = SessionManager.getSession(activeSession.id);
+                    if (currentSession) {
+                        const updatedMsgList = currentSession.messages.map(m => {
+                            if (m.id === messageId) {
+                                const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                                const updated = currentInconsistencies.map(inc => {
+                                    if (inc.id === inconsistencyId) {
+                                        return { ...inc, resolved: true, selectedOption: 'OMIT', customText: 'Omitido / Ignorado por el escritor' };
+                                    }
+                                    return inc;
+                                });
+                                return { ...m, inconsistencies: updated };
+                            }
+                            return m;
+                        });
+                        SessionManager.saveSessionMessages(activeSession.id, updatedMsgList);
+                    }
+                }, 100);
+            }
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '👁️ Inconsistencia omitida e ignorada.', type: 'info' }
+            }));
+            return;
+        }
+
         const apiKey = getApiKey();
         if (!apiKey) {
             window.dispatchEvent(new CustomEvent('ia-toast', {
@@ -919,8 +973,7 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             ];
 
             const response = await AIService.sendMessage(aiMessages, apiKey, {
-                model: selectedModel,
-                apiSelected: selectedApi,
+                model: chatModel || defaultModel,
                 temperature: 0.2 // Baja temperatura para parches precisos
             });
 
@@ -942,8 +995,52 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             setIsLoading(false);
         }
     }, [messages, chapters, worldItems, characters, activeBook, contextSelections, compressContext,
-        getApiKey, selectedModel, selectedApi, destinationDoc, activeChapter, handleShowDiff, activeResolution]);
+        getApiKey, chatModel, defaultModel, destinationDoc, activeChapter, handleShowDiff, activeResolution]);
 
+
+    // Reopen a resolved inconsistency back to pending state, keeping a wasResolved flag
+    const handleReopenInconsistency = useCallback((messageId, inconsistencyId) => {
+        setMessages(prev => prev.map(m => {
+            if (m.id === messageId) {
+                const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                const updated = currentInconsistencies.map(inc => {
+                    if (inc.id === inconsistencyId) {
+                        return { ...inc, resolved: false, wasResolved: true, selectedOption: null };
+                    }
+                    return inc;
+                });
+                return { ...m, inconsistencies: updated };
+            }
+            return m;
+        }));
+
+        // Persist in session
+        if (activeSession) {
+            setTimeout(() => {
+                const currentSession = SessionManager.getSession(activeSession.id);
+                if (currentSession) {
+                    const updatedMsgList = currentSession.messages.map(m => {
+                        if (m.id === messageId) {
+                            const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                            const updated = currentInconsistencies.map(inc => {
+                                if (inc.id === inconsistencyId) {
+                                    return { ...inc, resolved: false, wasResolved: true, selectedOption: null };
+                                }
+                                return inc;
+                            });
+                            return { ...m, inconsistencies: updated };
+                        }
+                        return m;
+                    });
+                    SessionManager.saveSessionMessages(activeSession.id, updatedMsgList);
+                }
+            }, 100);
+        }
+
+        window.dispatchEvent(new CustomEvent('ia-toast', {
+            detail: { message: '↩️ Inconsistencia marcada como pendiente nuevamente.', type: 'info' }
+        }));
+    }, [activeSession, setMessages, parseInconsistenciesFromResponse]);
 
     // Cancel Stream Generation
     const handleCancelStream = useCallback(() => {
@@ -954,25 +1051,7 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
         setIsLoading(false);
     }, []);
 
-    // Switch Model mid-chat
-    const handleModelChange = useCallback((modelId) => {
-        let api = selectedApi;
-        if (modelId.startsWith('google_direct/')) {
-            api = 'google_direct';
-        } else if (modelId.startsWith('deepseek-')) {
-            api = 'deepseek';
-        } else if (modelId.includes('/') && !modelId.startsWith('google_direct/')) {
-            api = 'openrouter';
-        }
 
-        updateBookData({
-            aiSettings: {
-                ...aiSettings,
-                selectedApi: api,
-                selectedAiModel: modelId
-            }
-        });
-    }, [aiSettings, selectedApi, updateBookData]);
 
     // Remove item from selected Context
     const handleRemoveContextItem = useCallback((type, id) => {
@@ -1019,6 +1098,153 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             })
             .join('');
     };
+
+    // Auto-corregir un parche utilizando la IA con contexto del documento completo
+    const handleAutoCorrectPatch = useCallback(async (blockIndex, block) => {
+        setIsLoadingAutoCorrect(true);
+        try {
+            const apiKey = getApiKey();
+            if (!apiKey) throw new Error("API Key no configurada.");
+
+            const docId = block.docId;
+            let docContent = '';
+            let docTitle = block.title;
+            if (docId) {
+                const doc = [...(worldItems || []), ...(chapters || [])].find(d => d.id === docId);
+                docContent = doc?.content || '';
+                docTitle = doc?.title || doc?.name || block.title;
+            } else {
+                const activeDoc = activeChapter || activeWorldDoc;
+                docContent = activeDoc?.content || '';
+                docTitle = activeDoc?.title || activeDoc?.name || 'Documento';
+            }
+
+            const systemPrompt = `Eres un asistente de escritura e inyección de parches ultra-preciso.
+El escritor tiene un documento de texto y quiere aplicar un cambio propuesto por la IA, pero el motor de inyección automático no pudo encontrar el fragmento original exacto.
+Tu tarea es analizar el documento completo, encontrar la ubicación semántica y lógica más probable para aplicar la corrección, y devolver un bloque [[parche]] con el [[ORIGINAL]] copiado LETRA POR LETRA Y DE FORMA TOTALMENTE EXACTA del documento provisto, para que pueda ser reemplazado de manera automatizada.
+
+NUNCA inventes, resumas ni alteres el texto de [[ORIGINAL]]. Debe existir exactamente igual dentro del texto del documento para que el buscador exacto lo localice.
+
+Devuelve tu respuesta en este formato hermético:
+[[TIPO: fragmento]]
+[[DESTINO: ${block.docId || 'activo'}]]
+[[ORIGINAL]]
+[texto exacto copiado del documento]
+[[/ORIGINAL]]
+[[REEMPLAZO]]
+${block.proposedContent}
+[[/REEMPLAZO]]`;
+
+            const userPrompt = `DOCUMENTO ORIGINAL:
+"""
+${cleanHtmlToPlainText(docContent)}
+"""
+
+FRACASO DE COINCIDENCIA:
+El motor de parches no encontró esta parte:
+"${block.original}"
+
+EL CAMBIO PROPUESTO QUE DEBES APLICAR ES:
+"${block.proposedContent}"
+
+Por favor, localiza en el documento dónde va este cambio, extrae el texto original exacto como aparece allí y genera el bloque de parche corregido con el [[ORIGINAL]] exacto.`;
+
+            const aiMessages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ];
+
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '🔄 Buscando ubicación y corrigiendo parche con la IA...', type: 'info' }
+            }));
+
+            const response = await AIService.sendMessage(aiMessages, apiKey, {
+                model: chatModel || defaultModel,
+                temperature: 0.1
+            });
+
+            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems);
+            if (parsedBlocks && parsedBlocks.length > 0) {
+                const correctedBlock = parsedBlocks[0];
+                
+                setDiffBlocks(prev => prev.map((b, idx) => {
+                    if (idx === blockIndex) {
+                        return {
+                            ...b,
+                            original: correctedBlock.original || b.original,
+                            proposedContent: correctedBlock.proposedContent || correctedBlock.content || b.proposedContent,
+                            currentContent: docContent
+                        };
+                    }
+                    return b;
+                }));
+
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: '✅ Parche corregido por la IA. ¡Coincidencia lista!', type: 'success' }
+                }));
+            } else {
+                throw new Error("No se pudo parsear el parche corregido de la respuesta de la IA.");
+            }
+
+        } catch (error) {
+            console.error("Error al autocorregir parche:", error);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: `❌ Error de autocorrección: ${error.message}`, type: 'error' }
+            }));
+        } finally {
+            setIsLoadingAutoCorrect(false);
+        }
+    }, [chapters, worldItems, activeChapter, activeWorldDoc, getApiKey, chatModel, defaultModel, destinationDoc]);
+
+    // Aplicar el parche directamente sobre el bloque que el usuario haya sombreado en el editor
+    const handleApplyToSelection = useCallback(async (blockIndex, block) => {
+        if (!editor) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '❌ El editor debe estar abierto para aplicar en la selección.', type: 'error' }
+            }));
+            return;
+        }
+
+        const { from, to } = editor.state.selection;
+        if (from === to) {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '⚠️ Por favor, sombrea/selecciona el texto en el editor donde deseas aplicar este cambio.', type: 'warning' }
+            }));
+            return;
+        }
+
+        let replacementHtml = block.proposedContent;
+        const trimmedRep = replacementHtml.trim();
+        if (trimmedRep.toLowerCase().startsWith('<p>') && trimmedRep.toLowerCase().endsWith('</p>')) {
+            replacementHtml = trimmedRep.substring(3, trimmedRep.length - 4);
+        }
+
+        try {
+            editor.chain().focus().insertContentAt({ from, to }, replacementHtml).run();
+
+            const newContent = editor.getHTML();
+            saveChapterContent(newContent, 'ia');
+
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '✅ Cambio aplicado con éxito en tu selección.', type: 'success' }
+            }));
+
+            // Eliminar el bloque resuelto de la lista y cerrar el modal si no quedan más
+            setDiffBlocks(prev => {
+                const remaining = prev.filter((_, idx) => idx !== blockIndex);
+                if (remaining.length === 0) {
+                    return null;
+                }
+                return remaining;
+            });
+
+        } catch (error) {
+            console.error("Error al aplicar en selección:", error);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: '❌ Ocurrió un error al inyectar el cambio en la selección.', type: 'error' }
+            }));
+        }
+    }, [editor, saveChapterContent]);
 
     // Apply changes — supports regular content, patches, and section accumulation
     const handleApplyChanges = useCallback(async (editedBlocks) => {
@@ -1340,14 +1566,17 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                 onOpenSessions={() => window.dispatchEvent(new CustomEvent('open-mobile-sidebar'))}
                 onExport={handleExport}
                 QUICK_ACTIONS={QUICK_ACTIONS}
-                selectedApi={selectedApi}
-                selectedModel={selectedModel}
+                selectedModel={chatModel || defaultModel}
+                chatReasoningMode={chatReasoningMode}
+                onReasoningModeChange={setChatReasoningMode}
+                chatReasoningEffort={chatReasoningEffort}
+                onReasoningEffortChange={setChatReasoningEffort}
                 contextSelections={contextSelections}
                 activeBook={activeBook}
                 chapters={chapters}
                 characters={characters}
                 worldItems={worldItems}
-                onModelChange={handleModelChange}
+                onModelChange={setChatModel}
                 onRemoveContextItem={handleRemoveContextItem}
                 onCancelStream={handleCancelStream}
                 onRegenerate={handleRegenerate}
@@ -1360,6 +1589,7 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                 accumulatedSections={accumulatedSections}
                 destinationDoc={destinationDoc}
                 onResolveInconsistency={handleResolveInconsistency}
+                onReopenInconsistency={handleReopenInconsistency}
             />
 
             {/* Diff Modal */}
@@ -1387,6 +1617,9 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
                     }}
                     accumulatedSections={accumulatedSections}
                     activeResolution={activeResolution}
+                    onAutoCorrectPatch={handleAutoCorrectPatch}
+                    onApplyToSelection={handleApplyToSelection}
+                    isLoadingAutoCorrect={isLoadingAutoCorrect}
                 />
             )}
 
