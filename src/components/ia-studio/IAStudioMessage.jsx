@@ -372,8 +372,38 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
         );
     }
 
-    // Streaming in progress — show raw text + cursor
+    // Streaming in progress — show raw text + cursor or premium interactive skeletons for tool calls
     if (isStreaming) {
+        const isChapter = content.includes('🆕');
+        const isPatch = content.includes('✂️');
+        const isInconsistency = content.includes('⚠️');
+
+        if (isChapter || isPatch || isInconsistency) {
+            return (
+                <div className="space-y-3 p-3.5 border border-indigo-500/20 bg-indigo-500/[0.02] rounded-2xl animate-pulse min-w-[240px] sm:min-w-[320px] shadow-[0_0_12px_rgba(99,102,241,0.05)] border-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                        {isChapter && <FileText size={14} className="animate-spin text-emerald-400 shrink-0" style={{ animationDuration: '3s' }} />}
+                        {isPatch && <FileDiff size={14} className="animate-bounce text-indigo-400 shrink-0" />}
+                        {isInconsistency && <AlertTriangle size={14} className="animate-pulse text-amber-400 shrink-0" />}
+                        <span className="text-[10px] font-black uppercase tracking-wider">
+                            {isChapter && 'Generando Nuevo Capítulo...'}
+                            {isPatch && 'Redactando Parche Quirúrgico...'}
+                            {isInconsistency && 'Analizando Lore y Conflictos...'}
+                        </span>
+                    </div>
+
+                    <div className="space-y-2 pt-1">
+                        <div className="h-3 w-11/12 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" />
+                        <div className="h-3 w-4/5 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.15s' }} />
+                    </div>
+
+                    <div className="text-[10px] font-mono text-[var(--text-muted)] opacity-60 overflow-hidden text-ellipsis whitespace-nowrap bg-[var(--bg-app)]/40 p-2 rounded-xl border border-[var(--border-main)]/20 leading-none">
+                        {content}
+                    </div>
+                </div>
+            );
+        }
+
         return (
             <div>
                 <span className="whitespace-pre-wrap">{content}</span>

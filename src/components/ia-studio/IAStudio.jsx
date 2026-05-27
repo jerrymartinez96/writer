@@ -18,6 +18,7 @@ import {
     SYSTEM_WORLD_ITEM_IDS,
     parseInconsistenciesFromResponse,
     SYSTEM_WORLD_ITEM_LABELS,
+    parseToolCallResponse,
 } from './IAStudioUtils';
 
 import { AIService } from '../../services/AIService';
@@ -602,15 +603,65 @@ const IAStudio = () => {
         try {
             let fullResponse = '';
             let finalUsage = null;
+            let lastToolCall = { name: '', args: '' };
+
+            const modelId = chatModel || defaultModel;
+            const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
 
             await AIService.generateStream(aiMessages, {
-                selectedAiModel: chatModel || defaultModel,
+                selectedAiModel: modelId,
                 deepseekApiKey: apiKey,
                 reasoningMode: chatReasoningMode,
                 reasoningEffort: chatReasoningEffort,
                 temperature: temperature,
                 useJsonMode: useJsonMode,
                 signal: abortControllerRef.current.signal,
+                enableTools: enableTools,
+                onToolCall: (name, argsText, isComplete) => {
+                    lastToolCall = { name, args: argsText };
+                    
+                    const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems);
+                    let streamResponseType = undefined;
+                    let displayContent = 'Procesando comando inteligente...';
+                    let inconsistencies = undefined;
+
+                    if (name === 'crear_capitulo') {
+                        streamResponseType = 'content';
+                        const block = parsedBlocks[0];
+                        displayContent = `🆕 **Nuevo Capítulo (Streaming)**: ${block?.title || 'Creando...'}\n\n`;
+                    } else if (name === 'aplicar_parche') {
+                        streamResponseType = 'patch';
+                        const patch = parsedBlocks[0];
+                        displayContent = `✂️ **Fragmento editado (Streaming)** en *${patch?.title || 'Buscando documento...'}*\n\n**Original:**\n> ${patch?.original || '...'}\n\n**Reemplazo:**\n> ${patch?.content || '...'}`;
+                    } else if (name === 'registrar_inconsistencia') {
+                        streamResponseType = 'inconsistencies';
+                        const block = parsedBlocks[0];
+                        inconsistencies = block?.inconsistencies || [];
+                        displayContent = `⚠️ Se está detectando una inconsistencia de lore...\n\n**Título:** ${inconsistencies[0]?.title || '...'}\n**Conflicto:** ${inconsistencies[0]?.problem || '...'}`;
+                    }
+
+                    setMessages(prev => prev.map(m =>
+                        m.id === aiMsgId ? { 
+                            ...m, 
+                            content: displayContent, 
+                            rawResponse: isComplete ? JSON.stringify({ tool_call: { name, arguments: argsText } }) : '', 
+                            responseType: streamResponseType,
+                            inconsistencies: inconsistencies
+                        } : m
+                    ));
+                    
+                    if (activeSession) {
+                        SessionManager.updateLastAssistantMessage(
+                            activeSession.id, 
+                            displayContent, 
+                            isComplete, 
+                            streamResponseType,
+                            isComplete ? JSON.stringify({ tool_call: { name, arguments: argsText } }) : undefined,
+                            undefined,
+                            inconsistencies
+                        );
+                    }
+                }
             }, (chunk) => {
                 fullResponse += chunk;
                 
@@ -653,7 +704,7 @@ const IAStudio = () => {
                 finalUsage = usage;
             });
 
-            if (!fullResponse || fullResponse.trim().length === 0) {
+            if ((!fullResponse || fullResponse.trim().length === 0) && !lastToolCall.name) {
                 throw new Error("La IA cerró la conexión sin devolver ningún contenido. Esto puede deberse a límites de cuota, filtros de seguridad del proveedor o inestabilidad en la red.");
             }
 
@@ -665,100 +716,115 @@ const IAStudio = () => {
                     m.id === aiMsgId ? { ...m, content: errorMsg, isStreaming: false, responseType: 'error' } : m
                 ));
             } else {
-                const parsedBlocks = parseDestinationsFromResponse(fullResponse, destinationDoc, chapters, worldItems);
-
-                const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
-                const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
-                const patchBlocks = parsedBlocks.filter(b => b.isPatch);
-                const sectionBlocks = parsedBlocks.filter(b => b.isSection);
-                const sceneBlocks = parsedBlocks.filter(b => b.isScene);
-
-                let displayContent;
+                let parsedBlocks = [];
+                let displayContent = '';
                 let responseType = 'analysis';
+                let inconsistencies = undefined;
 
-                if (patchBlocks.length > 0) {
-                    // Patch response — mostrar resumen del cambio
-                    responseType = 'patch';
-                    const patch = patchBlocks[0];
-                    const originalPreview = (patch.original || '').substring(0, 120);
-                    const replacementWords = cleanText(patch.content || '').split(/\s+/).filter(Boolean).length;
-                    displayContent = `✂️ **Fragmento editado** — ${replacementWords} palabras en el reemplazo\n\n${patch.context ? `> ${patch.context}` : ''}`;
-
-                    if (originalPreview) {
-                        displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
+                if (lastToolCall.name) {
+                    parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems);
+                    const block = parsedBlocks[0];
+                    if (lastToolCall.name === 'crear_capitulo') {
+                        responseType = 'content';
+                        displayContent = `🆕 **Nuevo Capítulo creado con éxito**\n\nTítulo: **${block?.title}**`;
+                    } else if (lastToolCall.name === 'aplicar_parche') {
+                        responseType = 'patch';
+                        const patch = block;
+                        const originalPreview = (patch.original || '').substring(0, 120);
+                        const replacementWords = cleanText(patch.content || '').split(/\s+/).filter(Boolean).length;
+                        displayContent = `✂️ **Fragmento editado** — ${replacementWords} palabras en el reemplazo\n\n${patch.context ? `> ${patch.context}` : ''}`;
+                        if (originalPreview) {
+                            displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
+                        }
+                    } else if (lastToolCall.name === 'registrar_inconsistencia') {
+                        responseType = 'inconsistencies';
+                        inconsistencies = block?.inconsistencies || [];
+                        displayContent = `⚠️ Se han detectado inconsistencias de lore. Revisa y resuelve las tarjetas mostradas arriba.`;
                     }
-                } else if (sceneBlocks.length > 0) {
-                    // Scene response
-                    responseType = 'scene';
-                    const scene = sceneBlocks[0];
-                    const wordCount = cleanText(scene.content || '').split(/\s+/).filter(Boolean).length;
-                    displayContent = `🎬 **Escena ${scene.sceneIndex || 1}: ${scene.titleOriginal || 'Nueva Escena'}** generada — ${wordCount} palabras`;
-                } else if (sectionBlocks.length > 0) {
-                    // Section response
-                    responseType = 'section';
-                    const section = sectionBlocks[0];
-                    const wordCount = cleanText(section.content || '').split(/\s+/).filter(Boolean).length;
-                    displayContent = `📄 **Sección ${section.sectionIndex} de ${section.totalSections}** generada — ${wordCount} palabras`;
-
-                    // Acumulate section
-                    const newSection = { sectionIndex: section.sectionIndex, html: section.content, title: section.title };
-                    setAccumulatedSections(prev => {
-                        const updated = [...prev.filter(s => s.sectionIndex !== section.sectionIndex), newSection];
-                        return updated.sort((a, b) => a.sectionIndex - b.sectionIndex);
-                    });
-                } else if (htmlBlocks.length > 0) {
-                    responseType = 'content';
-                    const parsed = tryParseAIJsonExported(fullResponse);
-                    if (parsed?.html) {
-                        const preview = cleanText(parsed.html);
-                        displayContent = preview.substring(0, 400) + (preview.length > 400 ? '…' : '');
-                    } else {
-                        displayContent = htmlBlocks.map(b => {
-                            const actionLabel = b.mode === 'new' ? '🆕 Nuevo documento' : `✏️ ${b.title}`;
-                            return actionLabel;
-                        }).join('\n');
-                    }
-                } else if (textBlocks.length > 0) {
-                    responseType = parsedBlocks[0]?.responseType || 'analysis';
-                    displayContent = textBlocks.map(b => b.content).join('\n\n');
                 } else {
-                    displayContent = fullResponse;
+                    parsedBlocks = parseDestinationsFromResponse(fullResponse, destinationDoc, chapters, worldItems);
+
+                    const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
+                    const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
+                    const patchBlocks = parsedBlocks.filter(b => b.isPatch);
+                    const sectionBlocks = parsedBlocks.filter(b => b.isSection);
+                    const sceneBlocks = parsedBlocks.filter(b => b.isScene);
+
+                    if (patchBlocks.length > 0) {
+                        responseType = 'patch';
+                        const patch = patchBlocks[0];
+                        const originalPreview = (patch.original || '').substring(0, 120);
+                        const replacementWords = cleanText(patch.content || '').split(/\s+/).filter(Boolean).length;
+                        displayContent = `✂️ **Fragmento editado** — ${replacementWords} palabras en el reemplazo\n\n${patch.context ? `> ${patch.context}` : ''}`;
+
+                        if (originalPreview) {
+                            displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
+                        }
+                    } else if (sceneBlocks.length > 0) {
+                        responseType = 'scene';
+                        const scene = sceneBlocks[0];
+                        const wordCount = cleanText(scene.content || '').split(/\s+/).filter(Boolean).length;
+                        displayContent = `🎬 **Escena ${scene.sceneIndex || 1}: ${scene.titleOriginal || 'Nueva Escena'}** generada — ${wordCount} palabras`;
+                    } else if (sectionBlocks.length > 0) {
+                        responseType = 'section';
+                        const section = sectionBlocks[0];
+                        const wordCount = cleanText(section.content || '').split(/\s+/).filter(Boolean).length;
+                        displayContent = `📄 **Sección ${section.sectionIndex} de ${section.totalSections}** generada — ${wordCount} palabras`;
+
+                        const newSection = { sectionIndex: section.sectionIndex, html: section.content, title: section.title };
+                        setAccumulatedSections(prev => {
+                            const updated = [...prev.filter(s => s.sectionIndex !== section.sectionIndex), newSection];
+                            return updated.sort((a, b) => a.sectionIndex - b.sectionIndex);
+                        });
+                    } else if (htmlBlocks.length > 0) {
+                        responseType = 'content';
+                        const parsed = tryParseAIJsonExported(fullResponse);
+                        if (parsed?.html) {
+                            const preview = cleanText(parsed.html);
+                            displayContent = preview.substring(0, 400) + (preview.length > 400 ? '…' : '');
+                        } else {
+                            displayContent = htmlBlocks.map(b => {
+                                const actionLabel = b.mode === 'new' ? '🆕 Nuevo documento' : `✏️ ${b.title}`;
+                                return actionLabel;
+                            }).join('\n');
+                        }
+                    } else if (textBlocks.length > 0) {
+                        responseType = parsedBlocks[0]?.responseType || 'analysis';
+                        displayContent = textBlocks.map(b => b.content).join('\n\n');
+                    } else {
+                        displayContent = fullResponse;
+                    }
+
+                    const lowerResp = fullResponse.toLowerCase();
+                    if (responseType === 'analysis' && (lowerResp.includes('<inconsistencia') || lowerResp.includes('[[inconsistencia'))) {
+                        responseType = 'inconsistencies';
+                    }
+
+                    inconsistencies = responseType === 'inconsistencies'
+                        ? (parsedBlocks[0]?.inconsistencies || parseInconsistenciesFromResponse(fullResponse) || [])
+                        : undefined;
+
+                    if (responseType === 'inconsistencies') {
+                        displayContent = (displayContent || fullResponse)
+                            .replace(/\[\[inconsistencia[\s\S]*?\[\/inconsistencia\]\]/gi, '')
+                            .replace(/\[\[inconsistencia[^\]]*\]\]([\s\S]*?)\[\[\/inconsistencia\]\]/gi, '')
+                            .replace(/\[\[inconsistencia\s+\d+[^\]]*\]\][\s\S]*?(?=\[\[inconsistencia|\z)/gi, '')
+                            .replace(/\[\[titulo\]\][\s\S]*?\[\[\/titulo\]\]/gi, '')
+                            .replace(/\[\[problema\]\][\s\S]*?\[\[\/problema\]\]/gi, '')
+                            .replace(/\[\[solucion[^\]]*\]\][\s\S]*?\[\[\/solucion\]\]/gi, '')
+                            .replace(/UBICACIÓN:\s*[^\n]+\n?/gi, '')
+                            .replace(/SOLUCIÓ?N\s+[A-D]\s*:\s*[\s\S]*?(?=\n(?:SOLUCIÓ?N|\[\[|\z))/gi, '')
+                            .replace(/<inconsistencia[\s\S]*?<\/inconsistencia>/gi, '')
+                            .replace(/<inconsistencia[^>]*>([\s\S]*?)<\/inconsistencia>/gi, '')
+                            .replace(/<titulo>[\s\S]*?<\/titulo>/gi, '')
+                            .replace(/<problema>[\s\S]*?<\/problema>/gi, '')
+                            .replace(/<solucion[^>]*>[\s\S]*?<\/solucion>/gi, '')
+                            .replace(/```xml[\s\S]*?```/gi, '')
+                            .replace(/```[\s\S]*?```/gi, '')
+                            .replace(/\n{3,}/g, '\n\n')
+                            .trim();
+                    }
                 }
-
-                // Si la respuesta contiene inconsistencias XML o de doble corchete, promover su tipo a 'inconsistencias'
-                // NOTA: Usar .toLowerCase() porque la IA a veces escribe [[INCONSISTENCIA]] en mayúsculas
-                const lowerResp = fullResponse.toLowerCase();
-                if (responseType === 'analysis' && (lowerResp.includes('<inconsistencia') || lowerResp.includes('[[inconsistencia'))) {
-                    responseType = 'inconsistencies';
-                }
-
-
-                const inconsistencies = responseType === 'inconsistencies'
-                    ? (parsedBlocks[0]?.inconsistencies || parseInconsistenciesFromResponse(fullResponse) || [])
-                    : undefined;
-
-                if (responseType === 'inconsistencies') {
-                    // Limpiar el XML crudo, los dobles corchetes y los bloques de código que lo envuelven del displayContent
-                    displayContent = (displayContent || fullResponse)
-                        .replace(/\[\[inconsistencia[\s\S]*?\[\/inconsistencia\]\]/gi, '')
-                        .replace(/\[\[inconsistencia[^\]]*\]\]([\s\S]*?)\[\[\/inconsistencia\]\]/gi, '')
-                        .replace(/\[\[inconsistencia\s+\d+[^\]]*\]\][\s\S]*?(?=\[\[inconsistencia|\z)/gi, '')
-                        .replace(/\[\[titulo\]\][\s\S]*?\[\[\/titulo\]\]/gi, '')
-                        .replace(/\[\[problema\]\][\s\S]*?\[\[\/problema\]\]/gi, '')
-                        .replace(/\[\[solucion[^\]]*\]\][\s\S]*?\[\[\/solucion\]\]/gi, '')
-                        .replace(/UBICACIÓN:\s*[^\n]+\n?/gi, '')
-                        .replace(/SOLUCIÓ?N\s+[A-D]\s*:\s*[\s\S]*?(?=\n(?:SOLUCIÓ?N|\[\[|\z))/gi, '')
-                        .replace(/<inconsistencia[\s\S]*?<\/inconsistencia>/gi, '')
-                        .replace(/<inconsistencia[^>]*>([\s\S]*?)<\/inconsistencia>/gi, '')
-                        .replace(/<titulo>[\s\S]*?<\/titulo>/gi, '')
-                        .replace(/<problema>[\s\S]*?<\/problema>/gi, '')
-                        .replace(/<solucion[^>]*>[\s\S]*?<\/solucion>/gi, '')
-                        .replace(/```xml[\s\S]*?```/gi, '')
-                        .replace(/```[\s\S]*?```/gi, '')
-                        .replace(/\n{3,}/g, '\n\n')
-                        .trim();
-                }
-
 
                 if (activeSession && finalUsage) {
                     const inputTokenCost = aiConfig.inputTokenCost ?? 0.075;
@@ -770,7 +836,7 @@ const IAStudio = () => {
                     m.id === aiMsgId ? { 
                         ...m, 
                         content: displayContent || fullResponse, 
-                        rawResponse: fullResponse, 
+                        rawResponse: lastToolCall.name ? JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }) : fullResponse, 
                         isStreaming: false, 
                         responseType, 
                         inconsistencies,
@@ -783,11 +849,10 @@ const IAStudio = () => {
                         displayContent || fullResponse, 
                         true, 
                         responseType, 
-                        fullResponse, 
+                        lastToolCall.name ? JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }) : fullResponse, 
                         finalUsage,
                         inconsistencies
                     );
-                    // Sync active session and sessions in state with cumulativeUsage changes
                     setActiveSession(SessionManager.getSession(activeSession.id));
                     setSessions(SessionManager.getSessions());
                 }
@@ -798,7 +863,6 @@ const IAStudio = () => {
                     handleShowDiff(parsedBlocks);
                 }
 
-                // Advance section index if in section mode
                 if (effectiveAction === 'seccion' && sectionConfig && currentSectionIndex < sectionConfig.total) {
                     setCurrentSectionIndex(prev => prev + 1);
                 }

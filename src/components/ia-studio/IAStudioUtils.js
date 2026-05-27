@@ -857,6 +857,23 @@ export const isStructuredResponse = (text) => {
 export const parseDestinationsFromResponse = (response, destinationDoc, chapters = [], worldItems = []) => {
     if (!response) return [];
 
+    // Comprobar si la respuesta contiene argumentos JSON directos de una llamada de herramientas
+    const trimmed = response.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+            const parsedJson = JSON.parse(trimmed);
+            if (parsedJson.parches) {
+                return parseToolCallResponse('aplicar_parches_resolucion', parsedJson, destinationDoc, chapters, worldItems);
+            }
+            if (parsedJson.texto_original_exacto) {
+                return parseToolCallResponse('localizar_parche_exacto', parsedJson, destinationDoc, chapters, worldItems);
+            }
+            if (parsedJson.texto_original) {
+                return parseToolCallResponse('aplicar_parche', parsedJson, destinationDoc, chapters, worldItems);
+            }
+        } catch (e) {}
+    }
+
     // Attempt to parse as XML semantic tags
     const parsedXml = tryParseAIXml(response);
     if (parsedXml) {
@@ -2292,3 +2309,166 @@ export const SYSTEM_WORLD_ITEM_LABELS = {
     system_estructura: 'Estructura',
     system_core: 'Información General',
 };
+
+/**
+ * Parsea respuestas de DeepSeek Tool Calling a la estructura de bloques interna.
+ */
+export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters = [], worldItems = []) => {
+    if (!name || !argsJson) return [];
+    
+    let args = {};
+    try {
+        args = typeof argsJson === 'string' ? JSON.parse(argsJson) : argsJson;
+    } catch (e) {
+        // Fallback simple para parsing parcial durante streaming
+        const cleanJson = typeof argsJson === 'string' ? argsJson.trim() : '';
+        try {
+            const extractProp = (propName) => {
+                const r = new RegExp(`"${propName}"\\s*:\\s*"([^"]*)"`, 'i');
+                const m = r.exec(cleanJson);
+                return m ? m[1] : '';
+            };
+            if (name === 'crear_capitulo') {
+                args.titulo = extractProp('titulo');
+                args.contenido_html = extractProp('contenido_html');
+            } else if (name === 'aplicar_parche') {
+                args.documento_id = extractProp('documento_id');
+                args.texto_original = extractProp('texto_original');
+                args.texto_reemplazo = extractProp('texto_reemplazo');
+                args.contexto_linea = extractProp('contexto_linea');
+            } else if (name === 'registrar_inconsistencia') {
+                args.titulo = extractProp('titulo');
+                args.problema = extractProp('problema');
+            }
+        } catch (innerErr) {}
+    }
+
+    if (name === 'crear_capitulo') {
+        return [{
+            docType: 'chapter',
+            docId: null,
+            mode: 'new',
+            title: args.titulo || 'Nuevo capítulo',
+            content: args.contenido_html || '',
+            responseType: 'content'
+        }];
+    }
+
+    if (name === 'aplicar_parche') {
+        let dest = destinationDoc || { mode: 'auto' };
+        if (args.documento_id) {
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            if (resolved) {
+                dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
+            } else {
+                dest = { mode: 'auto', docTitle: args.documento_id };
+            }
+        }
+        return [{
+            docType: dest.docType || 'chapter',
+            docId: dest.docId || null,
+            mode: dest.mode || 'auto',
+            title: dest.docTitle || 'Fragmento',
+            content: args.texto_reemplazo || '',
+            original: args.texto_original || '',
+            responseType: 'patch',
+            isPatch: true,
+            context: args.contexto_linea || ''
+        }];
+    }
+
+    if (name === 'registrar_inconsistencia') {
+        const inconsistencies = [{
+            id: 'inc_' + Math.random().toString(36).substr(2, 9),
+            files: Array.isArray(args.archivos_involucrados) 
+                ? args.archivos_involucrados.map(f => {
+                    const resolved = resolveTargetDoc(f, chapters, worldItems);
+                    return resolved ? resolved.docId : f;
+                  })
+                : [],
+            title: args.titulo || 'Conflicto de lore',
+            problem: args.problema || '',
+            options: Array.isArray(args.opciones_resolucion)
+                ? args.opciones_resolucion.map(o => ({
+                    letter: (o.letra || '').toUpperCase().trim(),
+                    text: o.texto || ''
+                  }))
+                : [],
+            resolved: false,
+            selectedOption: null,
+            customText: ''
+        }];
+        return [{
+            docType: 'text',
+            docId: null,
+            mode: 'text',
+            title: 'Inconsistencias',
+            content: 'Se han detectado inconsistencias de lore.',
+            responseType: 'inconsistencies',
+            inconsistencies: inconsistencies
+        }];
+    }
+
+    if (name === 'aplicar_parches_resolucion') {
+        const parches = Array.isArray(args.parches) ? args.parches : [];
+        return parches.map(patch => {
+            let dest = destinationDoc || { mode: 'auto' };
+            if (patch.documento_id) {
+                const resolved = resolveTargetDoc(patch.documento_id, chapters, worldItems);
+                if (resolved) {
+                    dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
+                } else {
+                    dest = { mode: 'auto', docTitle: patch.documento_id };
+                }
+            }
+            return {
+                docType: dest.docType || null,
+                docId: dest.docId || null,
+                mode: dest.mode || 'auto',
+                title: dest.docTitle || patch.documento_id || 'Fragmento',
+                content: patch.texto_reemplazo || '',
+                original: patch.texto_original || '',
+                responseType: 'patch',
+                isPatch: true,
+                context: 'Resolución de conflicto'
+            };
+        });
+    }
+
+    if (name === 'localizar_parche_exacto') {
+        let dest = destinationDoc || { mode: 'auto' };
+        if (args.documento_id) {
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            if (resolved) {
+                dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
+            } else {
+                dest = { mode: 'auto', docTitle: args.documento_id };
+            }
+        }
+        return [{
+            docType: dest.docType || 'chapter',
+            docId: dest.docId || null,
+            mode: dest.mode || 'auto',
+            title: dest.docTitle || 'Fragmento',
+            content: args.texto_reemplazo || '',
+            original: args.texto_original_exacto || '',
+            responseType: 'patch',
+            isPatch: true,
+            context: 'Autocorrección de parche'
+        }];
+    }
+
+    if (name === 'sugerir_nombres' || name === 'proponer_preguntas_entrevista' || name === 'sugerir_respuestas_rapidas') {
+        return [{
+            docType: 'text',
+            docId: null,
+            mode: 'text',
+            title: 'Asistente de Personajes',
+            content: typeof argsJson === 'string' ? argsJson : JSON.stringify(args),
+            responseType: 'analysis'
+        }];
+    }
+
+    return [];
+};
+

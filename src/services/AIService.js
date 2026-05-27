@@ -59,6 +59,173 @@ export const AI_RESPONSE_SCHEMA = {
     required: ["type"]
 };
 
+export const DEEPSEEK_SCHEMAS = [
+    {
+        type: "function",
+        function: {
+            name: "crear_capitulo",
+            description: "Crea un nuevo capítulo en el manuscrito con el título y contenido especificados.",
+            parameters: {
+                type: "object",
+                properties: {
+                    titulo: { type: "string", description: "El título del nuevo capítulo." },
+                    contenido_html: { type: "string", description: "El contenido narrativo en formato HTML limpio para el editor." }
+                },
+                required: ["titulo", "contenido_html"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "aplicar_parche",
+            description: "Reemplaza un fragmento de texto exacto de un capítulo o documento existente por un nuevo texto revisado o corregido.",
+            parameters: {
+                type: "object",
+                properties: {
+                    documento_id: { type: "string", description: "El ID o título del documento/capítulo a modificar." },
+                    texto_original: { type: "string", description: "El fragmento exacto que se desea cambiar de forma textual." },
+                    texto_reemplazo: { type: "string", description: "El nuevo texto corregido que sustituye al original." },
+                    contexto_linea: { type: "string", description: "Opcional. Contexto o líneas alrededor para asegurar el match exacto." }
+                },
+                required: ["documento_id", "texto_original", "texto_reemplazo"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "registrar_inconsistencia",
+            description: "Registra inconsistencias dramáticas, lógicas o vacíos de lore en el manuscrito para su revisión interactiva por el usuario.",
+            parameters: {
+                type: "object",
+                properties: {
+                    titulo: { type: "string", description: "Título descriptivo del conflicto o inconsistencia de lore." },
+                    problema: { type: "string", description: "Explicación detallada del porqué existe una inconsistencia." },
+                    archivos_involucrados: { 
+                        type: "array", 
+                        items: { type: "string" }, 
+                        description: "Nombres o IDs de los capítulos, personajes o elementos del lore en conflicto." 
+                    },
+                    opciones_resolucion: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                letra: { type: "string", description: "Opción A, B, C, D" },
+                                texto: { type: "string", description: "Propuesta de solución para resolver la inconsistencia." }
+                            },
+                            required: ["letra", "texto"]
+                        }
+                    }
+                },
+                required: ["titulo", "problema", "archivos_involucrados", "opciones_resolucion"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "aplicar_parches_resolucion",
+            description: "Aplica de forma simultánea múltiples parches de texto para resolver inconsistencias o actualizar varios documentos a la vez de forma quirúrgica.",
+            parameters: {
+                type: "object",
+                properties: {
+                    parches: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                documento_id: { type: "string", description: "El ID o título del documento a modificar." },
+                                texto_original: { type: "string", description: "El fragmento exacto que se desea cambiar." },
+                                texto_reemplazo: { type: "string", description: "El nuevo texto corregido." }
+                            },
+                            required: ["documento_id", "texto_original", "texto_reemplazo"]
+                        }
+                    }
+                },
+                required: ["parches"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "localizar_parche_exacto",
+            description: "Busca y ubica un parche propuesto en el documento, identificando el texto original exacto para su reemplazo.",
+            parameters: {
+                type: "object",
+                properties: {
+                    documento_id: { type: "string", description: "El ID o título del documento." },
+                    texto_original_exacto: { type: "string", description: "El texto original encontrado en el documento." },
+                    texto_reemplazo: { type: "string", description: "El nuevo texto corregido." }
+                },
+                required: ["documento_id", "texto_original_exacto", "texto_reemplazo"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "sugerir_nombres",
+            description: "Sugiere una lista de nombres creativos para personajes basados en el contexto literario.",
+            parameters: {
+                type: "object",
+                properties: {
+                    nombres: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                nombre: { type: "string", description: "El nombre sugerido." },
+                                personalidad: { type: "string", description: "Rasgo o justificación del nombre." }
+                            },
+                            required: ["nombre", "personalidad"]
+                        }
+                    }
+                },
+                required: ["nombres"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "proponer_preguntas_entrevista",
+            description: "Propone preguntas personalizadas de entrevista para moldear un personaje.",
+            parameters: {
+                type: "object",
+                properties: {
+                    preguntas: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Lista de preguntas para la entrevista."
+                    }
+                },
+                required: ["preguntas"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "sugerir_respuestas_rapidas",
+            description: "Propone sugerencias de respuestas rápidas para que el escritor responda a la entrevista de personajes.",
+            parameters: {
+                type: "object",
+                properties: {
+                    respuestas: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Lista de respuestas cortas y creativas."
+                    }
+                },
+                required: ["respuestas"]
+            }
+        }
+    }
+];
+
 export const AIService = {
     /**
      * Models available (DeepSeek V4 updated list)
@@ -119,8 +286,14 @@ export const AIService = {
                 max_tokens: options.max_tokens || 8192,
             };
 
-            // Enable JSON mode if requested
-            if (options.useJsonMode) {
+            // Enable schemas for tool calling if requested
+            if (options.enableTools || (typeof model === 'string' && model.startsWith('deepseek') && options.enableTools !== false)) {
+                body.tools = DEEPSEEK_SCHEMAS;
+                body.tool_choice = "auto";
+            }
+
+            // Enable JSON mode if requested (only if tools are not active)
+            if (options.useJsonMode && !body.tools) {
                 body.response_format = { type: "json_object" };
             }
 
@@ -152,7 +325,12 @@ export const AIService = {
 
             const data = await response.json();
             if (data.choices && data.choices[0] && data.choices[0].message) {
-                return data.choices[0].message.content || "";
+                const msg = data.choices[0].message;
+                if (msg.tool_calls && msg.tool_calls.length > 0) {
+                    // Si se llamó una herramienta síncrona, retornamos sus argumentos como string
+                    return msg.tool_calls[0].function?.arguments || "";
+                }
+                return msg.content || "";
             }
             throw new Error("Respuesta de DeepSeek malformada.");
         } catch (error) {
@@ -205,8 +383,14 @@ export const AIService = {
             max_tokens: 32768
         };
 
-        // Enable JSON mode if requested
-        if (useJsonMode) {
+        // Inject schemas for DeepSeek tool calling if requested
+        if (settings?.enableTools) {
+            body.tools = DEEPSEEK_SCHEMAS;
+            body.tool_choice = "auto";
+        }
+
+        // Enable JSON mode if requested (only if tools are not being called)
+        if (useJsonMode && !settings?.enableTools) {
             body.response_format = { type: "json_object" };
         }
 
@@ -238,6 +422,7 @@ export const AIService = {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let activeToolCalls = [];
 
         while (true) {
             const { done, value } = await reader.read();
@@ -253,8 +438,35 @@ export const AIService = {
                     if (dataStr === '[DONE]' || !dataStr) continue;
                     try {
                         const data = JSON.parse(dataStr);
-                        const text = data.choices?.[0]?.delta?.content || '';
+                        const delta = data.choices?.[0]?.delta;
+                        const text = delta?.content || '';
                         if (text) onChunk(text);
+
+                        // Capture tool calls
+                        if (delta?.tool_calls && Array.isArray(delta.tool_calls)) {
+                            delta.tool_calls.forEach(tc => {
+                                const idx = tc.index ?? 0;
+                                if (!activeToolCalls[idx]) {
+                                    activeToolCalls[idx] = {
+                                        id: tc.id || '',
+                                        name: tc.function?.name || '',
+                                        arguments: tc.function?.arguments || ''
+                                    };
+                                } else {
+                                    if (tc.id) activeToolCalls[idx].id = tc.id;
+                                    if (tc.function?.name) activeToolCalls[idx].name = tc.function.name;
+                                    if (tc.function?.arguments) activeToolCalls[idx].arguments += tc.function.arguments;
+                                }
+
+                                if (settings?.onToolCall && activeToolCalls[idx].name) {
+                                    settings.onToolCall(
+                                        activeToolCalls[idx].name,
+                                        activeToolCalls[idx].arguments,
+                                        false
+                                    );
+                                }
+                            });
+                        }
 
                         // Capture usage data if returned in stream
                         if (data.usage && onUsage) {
@@ -270,6 +482,15 @@ export const AIService = {
                     }
                 }
             }
+        }
+
+        // Trigger completed callbacks for tool calls if any
+        if (activeToolCalls.length > 0 && settings?.onToolCall) {
+            activeToolCalls.forEach(tc => {
+                if (tc && tc.name) {
+                    settings.onToolCall(tc.name, tc.arguments, true);
+                }
+            });
         }
 
         console.log(
