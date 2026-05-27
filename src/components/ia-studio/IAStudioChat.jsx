@@ -1544,7 +1544,7 @@ const IAStudioChat = ({
 
 
     return (
-        <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-app)]">
+        <div className="flex-1 flex flex-col min-h-0 max-w-full overflow-x-hidden bg-[var(--bg-app)]">
             {/* Header */}
             <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -1922,7 +1922,7 @@ const IAStudioChat = ({
                                 {selectedChapterIds.length + selectedWorldItemIds.length} elem
                             </strong>
                         </button>
-                        <span className="opacity-30 hidden xs:inline">·</span>
+                        <span className="opacity-30 hidden sm:inline">·</span>
                         <button
                             type="button"
                             onClick={onOpenContext}
@@ -2060,7 +2060,7 @@ const IAStudioChat = ({
                                 onChange={(e) => handleInputChange(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Escribe tu mensaje... (Enter para enviar o '/' para comandos)"
-                                className="flex-1 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
+                                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
                                 rows={1}
                                 disabled={isLoading}
                             />

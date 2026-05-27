@@ -96,30 +96,40 @@ export const DEEPSEEK_SCHEMAS = [
         type: "function",
         function: {
             name: "registrar_inconsistencia",
-            description: "Registra inconsistencias dramáticas, lógicas o vacíos de lore en el manuscrito para su revisión interactiva por el usuario.",
+            description: "Registra una o más inconsistencias dramáticas, lógicas o vacíos de lore en el manuscrito para su revisión interactiva por el usuario.",
             parameters: {
                 type: "object",
                 properties: {
-                    titulo: { type: "string", description: "Título descriptivo del conflicto o inconsistencia de lore." },
-                    problema: { type: "string", description: "Explicación detallada del porqué existe una inconsistencia." },
-                    archivos_involucrados: { 
-                        type: "array", 
-                        items: { type: "string" }, 
-                        description: "Nombres o IDs de los capítulos, personajes o elementos del lore en conflicto." 
-                    },
-                    opciones_resolucion: {
+                    inconsistencias: {
                         type: "array",
+                        description: "Lista de inconsistencias detectadas (de 1 a N).",
                         items: {
                             type: "object",
                             properties: {
-                                letra: { type: "string", description: "Opción A, B, C, D" },
-                                texto: { type: "string", description: "Propuesta de solución para resolver la inconsistencia." }
+                                titulo: { type: "string", description: "Título descriptivo del conflicto o inconsistencia de lore." },
+                                problema: { type: "string", description: "Explicación detallada del porqué existe una inconsistencia." },
+                                archivos_involucrados: { 
+                                    type: "array", 
+                                    items: { type: "string" }, 
+                                    description: "Nombres o IDs de los capítulos, personajes o elementos del lore en conflicto." 
+                                },
+                                opciones_resolucion: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            letra: { type: "string", description: "Opción A, B, C, D" },
+                                            texto: { type: "string", description: "Propuesta de solución para resolver la inconsistencia." }
+                                        },
+                                        required: ["letra", "texto"]
+                                    }
+                                }
                             },
-                            required: ["letra", "texto"]
+                            required: ["titulo", "problema", "archivos_involucrados", "opciones_resolucion"]
                         }
                     }
                 },
-                required: ["titulo", "problema", "archivos_involucrados", "opciones_resolucion"]
+                required: ["inconsistencias"]
             }
         }
     },
@@ -350,18 +360,7 @@ export const AIService = {
         const temperature = settings?.temperature ?? 0.7;
         const useJsonMode = settings?.useJsonMode ?? false;
 
-        console.log(
-            `%c🚀 [AIService.generateStream] INICIANDO PETICIÓN STREAM %c\n` +
-            `• API: DeepSeek\n` +
-            `• Modelo: ${modelId}\n` +
-            `• Modo Razonamiento (reasoningMode): ${!!settings?.reasoningMode}\n` +
-            `• Esfuerzo de Razonamiento (reasoningEffort): ${settings?.reasoningEffort || 'high'}\n` +
-            `• Temperatura: ${temperature}\n` +
-            `• JSON Mode: ${useJsonMode}`,
-            "background: #4f46e5; color: white; padding: 3px 6px; border-radius: 4px; font-weight: bold;",
-            "color: inherit;"
-        );
-        console.log("📨 Mensajes enviados al modelo:", messages);
+
 
         // Decorate onChunk to also log the returned chunks at the end
         let fullResponseText = "";
@@ -493,13 +492,7 @@ export const AIService = {
             });
         }
 
-        console.log(
-            `%c✅ [AIService.generateStream] FLUJO FINALIZADO CON ÉXITO %c\n` +
-            `• Longitud del texto recibido: ${fullResponseText.length} caracteres`,
-            "background: #10b981; color: white; padding: 3px 6px; border-radius: 4px; font-weight: bold;",
-            "color: inherit;"
-        );
-        console.log("📝 Respuesta completa devuelta:", fullResponseText);
+
     }
 };
 

@@ -1077,7 +1077,7 @@ export const parseInconsistenciesFromResponse = (text) => {
 
     // ── FORMATO 3: Semi-estructurado tolerante ──
     if (inconsistencies.length === 0) {
-        const incRegexFree = /\[\[inconsistencia\s+\d+\s*:\s*([^\]]+)\]\]\s*([\s\S]*?)(?=\[\[inconsistencia|\z)/gi;
+        const incRegexFree = /\[\[inconsistencia\s+\d+\s*:\s*([^\]]+)\]\]\s*([\s\S]*?)(?=\[\[inconsistencia|$)/gim;
         let freeMatch;
 
         while ((freeMatch = incRegexFree.exec(text)) !== null) {
@@ -1085,7 +1085,7 @@ export const parseInconsistenciesFromResponse = (text) => {
             const body = freeMatch[2].trim();
             
             const ubicacionMatch = body.match(/UBICACIÓN:\s*([^\n]+)/i);
-            const problemMatch2 = body.match(/PROBLEMA:\s*([\s\S]*?)(?=\n(?:SOLUCIÓN|SOLUCION)\s+(?:A|B):|\n\[\[|\Z)/i);
+            const problemMatch2 = body.match(/PROBLEMA:\s*([\s\S]*?)(?=\n(?:SOLUCIÓN|SOLUCION)\s+(?:A|B):|\n\[\[|$)/im);
             const files = [];
 
             if (ubicacionMatch) {
@@ -1099,7 +1099,7 @@ export const parseInconsistenciesFromResponse = (text) => {
 
             const problem = problemMatch2 ? problemMatch2[1].trim() : '';
 
-            const solRegexFree = /(?:SOLUCIÓN|SOLUCION)\s+([A-D])\s*:\s*([\s\S]*?)(?=\n(?:SOLUCIÓN|SOLUCION)\s+[A-D]\s*:|\n\[\[|\Z)/gi;
+            const solRegexFree = /(?:SOLUCIÓN|SOLUCION)\s+([A-D])\s*:\s*([\s\S]*?)(?=\n(?:SOLUCIÓN|SOLUCION)\s+[A-D]\s*:|\n\[\[|$)/gim;
             const options = [];
             let solFreeMatch;
 
@@ -2007,19 +2007,24 @@ export const buildSystemPrompt = (action, context, destinationDoc, activeChapter
 🎯 ACCIÓN: ESCRIBIR — Crear contenido nuevo o modificar existente.
 📌 Destino: ${docDescription}
 
-${contentInstruction}
+${dest.mode === 'new' ? `🔧 INSTRUCCIÓN OBLIGATORIA — USA LA HERRAMIENTA NATIVA:
+Estás creando un NUEVO documento. Usa la herramienta \`crear_capitulo\` con:
+• titulo → el título del nuevo documento
+• contenido_html → el contenido completo en HTML limpio (párrafos <p>...</p>)
+NO uses el formato [[TIPO: contenido]] para la creación de nuevos documentos.` : `${contentInstruction}
 
 ESTRATEGIA DE RESPUESTA:
 - ¿Crear desde cero? → usa [[ÁMBITO: completo]] devolviendo todo el documento en texto plano limpio.
 - ¿Modificar contenido existente? → usa [[ÁMBITO: parcial]] si solo cambias algunas secciones; [[ÁMBITO: completo]] si reescribes la mayoría del documento.
 - ¿Expandir/Añadir? → usa [[ÁMBITO: parcial]] devolviendo SOLO las secciones añadidas/modificadas.
+- ¿Corrección puntual de un fragmento? → usa la herramienta \`aplicar_parche\` con texto_original exacto y texto_reemplazo.`}
 
 ⚠️ DIRECTRICES DE FIDELIDAD NARRATIVA:
 - NUNCA resumas, omitas ni abrevies la información que sí devuelves.
 - Cada sección devuelta debe mantener su extensión y riqueza original.
 - Si no modificas una sección, no es necesario incluirla (salvo contexto mínimo para ubicación).
 
-${getActionTechnicalDescription('escribir')}
+${dest.mode !== 'new' ? getActionTechnicalDescription('escribir') : ''}
 
 Contexto del libro:
 ${context}`,
@@ -2029,20 +2034,25 @@ ${context}`,
 🎯 ACCIÓN: EDITAR FRAGMENTO (patch mode).
 📌 Destino: ${docDescription}
 
-${dest.mode === 'auto' ? `INSTRUCCIÓN DE DESTINO:
-Como el destino es automático, debes determinar a qué capítulo o sección del Master Doc va dirigida esta corrección.
-Indica obligatoriamente el título exacto de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]]).
+🔧 INSTRUCCIÓN OBLIGATORIA — USA LA HERRAMIENTA NATIVA:
+Tienes acceso a la herramienta \`aplicar_parche\`. DEBES usarla para devolver el fragmento editado. NO uses el formato [[parche]] — usa la herramienta directamente.
 
+Parámetros de la herramienta:
+• documento_id → "${extraOptions?.useNativeTools && dest.mode === 'auto' ? 'el título exacto del documento al que pertenece el fragmento' : (dest.docTitle || dest.docId || 'documento actual')}"
+• texto_original → copia EXACTA y literal del fragmento original tal como aparece en el documento (sin modificar ni parafrasear)
+• texto_reemplazo → el fragmento modificado en texto plano limpio (sin markdown, sin HTML)
+• contexto_linea → (opcional) una frase del contexto circundante para mayor precisión en el match
+
+${dest.mode === 'auto' ? `⚠️ El destino es automático. Debes determinar a qué documento pertenece el fragmento e indicarlo en documento_id.
 ${targetsStr}` : ''}
 
 El usuario ha seleccionado un fragmento específico de su texto para que lo modifiques.
 Tu tarea es:
-1. Recibir el fragmento original
+1. Analizar el fragmento original y la instrucción del usuario
 2. Aplicar los cambios solicitados SOLO a ese fragmento
-3. Devolver el fragmento modificado en texto plano limpio.
-NO reescribas el documento completo. Trabaja exclusivamente con el fragmento proporcionado.
+3. Llamar a la herramienta \`aplicar_parche\` con el texto original exacto y el texto modificado
 
-${getActionTechnicalDescription('fragmento')}
+NO reescribas el documento completo. Trabaja exclusivamente con el fragmento proporcionado.
 
 Contexto del libro:
 ${context}`,
@@ -2069,29 +2079,23 @@ ${context}`,
 
 Lleva a cabo un análisis del contexto proporcionado.
 
-INSTRUCCIÓN CRÍTICA DE INCONSISTENCIAS — FORMATO ESTRICTO:
+INSTRUCCIÓN CRÍTICA DE INCONSISTENCIAS — USA LA HERRAMIENTA NATIVA:
 Si el escritor te solicita explícitamente auditar la coherencia, buscar inconsistencias, contradicciones, vacíos, huecos de lore o dudas entre el Master Doc y sus capítulos:
 1. Realiza una auditoría sumamente detallada.
-2. Responde estrictamente usando [[TIPO: inconsistencias]].
-3. CADA inconsistencia debe usar el formato de doble corchete ESTRUCTURADO con [[inconsistencia id="N" archivos="..."]].
-4. Siempre proporciona al menos 2 opciones de solución por inconsistencia.
+2. Agrupa TODAS las inconsistencias detectadas en una sola llamada a la herramienta \`registrar_inconsistencia\`, pasando una lista en el parámetro \`inconsistencias\` donde cada elemento contenga:
+   • titulo → título descriptivo del conflicto (ej. "Edad contradictoria de Nora")
+   • problema → explicación detallada de por qué existe la inconsistencia
+   • archivos_involucrados → array de nombres exactos de los documentos/secciones afectados
+   • opciones_resolucion → array de {letra: "A", texto: "propuesta de resolución"} (mínimo 2 opciones)
+3. Llama a la herramienta UNA SOLA VEZ incluyendo todas las inconsistencias detectadas en la lista.
 
-⛔ FORMATOS NO VÁLIDOS (NO USARLOS):
-   ❌ [[1. Título del problema]] — numeración simple sin estructura
-   ❌ [[Título]] / [[Descripción]] — etiquetas sueltas
-   ❌ 1. Problema: ... Opción A: ... — listas numeradas planas
-   ❌ - Problema: ... - Solución: ... — listas con guiones
+⛔ FORMATOS NO VÁLIDOS — NO USARLOS:
+   ❌ [[inconsistencia id="1" archivos="..."]] — NO uses el formato de corchetes, usa la herramienta
+   ❌ [[titulo]]...[[/titulo]] — formato de texto, no de herramienta
+   ❌ Listas numeradas planas o con guiones
 
-✅ ÚNICO FORMATO VÁLIDO:
-   [[inconsistencia id="1" archivos="doc1,doc2"]]
-   [[titulo]]Título corto[[/titulo]]
-   [[problema]]Descripción detallada[[/problema]]
-   [[solucion letra="A"]]Propuesta A[[/solucion]]
-   [[solucion letra="B"]]Propuesta B[[/solucion]]
-   [[/inconsistencia]]
-
-De lo contrario, para análisis de estilo, gramática, ritmo, tono o estructura:
-1. Responde con [[TIPO: analisis]].
+Para análisis de estilo, gramática, ritmo, tono o estructura (que NO son inconsistencias de lore):
+1. Responde con [[TIPO: analisis]] en texto plano.
 2. Escribe tu retroalimentación en texto plano claro y estructurado con saltos de línea dobles (\\n\\n).
 
 ${getActionTechnicalDescription('analizar')}
@@ -2144,11 +2148,27 @@ ${context}`,
 El escritor ha detectado y seleccionado una solución para una inconsistencia de lore.
 Tu tarea es modificar SOLO las secciones afectadas de los documentos, preservando TODO el resto del contenido intacto.
 
-⚠️ REGLA CRÍTICA: NUNCA uses [[ÁMBITO: completo]]. Siempre usa [[ÁMBITO: parcial]].
-⚠️ Si el cambio es pequeño y localizado, prefiere [[TIPO: fragmento]] con el bloque [[ORIGINAL]].
-⚠️ Si modificas múltiples documentos, devuelve bloques consecutivos con sus respectivos metadatos.
+🔧 INSTRUCCIÓN OBLIGATORIA — USA LA HERRAMIENTA NATIVA:
+Tienes acceso a la herramienta \`aplicar_parches_resolucion\`. DEBES usarla para aplicar los cambios. NO uses el formato [[parche]] ni [[TIPO: fragmento]].
 
-${getActionTechnicalDescription('inconsistencia')}
+Parámetros de la herramienta:
+{
+  "parches": [
+    {
+      "documento_id": "Título exacto del documento a modificar",
+      "texto_original": "Texto EXACTO tal como aparece en el documento (copia literal, sin parafrasear)",
+      "texto_reemplazo": "Nuevo texto corregido en prosa limpia (sin markdown ni HTML)"
+    }
+  ]
+}
+
+Proporciona UN objeto de parche por cada documento afectado. Si la inconsistencia afecta 3 documentos, provee 3 entradas en el array.
+
+⚠️ REGLAS CRÍTICAS:
+⚠️ texto_original debe ser una copia EXACTA y LITERAL del texto original — no lo parafrasees ni lo resumas.
+⚠️ Solo modifica las secciones directamente afectadas. Preserva TODO el resto del documento intacto.
+
+${targetsStr}
 
 Contexto del libro:
 ${context}`,
@@ -2163,12 +2183,18 @@ Auto-determina el tipo de respuesta según la pregunta:
 - ¿Duda/Pregunta/Explicación sobre el lore? → [[TIPO: sugerencia]] o texto plano
 - ¿Crear algo rápido (un nombre, un dato)? → texto plano sin estructura de destino
 - ¿Analizar algo? → [[TIPO: analisis]]
-- ¿Buscar inconsistencias? → [[TIPO: inconsistencias]] con formato [[ ]]
+- ¿Buscar inconsistencias? → usa la herramienta \`registrar_inconsistencia\` (NO el formato [[]])
+- ¿Aplicar un cambio quirurgico solicitado? → usa la herramienta \`aplicar_parche\`
 - ¿Consultar un detalle del contexto? → texto plano directo
 
+🔧 HERRAMIENTAS DISPONIBLES EN ESTE CHAT:
+- \`registrar_inconsistencia\` — úsala cuando el usuario pida buscar inconsistencias o auditar el lore
+- \`aplicar_parche\` — úsala cuando el usuario pida hacer una corrección o cambio puntual en un documento
+- \`crear_capitulo\` — úsala cuando el usuario pida crear un nuevo capítulo rápidamente
+
 ⚠️ IMPORTANTE:
-- NO uses [[DESTINO:]] ni [[ÁMBITO:]] — esto es un chat, no edición de documentos.
-- No esperes que se muestre un visor de diferencias.
+- NO uses [[DESTINO:]] ni [[ÁMBITO:]] en respuestas conversacionales.
+- No esperes que se muestre un visor de diferencias para respuestas de chat.
 - Puedes usar emojis de forma sutil y natural si es relevante.
 
 ${getActionTechnicalDescription('chat')}
@@ -2378,26 +2404,43 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     }
 
     if (name === 'registrar_inconsistencia') {
-        const inconsistencies = [{
-            id: 'inc_' + Math.random().toString(36).substr(2, 9),
-            files: Array.isArray(args.archivos_involucrados) 
-                ? args.archivos_involucrados.map(f => {
-                    const resolved = resolveTargetDoc(f, chapters, worldItems);
-                    return resolved ? resolved.docId : f;
-                  })
-                : [],
-            title: args.titulo || 'Conflicto de lore',
-            problem: args.problema || '',
-            options: Array.isArray(args.opciones_resolucion)
-                ? args.opciones_resolucion.map(o => ({
-                    letter: (o.letra || '').toUpperCase().trim(),
-                    text: o.texto || ''
-                  }))
-                : [],
-            resolved: false,
-            selectedOption: null,
-            customText: ''
-        }];
+        const inconsistencies = [];
+        const rawIncList = Array.isArray(args.inconsistencias) ? args.inconsistencias : [];
+        
+        // Fallback para retrocompatibilidad o parsing parcial en streaming
+        if (rawIncList.length === 0 && (args.titulo || args.problema)) {
+            rawIncList.push({
+                titulo: args.titulo,
+                problema: args.problema,
+                archivos_involucrados: args.archivos_involucrados,
+                opciones_resolucion: args.opciones_resolucion
+            });
+        }
+        
+        rawIncList.forEach(incItem => {
+            if (!incItem) return;
+            inconsistencies.push({
+                id: 'inc_' + Math.random().toString(36).substr(2, 9),
+                files: Array.isArray(incItem.archivos_involucrados) 
+                    ? incItem.archivos_involucrados.map(f => {
+                        const resolved = resolveTargetDoc(f, chapters, worldItems);
+                        return resolved ? resolved.docId : f;
+                      })
+                    : [],
+                title: incItem.titulo || 'Conflicto de lore',
+                problem: incItem.problema || '',
+                options: Array.isArray(incItem.opciones_resolucion)
+                    ? incItem.opciones_resolucion.map(o => ({
+                        letter: (o.letra || '').toUpperCase().trim(),
+                        text: o.texto || ''
+                      }))
+                    : [],
+                resolved: false,
+                selectedOption: null,
+                customText: ''
+            });
+        });
+
         return [{
             docType: 'text',
             docId: null,

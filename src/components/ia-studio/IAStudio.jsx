@@ -252,10 +252,8 @@ const IAStudio = () => {
                 const isPartial = block.isPartial || (proposedWordCount < currentWordCount * 0.7);
 
                 if (isPartial) {
-                    console.log(`[SMART MERGE] Respuesta parcial detectada (${proposedWordCount} vs ${currentWordCount} palabras). Fusionando con original...`);
                     const mergedText = smartMergePartialResponse(currentText, proposedText);
                     proposedContent = plainTextToHtml(mergedText);
-                    console.log(`[SMART MERGE] Resultado: ${mergedText.split(/\s+/).filter(Boolean).length} palabras (original preservado).`);
                 }
             }
 
@@ -351,7 +349,9 @@ const IAStudio = () => {
             }
             
             setIsLoading(true);
+            const startTime = Date.now();
             await new Promise(resolve => setTimeout(resolve, 800)); // Simular latencia de red
+            const durationMs = Date.now() - startTime;
             
             let fakeResponse = '';
             
@@ -475,7 +475,8 @@ const IAStudio = () => {
                     rawResponse: fakeResponse, 
                     isStreaming: false, 
                     responseType,
-                    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+                    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+                    duration: durationMs
                 } : m
             ));
             
@@ -487,7 +488,8 @@ const IAStudio = () => {
                     responseType, 
                     fakeResponse, 
                     { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-                    undefined
+                    undefined,
+                    durationMs
                 );
                 setActiveSession(SessionManager.getSession(activeSession.id));
                 setSessions(SessionManager.getSessions());
@@ -538,6 +540,11 @@ const IAStudio = () => {
         const extraOptions = {};
         extraOptions.chapters = chapters;
         extraOptions.worldItems = worldItems;
+
+        // Compute model + tool support early so buildSystemPrompt can inject the right instructions
+        const modelId = chatModel || defaultModel;
+        const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
+        extraOptions.useNativeTools = enableTools;
 
         if (effectiveAction === 'seccion' && sectionConfig) {
             extraOptions.sectionIndex = currentSectionIndex;
@@ -601,12 +608,12 @@ const IAStudio = () => {
         abortControllerRef.current = new AbortController();
 
         try {
+            const startTime = Date.now();
             let fullResponse = '';
             let finalUsage = null;
             let lastToolCall = { name: '', args: '' };
 
-            const modelId = chatModel || defaultModel;
-            const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
+            // modelId and enableTools already computed above
 
             await AIService.generateStream(aiMessages, {
                 selectedAiModel: modelId,
@@ -629,10 +636,16 @@ const IAStudio = () => {
                         streamResponseType = 'content';
                         const block = parsedBlocks[0];
                         displayContent = `🆕 **Nuevo Capítulo (Streaming)**: ${block?.title || 'Creando...'}\n\n`;
-                    } else if (name === 'aplicar_parche') {
+                    } else if (name === 'aplicar_parche' || name === 'localizar_parche_exacto') {
                         streamResponseType = 'patch';
                         const patch = parsedBlocks[0];
                         displayContent = `✂️ **Fragmento editado (Streaming)** en *${patch?.title || 'Buscando documento...'}*\n\n**Original:**\n> ${patch?.original || '...'}\n\n**Reemplazo:**\n> ${patch?.content || '...'}`;
+                    } else if (name === 'aplicar_parches_resolucion') {
+                        streamResponseType = 'patch';
+                        const numParches = parsedBlocks.length;
+                        displayContent = isComplete
+                            ? `🔧 **${numParches} parche(s) de resolución listos** — aplicando cambios en ${numParches} documento(s)...`
+                            : `🔧 **Construyendo parches de resolución...** (${numParches} detectado(s) hasta ahora)`;
                     } else if (name === 'registrar_inconsistencia') {
                         streamResponseType = 'inconsistencies';
                         const block = parsedBlocks[0];
@@ -727,7 +740,7 @@ const IAStudio = () => {
                     if (lastToolCall.name === 'crear_capitulo') {
                         responseType = 'content';
                         displayContent = `🆕 **Nuevo Capítulo creado con éxito**\n\nTítulo: **${block?.title}**`;
-                    } else if (lastToolCall.name === 'aplicar_parche') {
+                    } else if (lastToolCall.name === 'aplicar_parche' || lastToolCall.name === 'localizar_parche_exacto') {
                         responseType = 'patch';
                         const patch = block;
                         const originalPreview = (patch.original || '').substring(0, 120);
@@ -736,6 +749,11 @@ const IAStudio = () => {
                         if (originalPreview) {
                             displayContent += `\n\n**Original:** "${originalPreview}${patch.original?.length > 120 ? '...' : ''}"`;
                         }
+                    } else if (lastToolCall.name === 'aplicar_parches_resolucion') {
+                        responseType = 'patch';
+                        const numParches = parsedBlocks.length;
+                        const docs = [...new Set(parsedBlocks.map(b => b.title).filter(Boolean))];
+                        displayContent = `🔧 **${numParches} parche(s) aplicados** en ${numParches} documento(s): ${docs.join(', ')}`;
                     } else if (lastToolCall.name === 'registrar_inconsistencia') {
                         responseType = 'inconsistencies';
                         inconsistencies = block?.inconsistencies || [];
@@ -832,6 +850,8 @@ const IAStudio = () => {
                     SessionManager.addSessionCumulativeUsage(activeSession.id, finalUsage, inputTokenCost, outputTokenCost);
                 }
 
+                const durationMs = Date.now() - startTime;
+
                 setMessages(prev => prev.map(m =>
                     m.id === aiMsgId ? { 
                         ...m, 
@@ -840,7 +860,8 @@ const IAStudio = () => {
                         isStreaming: false, 
                         responseType, 
                         inconsistencies,
-                        usage: finalUsage 
+                        usage: finalUsage,
+                        duration: durationMs
                     } : m
                 ));
                 if (activeSession) {
@@ -851,13 +872,15 @@ const IAStudio = () => {
                         responseType, 
                         lastToolCall.name ? JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }) : fullResponse, 
                         finalUsage,
-                        inconsistencies
+                        inconsistencies,
+                        durationMs
                     );
                     setActiveSession(SessionManager.getSession(activeSession.id));
                     setSessions(SessionManager.getSessions());
                 }
 
-                const shouldShowDiff = htmlBlocks.length > 0 || patchBlocks.length > 0 || sectionBlocks.length > 0 || sceneBlocks.length > 0;
+                const shouldShowDiff = parsedBlocks.some(b => b.isPatch || b.isSection || b.isScene || (b.mode !== 'text' && b.mode !== 'auto' && b.content))
+                    || (lastToolCall.name && ['crear_capitulo', 'aplicar_parche', 'localizar_parche_exacto', 'aplicar_parches_resolucion'].includes(lastToolCall.name));
 
                 if (shouldShowDiff && !isEchoingContext) {
                     handleShowDiff(parsedBlocks);
@@ -870,7 +893,6 @@ const IAStudio = () => {
 
         } catch (error) {
             if (error.name === 'AbortError') {
-                console.log("Generación cancelada por el usuario.");
                 setMessages(prev => prev.map(m =>
                     m.id === aiMsgId ? { ...m, content: m.content || "⏹️ Generación cancelada por el usuario.", isStreaming: false, responseType: 'error' } : m
                 ));

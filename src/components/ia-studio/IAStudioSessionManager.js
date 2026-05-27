@@ -218,7 +218,7 @@ export const addMessage = (sessionId, message) => {
 /**
  * Actualiza el último mensaje (para streaming)
  */
-export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined, usage = undefined, inconsistencies = undefined) => {
+export const updateLastAssistantMessage = (sessionId, partialContent, isComplete = false, responseType = undefined, rawResponse = undefined, usage = undefined, inconsistencies = undefined, duration = undefined) => {
     const store = getStore();
     const session = store.sessions.find(s => s.id === sessionId);
     if (session && session.messages.length > 0) {
@@ -239,6 +239,9 @@ export const updateLastAssistantMessage = (sessionId, partialContent, isComplete
             }
             if (inconsistencies !== undefined) {
                 lastMsg.inconsistencies = inconsistencies;
+            }
+            if (duration !== undefined && duration !== null) {
+                lastMsg.duration = duration;
             }
             session.updatedAt = Date.now();
             saveStore(store);

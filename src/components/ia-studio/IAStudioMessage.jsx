@@ -380,7 +380,7 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
 
         if (isChapter || isPatch || isInconsistency) {
             return (
-                <div className="space-y-3 p-3.5 border border-indigo-500/20 bg-indigo-500/[0.02] rounded-2xl animate-pulse min-w-[240px] sm:min-w-[320px] shadow-[0_0_12px_rgba(99,102,241,0.05)] border-2">
+                <div className="space-y-3 p-3.5 border border-indigo-500/20 bg-indigo-500/[0.02] rounded-2xl animate-pulse min-w-[240px] sm:min-w-[320px] max-w-full shadow-[0_0_12px_rgba(99,102,241,0.05)] border-2 overflow-hidden">
                     <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
                         {isChapter && <FileText size={14} className="animate-spin text-emerald-400 shrink-0" style={{ animationDuration: '3s' }} />}
                         {isPatch && <FileDiff size={14} className="animate-bounce text-indigo-400 shrink-0" />}
@@ -397,7 +397,7 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
                         <div className="h-3 w-4/5 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.15s' }} />
                     </div>
 
-                    <div className="text-[10px] font-mono text-[var(--text-muted)] opacity-60 overflow-hidden text-ellipsis whitespace-nowrap bg-[var(--bg-app)]/40 p-2 rounded-xl border border-[var(--border-main)]/20 leading-none">
+                    <div className="text-[10px] font-mono text-[var(--text-muted)] opacity-60 bg-[var(--bg-app)]/40 p-2.5 rounded-xl border border-[var(--border-main)]/20 leading-relaxed max-w-full whitespace-pre-wrap break-words">
                         {content}
                     </div>
                 </div>
@@ -802,6 +802,13 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                                 <RotateCw size={12} />
                                 <span>Regenerar</span>
                             </button>
+                        )}
+
+                        {/* Response Time Badge */}
+                        {message.duration && (
+                            <span className="text-[9px] font-bold font-mono text-[var(--text-muted)] opacity-50 px-1 py-0.5 select-none" title={`La IA respondió en ${(message.duration / 1000).toFixed(2)} segundos`}>
+                                ⏱️ {(message.duration / 1000).toFixed(1)}s
+                            </span>
                         )}
 
                         {/* Delete Button */}

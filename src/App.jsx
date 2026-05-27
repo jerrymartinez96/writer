@@ -199,11 +199,13 @@ function AppContent() {
         return (activeChapter || activeWorldDoc) ? (
           <Editor />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-[var(--text-muted)] animate-in fade-in duration-1000">
+          <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-[var(--text-muted)] animate-in fade-in duration-1000 px-4 sm:px-6">
             <div className="w-20 h-20 bg-[var(--accent-soft)]/30 rounded-full flex items-center justify-center shadow-inner">
               <FileText size={40} className="text-[var(--accent-main)] opacity-50" />
             </div>
-            <p className="text-xl font-serif">Selecciona o crea un capítulo en la barra lateral</p>
+            <p className="text-xl font-serif text-center max-w-xs">
+              Selecciona o crea un capítulo en la barra lateral
+            </p>
           </div>
         );
     }
