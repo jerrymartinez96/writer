@@ -756,6 +756,14 @@ const Editor = () => {
         }
     }, [activeChapter?.id, activeChapter?.content, activeChapter?.lastSyncToken, activeWorldDoc?.id, activeWorldDoc?.content, editor]);
 
+    // Scroll to top whenever the active document changes (chapter or world doc)
+    useEffect(() => {
+        if (editorScrollRef.current) {
+            editorScrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
+        }
+    }, [activeChapter?.id, activeWorldDoc?.id]);
+
+
     // Handle Editable state (Focus Mode + Real-time Lock + Finalized Status)
     useEffect(() => {
         if (editor) {

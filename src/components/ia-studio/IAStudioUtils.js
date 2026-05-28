@@ -57,7 +57,7 @@ export const ACTION_CATALOG = {
         outputFormat: 'plain_text',
         defaultScope: 'auto',
         description: 'Genera contenido nuevo o modifica contenido existente preservando fidelidad',
-        rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'preserve_fidelity', 'no_triple_backtick'],
+        rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'preserve_fidelity', 'no_triple_backtick', 'preserve_whitespace'],
         formatInstructions: `[[TIPO: contenido]]
 [[ÁMBITO: completo|parcial]]
 [[DESTINO: Nombre exacto del destino]]
@@ -96,7 +96,7 @@ Nora (18 años). (pero omitiste todo el lore de las otras hermanas)
         outputFormat: 'patch',
         defaultScope: 'partial',
         description: 'Edita solo un fragmento o párrafo específico sin reescribir todo el documento',
-        rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick', 'patch_original_block'],
+        rules: ['no_markdown', 'no_html_in_prose', 'no_triple_backtick', 'patch_original_block', 'preserve_whitespace'],
         formatInstructions: `[[parche]]
 [[TIPO: fragmento]]
 [[DESTINO: Nombre exacto del destino]]
@@ -153,7 +153,7 @@ Nora, la mayor con 19 años
         outputFormat: 'plain_text',
         defaultScope: 'partial',
         description: 'Co-escribe y acumula capítulo escena por escena de forma conversacional',
-        rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'no_triple_backtick'],
+        rules: ['no_markdown', 'no_html_in_prose', 'paragraph_separator', 'no_triple_backtick', 'preserve_whitespace'],
         formatInstructions: `[[TIPO: escena]]
 [[ESCENA: Nombre de la escena]]
 [[NÚMERO: N]]`,
@@ -274,7 +274,7 @@ Usa la herramienta aplicar_parche con texto_original exacto y texto_reemplazo co
         outputFormat: 'structured',
         defaultScope: 'partial',
         description: 'Resuelve inconsistencias de lore editando quirúrgicamente los documentos afectados, preservando el resto del contenido intacto',
-        rules: ['no_markdown', 'no_html_in_prose', 'preserve_fidelity', 'no_triple_backtick', 'inconsistency_partial_only'],
+        rules: ['no_markdown', 'no_html_in_prose', 'preserve_fidelity', 'no_triple_backtick', 'inconsistency_partial_only', 'preserve_whitespace'],
         formatInstructions: `[[parche]]
 [[TIPO: fragmento]]
 [[DESTINO: ID_del_documento o nombre exacto]]
@@ -358,6 +358,14 @@ export const GENERAL_STYLE_RULES = [
     {
         id: 'natural_quotes',
         rule: '📌 Usa comillas dobles estándar (") de forma natural y fluida dentro de las oraciones. No agregues espacios innecesarios ni saltos de línea alrededor de las comillas.',
+    },
+    {
+        id: 'preserve_whitespace',
+        rule: `📌 REGLA DE PRESERVACIÓN DE ESPACIADO Y SALTOS DE LÍNEA:
+- Los saltos de línea (\\n y \\n\\n) que existan en el texto original DEBEN conservarse íntegramente en el texto de reemplazo. NUNCA los comprimas, elimines ni fusiones.
+- Si el original tiene un doble salto entre párrafos, el reemplazo también debe tenerlo en la misma posición relativa.
+- Esta regla aplica dentro del campo texto_reemplazo de la herramienta aplicar_parche, dentro del bloque [[REEMPLAZO]]...[[/REEMPLAZO]] y en cualquier campo de contenido que sustituya texto existente.
+- Dicho de otra forma: el número de párrafos y saltos de línea en el reemplazo debe ser ≥ al del original salvo que el usuario haya pedido explícitamente condensar el texto.`,
     },
     {
         id: 'inconsistency_partial_only',

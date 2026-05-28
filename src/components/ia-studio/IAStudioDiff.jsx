@@ -465,11 +465,20 @@ const IAStudioDiff = ({
         ];
     });
 
+    // Approved patches: set of block indices the user wants to apply (all approved by default)
+    const [approvedPatches, setApprovedPatches] = useState(() => {
+        const len = Array.isArray(diffBlocks) ? diffBlocks.length : 1;
+        return new Set(Array.from({ length: len }, (_, i) => i));
+    });
+
     if (diffBlocks !== prevDiffBlocks) {
         setPrevDiffBlocks(diffBlocks);
-        setLocalBlocks(Array.isArray(diffBlocks) && diffBlocks.length > 0 ? diffBlocks.map(b => ({ ...b })) : [
+        const nextBlocks = Array.isArray(diffBlocks) && diffBlocks.length > 0 ? diffBlocks.map(b => ({ ...b })) : [
             { currentContent: '', proposedContent: '', title: destinationTitle || 'Documento' }
-        ]);
+        ];
+        setLocalBlocks(nextBlocks);
+        // Reset approvals: approve all new blocks
+        setApprovedPatches(new Set(Array.from({ length: nextBlocks.length }, (_, i) => i)));
     }
 
     const [isMobile, setIsMobile] = useState(false);
@@ -523,7 +532,24 @@ const IAStudioDiff = ({
         ));
     };
 
+    const togglePatchApproval = (idx, e) => {
+        e.stopPropagation(); // don't switch tab when clicking the toggle
+        setApprovedPatches(prev => {
+            const next = new Set(prev);
+            if (next.has(idx)) next.delete(idx);
+            else next.add(idx);
+            return next;
+        });
+    };
+
     const handleApply = () => {
+        // Patch mode: only apply approved patches
+        if (isPatchMode || blocks.some(b => b.isPatch)) {
+            const approvedBlocks = blocks.filter((_, idx) => approvedPatches.has(idx));
+            onApply(approvedBlocks);
+            return;
+        }
+
         // Only reconstruct cherry-picked content if in 'semantic' view
         if (viewMode === 'semantic' && cherryPickState.selectedIds && cherryPickState.groups && !isPatchMode && !isSectionMode) {
             // Reconstruct proposed content using only selected changes
@@ -625,20 +651,48 @@ const IAStudioDiff = ({
                 {/* Tabs for multiple documents */}
                 {blocks.length > 1 && (
                     <div className="flex gap-1 px-5 pt-3 pb-0 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/30 overflow-x-auto shrink-0">
-                        {blocks.map((block, idx) => (
-                            <button
-                                key={idx}
-                                onClick={() => setActiveIndex(idx)}
-                                className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-t-xl text-[9px] font-black uppercase tracking-widest transition-all ${
-                                    idx === activeIndex
-                                        ? 'bg-[var(--bg-app)] text-indigo-500 border-t border-l border-r border-[var(--border-main)] -mb-px'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
-                                }`}
-                            >
-                                <div className={`w-1.5 h-1.5 rounded-full ${block.isPatch ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                                <span className="truncate max-w-[120px]">{block.title}</span>
-                            </button>
-                        ))}
+                        {blocks.map((block, idx) => {
+                            const isApproved = approvedPatches.has(idx);
+                            const hasPatchInBlock = block.isPatch;
+                            return (
+                                <button
+                                    key={idx}
+                                    onClick={() => setActiveIndex(idx)}
+                                    className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-t-xl text-[9px] font-black uppercase tracking-widest transition-all ${
+                                        idx === activeIndex
+                                            ? 'bg-[var(--bg-app)] text-indigo-500 border-t border-l border-r border-[var(--border-main)] -mb-px'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
+                                    } ${hasPatchInBlock && !isApproved ? 'opacity-50' : ''}`}
+                                >
+                                    <div className={`w-1.5 h-1.5 rounded-full ${
+                                        hasPatchInBlock
+                                            ? isApproved ? 'bg-emerald-500' : 'bg-rose-500'
+                                            : 'bg-emerald-500'
+                                    }`} />
+                                    <span className={`truncate max-w-[120px] ${hasPatchInBlock && !isApproved ? 'line-through opacity-60' : ''}`}>
+                                        {block.title}
+                                    </span>
+                                    {/* Patch approve toggle on tab */}
+                                    {hasPatchInBlock && (
+                                        <span
+                                            role="checkbox"
+                                            aria-checked={isApproved}
+                                            onClick={(e) => togglePatchApproval(idx, e)}
+                                            title={isApproved ? 'Click para omitir este patch' : 'Click para aprobar este patch'}
+                                            className={`ml-1 flex items-center justify-center w-4 h-4 rounded-full border transition-all cursor-pointer ${
+                                                isApproved
+                                                    ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-500'
+                                                    : 'bg-rose-500/20 border-rose-500/60 text-rose-500'
+                                            }`}
+                                        >
+                                            {isApproved
+                                                ? <Check size={8} strokeWidth={3} />
+                                                : <X size={8} strokeWidth={3} />}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 
@@ -648,6 +702,52 @@ const IAStudioDiff = ({
                     {/* ── Patch mode ── */}
                     {isPatchMode && (
                         <div className="space-y-4">
+
+                            {/* ── Approve / Reject toggle for this patch ── */}
+                            {blocks.length > 1 && (() => {
+                                const isApproved = approvedPatches.has(activeIndex);
+                                return (
+                                    <div className={`flex items-center justify-between gap-4 p-4 rounded-2xl border-2 transition-all duration-300 ${
+                                        isApproved
+                                            ? 'bg-emerald-500/[0.04] border-emerald-500/30'
+                                            : 'bg-rose-500/[0.04] border-rose-500/30'
+                                    }`}>
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                                                isApproved ? 'bg-emerald-500/15 text-emerald-500' : 'bg-rose-500/15 text-rose-500'
+                                            }`}>
+                                                {isApproved ? <Check size={16} strokeWidth={3} /> : <X size={16} strokeWidth={2.5} />}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className={`text-xs font-black uppercase tracking-widest ${
+                                                    isApproved ? 'text-emerald-500' : 'text-rose-500'
+                                                }`}>
+                                                    {isApproved ? '✓ Patch aprobado' : '✗ Patch omitido'}
+                                                </p>
+                                                <p className="text-[10px] text-[var(--text-muted)] opacity-70 mt-0.5 leading-relaxed">
+                                                    {isApproved
+                                                        ? 'Este patch se aplicará al hacer clic en "Aplicar Patches".'
+                                                        : 'Este patch será ignorado. Actívalo si deseas incluirlo.'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {/* Toggle button */}
+                                        <button
+                                            onClick={(e) => togglePatchApproval(activeIndex, e)}
+                                            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 ${
+                                                isApproved
+                                                    ? 'bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 border border-rose-500/30'
+                                                    : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border border-emerald-500/30'
+                                            }`}
+                                        >
+                                            {isApproved
+                                                ? <><X size={10} strokeWidth={2.5} /><span>Omitir este patch</span></>
+                                                : <><Check size={10} strokeWidth={3} /><span>Aprobar este patch</span></>}
+                                        </button>
+                                    </div>
+                                );
+                            })()}
+
                             {/* Match Check Badge / Panel */}
                             {(() => {
                                 const patchStatus = applyPatch(currentBlock.currentContent || '', currentBlock.original || '', currentBlock.proposedContent || '');
@@ -778,10 +878,24 @@ const IAStudioDiff = ({
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 px-5 py-4 border-t border-[var(--border-main)] bg-[var(--bg-editor)]/50 shrink-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold text-[var(--text-muted)]">
                         {isPatchMode ? (
-                            <span className="flex items-center gap-1.5 text-amber-500">
-                                <Scissors size={10} />
-                                Patch — solo se modifica el fragmento seleccionado
-                            </span>
+                            blocks.length > 1 ? (
+                                // Multiple patches: show approval counter
+                                <span className={`flex items-center gap-1.5 ${
+                                    approvedPatches.size === 0
+                                        ? 'text-rose-500'
+                                        : approvedPatches.size < blocks.length
+                                            ? 'text-amber-500'
+                                            : 'text-emerald-500'
+                                }`}>
+                                    <Scissors size={10} />
+                                    {approvedPatches.size} de {blocks.length} patches seleccionados
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 text-amber-500">
+                                    <Scissors size={10} />
+                                    Patch — solo se modifica el fragmento seleccionado
+                                </span>
+                            )
                         ) : isSectionMode ? (
                             <span className="flex items-center gap-1.5 text-indigo-500">
                                 <Layers size={10} />
@@ -815,10 +929,19 @@ const IAStudioDiff = ({
                         </button>
                         <button
                             onClick={handleApply}
-                            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+                            disabled={isPatchMode && blocks.length > 1 && approvedPatches.size === 0}
+                            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white transition-all shadow-lg active:scale-95 ${
+                                isPatchMode && blocks.length > 1 && approvedPatches.size === 0
+                                    ? 'bg-[var(--border-main)] opacity-40 cursor-not-allowed shadow-none'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                            }`}
                         >
                             <Check size={12} />
-                            {isPatchMode ? 'Aplicar Patch' : isSectionMode ? 'Aplicar Secciones' : 'Aplicar Cambios'}
+                            {isPatchMode
+                                ? blocks.length > 1
+                                    ? `Aplicar ${approvedPatches.size} Patch${approvedPatches.size !== 1 ? 'es' : ''}`
+                                    : 'Aplicar Patch'
+                                : isSectionMode ? 'Aplicar Secciones' : 'Aplicar Cambios'}
                         </button>
                     </div>
                 </div>
