@@ -253,6 +253,21 @@ Según el lore, Nora tiene 18 años...`,
             negative: `❌ NO generes bloques [[DESTINO:]] ni [[ÁMBITO:]].`,
         },
     },
+    formatear: {
+        id: 'formatear',
+        responseType: 'patch',
+        outputFormat: 'structured',
+        defaultScope: 'partial',
+        description: 'Optimiza el espaciado vertical y los saltos de línea de un documento sin alterar ninguna palabra',
+        rules: ['no_markdown', 'no_html_in_prose', 'preserve_fidelity', 'no_triple_backtick'],
+        formatInstructions: `Optimizar la legibilidad con saltos de línea sin alterar el texto. Usa la herramienta nativa aplicar_parche.`,
+        responseBody: 'Reorganización estética del espaciado del documento.',
+        examples: {
+            positive: `✅ RESPUESTA CORRECTA:
+Usa la herramienta aplicar_parche con texto_original exacto y texto_reemplazo con los saltos de línea formateados.`,
+            negative: `❌ NO alteres ninguna palabra del texto original.`,
+        },
+    },
     inconsistencia: {
         id: 'inconsistencia',
         responseType: 'patch',
@@ -2168,10 +2183,35 @@ Proporciona UN objeto de parche por cada documento afectado. Si la inconsistenci
 ⚠️ texto_original debe ser una copia EXACTA y LITERAL del texto original — no lo parafrasees ni lo resumas.
 ⚠️ Solo modifica las secciones directamente afectadas. Preserva TODO el resto del documento intacto.
 
-${targetsStr}
+${targetsStr}`,
 
-Contexto del libro:
-${context}`,
+        formatear: () => `Eres un formateador de texto técnico, preciso y determinista. Tu ÚNICA función es añadir saltos de línea y espaciado vertical al texto de un documento para mejorar su legibilidad. Nunca cambias ni alteras el contenido lingüístico.
+
+🎯 ACCIÓN: FORMATEAR ESPACIADO DE LECTURA.
+📌 Documento a formatear: ${docDescription}
+
+═══════════════════════════════════════════
+🔴 LEY ABSOLUTA — NUNCA INFRINGIR:
+═══════════════════════════════════════════
+1. NO cambies, modifiques, resumas, amplíes ni parafrasees ninguna palabra, nombre, fecha, número o signo de puntuación.
+2. Tu output debe contener EXACTAMENTE las mismas palabras que el input, en el mismo orden.
+3. Tu ÚNICA intervención permitida es insertar saltos de línea (\\n) entre bloques de contenido.
+
+═══════════════════════════════════════════
+✅ REGLAS DE FORMATEO — APLICA SIEMPRE:
+═══════════════════════════════════════════
+- Entre cada PERSONAJE principal → insertar 2 saltos de línea (\\n\\n).
+- Entre cada SECCIÓN o SUBTÍTULO identificable → insertar 2 saltos de línea (\\n\\n).
+- Entre HABILIDADES, RASGOS o ITEMS de una lista → insertar 1 salto de línea (\\n).
+- Entre PÁRRAFOS densos con ideas independientes → insertar 2 saltos de línea (\\n\\n).
+- Los puntos, comas y signos de puntuación NO se eliminan ni reordenan.
+
+🔧 INSTRUCCIÓN OBLIGATORIA — USA LA HERRAMIENTA NATIVA:
+Llama EXACTAMENTE a la herramienta \`aplicar_formateo_lectura\` con:
+• documento_id → "${dest.docTitle || dest.docId || 'documento actual'}"
+• texto_formateado → El texto completo recibido del usuario, con los saltos de línea añadidos según las reglas anteriores. NUNCA dejes el campo vacío ni lo recortes.
+
+⛔ NO USES \`aplicar_parche\`. NO USES \`crear_capitulo\`. SOLO \`aplicar_formateo_lectura\`.`,
 
         chat: () => `${BASE}
 
@@ -2303,6 +2343,7 @@ const ACTION_META = {
     fragmento: { label: '✂️ Fragmentos', description: 'Editar solo una sección o párrafo' },
     analizar: { label: '🔍 Analizar', description: 'Evaluar gramática, estilo, coherencia e inconsistencias' },
     sugerir: { label: '💡 Sugerir', description: 'Proponer ideas y mejoras creativas' },
+    formatear: { label: '✨ Formatear', description: 'Optimizar el espaciado y saltos de línea de un documento sin alterar el texto' },
     chat: { label: '💬 Chat', description: 'Consultas generales, dudas y preguntas rápidas' },
 };
 
@@ -2509,6 +2550,39 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
             title: 'Asistente de Personajes',
             content: typeof argsJson === 'string' ? argsJson : JSON.stringify(args),
             responseType: 'analysis'
+        }];
+    }
+
+    if (name === 'aplicar_formateo_lectura') {
+        let dest = destinationDoc || { mode: 'auto' };
+        if (args.documento_id) {
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            if (resolved) {
+                dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
+            } else {
+                dest = { mode: 'auto', docTitle: args.documento_id };
+            }
+        }
+        // El texto_formateado es texto plano → lo convertimos a HTML de párrafos
+        const rawFormatted = args.texto_formateado || '';
+        const htmlFormatted = rawFormatted
+            .split(/\n\n+/)
+            .map(block => block.trim())
+            .filter(Boolean)
+            .map(block => `<p>${block.replace(/\n/g, '<br/>')}</p>`)
+            .join('\n');
+
+        return [{
+            docType: dest.docType || 'chapter',
+            docId: dest.docId || null,
+            mode: dest.mode || 'auto',
+            title: dest.docTitle || args.documento_id || 'Documento',
+            content: htmlFormatted,
+            original: '', // reemplazo total del documento, no patch quirúrgico
+            responseType: 'format',
+            isPatch: false,
+            isFormat: true,
+            context: 'Formateo de espaciado'
         }];
     }
 

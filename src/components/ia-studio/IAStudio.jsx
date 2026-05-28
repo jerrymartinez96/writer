@@ -294,6 +294,139 @@ const IAStudio = () => {
             effectiveAction = 'seccion';
         }
 
+        // --- INTERCEPTOR DE COMANDO /FORMAT ---
+        if (userMessage.trim().startsWith('/format')) {
+            const trimmedMessage = userMessage.trim();
+            const formatDocName = trimmedMessage.substring(7).trim(); // Remueve "/format"
+            
+            // Buscar documento por título o ID
+            let targetDoc = null;
+            if (formatDocName) {
+                const searchName = formatDocName.toLowerCase().trim();
+                targetDoc = chapters?.find(c => c.title?.toLowerCase() === searchName || c.id === formatDocName) ||
+                            worldItems?.find(w => w.id === formatDocName || w.title?.toLowerCase() === searchName);
+            }
+            
+            // Si no se especifica, usar el activo
+            if (!targetDoc) {
+                targetDoc = activeChapter || activeWorldDoc;
+            }
+            
+            if (!targetDoc) {
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: '⚠️ No hay un documento activo seleccionado para formatear.', type: 'warning' }
+                }));
+                return;
+            }
+            
+            const docTitle = targetDoc.title || targetDoc.name || 'Capítulo Activo';
+            const docContent = targetDoc.content || '';
+            const plainTextContent = cleanHtmlToPlainText(docContent);
+            const wordCount = plainTextContent.split(/\s+/).filter(Boolean).length;
+            
+            // Re-enrutamos la acción interna a 'formatear'
+            effectiveAction = 'formatear';
+
+            // === FIX 1: Mensaje visual (lo que el usuario ve en la burbuja) ===
+            // Es una tarjeta descriptiva corta; el payload real va solo al API.
+            const displayUserMessage = `/format ${docTitle}`;
+            
+            // === El payload real que se envía a la IA (no se muestra en el chat) ===
+            userMessage = `Por favor formatea el siguiente texto del documento "${docTitle}" (${wordCount} palabras). Aplica saltos de línea dobles entre secciones, personajes y párrafos. NO modifiques ninguna palabra:\n\n${plainTextContent}`;
+
+            // Sobreescribimos la variable que se mostrará en el chat con el label corto
+            // Usamos un marcador especial en el objeto de mensaje para el renderizado estético
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                const userMsg = { id: generateMsgId(), role: 'user', content: displayUserMessage, timestamp: Date.now() };
+                const aiMsg = { id: generateMsgId(), role: 'assistant', content: '❌ API Key de DeepSeek no configurada.', timestamp: Date.now(), responseType: 'error' };
+                setMessages(prev => [...prev, userMsg, aiMsg]);
+                return;
+            }
+
+            lastUserMessageRef.current = displayUserMessage;
+
+            const contextText = buildContextFromSelections(
+                activeBook, chapters, contextSelections?.chapterIds || [],
+                characters, worldItems, contextSelections?.worldItemIds || [], compressContext
+            );
+            const extraOptions = { chapters, worldItems };
+            const modelId = chatModel || defaultModel;
+            const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
+            extraOptions.useNativeTools = enableTools;
+
+            const systemPrompt = buildSystemPrompt('formatear', contextText, destinationDoc, activeChapter || activeWorldDoc, extraOptions);
+            const aiMessages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage }
+            ];
+
+            const userMsgId = generateMsgId();
+            const aiMsgId = generateMsgId();
+            // Mostramos el label bonito en la burbuja, no el texto completo
+            const userMsg = { id: userMsgId, role: 'user', content: displayUserMessage, isFormatCommand: true, formatDocTitle: docTitle, formatWordCount: wordCount, timestamp: Date.now() };
+            const aiMsg = { id: aiMsgId, role: 'assistant', content: '', isStreaming: true, timestamp: Date.now() };
+            setMessages(prev => [...prev, userMsg, aiMsg]);
+            if (activeSession) {
+                SessionManager.addMessage(activeSession.id, userMsg);
+                SessionManager.addMessage(activeSession.id, aiMsg);
+                setSessions(SessionManager.getSessions());
+            }
+            setIsLoading(true);
+            if (abortControllerRef.current) abortControllerRef.current.abort();
+            abortControllerRef.current = new AbortController();
+
+            try {
+                const startTime = Date.now();
+                let lastToolCall = { name: '', args: '' };
+                await AIService.generateStream(aiMessages, {
+                    selectedAiModel: modelId,
+                    deepseekApiKey: apiKey,
+                    temperature: 0.0,
+                    signal: abortControllerRef.current.signal,
+                    enableTools,
+                    onToolCall: (name, argsText, isComplete) => {
+                        lastToolCall = { name, args: argsText };
+                        if (name === 'aplicar_formateo_lectura') {
+                            setMessages(prev => prev.map(m =>
+                                m.id === aiMsgId ? { ...m, content: `✨ **Formateando "${docTitle}"...**`, responseType: 'format' } : m
+                            ));
+                        }
+                    }
+                }, () => {}, () => {});
+
+                const durationMs = Date.now() - startTime;
+                if (lastToolCall.name === 'aplicar_formateo_lectura') {
+                    const parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems);
+                    const block = parsedBlocks[0];
+                    const charCount = cleanText(block?.content || '').length;
+                    const displayContent = `✨ **Formateo completado** — "${docTitle}"\n\n${charCount > 0 ? `${Math.ceil(charCount / 5)} palabras procesadas.` : ''}\n\nHaz clic en **Ver Cambios** para revisar y aplicar el nuevo espaciado.`;
+                    setMessages(prev => prev.map(m =>
+                        m.id === aiMsgId ? { ...m, content: displayContent, rawResponse: JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }), isStreaming: false, responseType: 'format', duration: durationMs } : m
+                    ));
+                    if (activeSession) {
+                        SessionManager.updateLastAssistantMessage(activeSession.id, displayContent, true, 'format', JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }));
+                        setActiveSession(SessionManager.getSession(activeSession.id));
+                        setSessions(SessionManager.getSessions());
+                    }
+                    if (parsedBlocks.length > 0) handleShowDiff(parsedBlocks);
+                } else {
+                    setMessages(prev => prev.map(m =>
+                        m.id === aiMsgId ? { ...m, content: '⚠️ El modelo no utilizó la herramienta de formateo. Intenta de nuevo.', isStreaming: false, responseType: 'error' } : m
+                    ));
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    setMessages(prev => prev.map(m =>
+                        m.id === aiMsgId ? { ...m, content: `❌ Error al formatear: ${error.message}`, isStreaming: false, responseType: 'error' } : m
+                    ));
+                }
+            } finally {
+                setIsLoading(false);
+            }
+            return; // No continúa al flujo normal de handleSend
+        }
+
         // --- MOCK INTERCEPTOR PARA SEGUIMIENTO Y TESTEO ---
         if (userMessage.trim().startsWith('/mock')) {
             const trimmedMessage = userMessage.trim();
@@ -620,7 +753,7 @@ const IAStudio = () => {
                 deepseekApiKey: apiKey,
                 reasoningMode: chatReasoningMode,
                 reasoningEffort: chatReasoningEffort,
-                temperature: temperature,
+                temperature: effectiveAction === 'formatear' ? 0.0 : temperature,
                 useJsonMode: useJsonMode,
                 signal: abortControllerRef.current.signal,
                 enableTools: enableTools,
@@ -879,8 +1012,8 @@ const IAStudio = () => {
                     setSessions(SessionManager.getSessions());
                 }
 
-                const shouldShowDiff = parsedBlocks.some(b => b.isPatch || b.isSection || b.isScene || (b.mode !== 'text' && b.mode !== 'auto' && b.content))
-                    || (lastToolCall.name && ['crear_capitulo', 'aplicar_parche', 'localizar_parche_exacto', 'aplicar_parches_resolucion'].includes(lastToolCall.name));
+                const shouldShowDiff = parsedBlocks.some(b => b.isPatch || b.isSection || b.isScene || b.isFormat || (b.mode !== 'text' && b.mode !== 'auto' && b.content))
+                    || (lastToolCall.name && ['crear_capitulo', 'aplicar_parche', 'localizar_parche_exacto', 'aplicar_parches_resolucion', 'aplicar_formateo_lectura'].includes(lastToolCall.name));
 
                 if (shouldShowDiff && !isEchoingContext) {
                     handleShowDiff(parsedBlocks);

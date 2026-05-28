@@ -78,6 +78,7 @@ const IAStudioChat = ({
 
     // --- COMANDOS MOCK DE PRUEBA ---
     const COMMANDS = [
+        { id: '/format', label: '✨ /format [documento]', description: 'Dar formato y espaciado de lectura ultra-legible a un documento' },
         { id: '/mock patch', label: '✂️ /mock patch', description: 'Simular patch (fragmento)' },
         { id: '/mock section', label: '📄 /mock section', description: 'Simular sección de capítulo' },
         { id: '/mock scene', label: '🎬 /mock scene', description: 'Simular escena agregada' },
@@ -89,6 +90,27 @@ const IAStudioChat = ({
 
     const getFilteredCommands = () => {
         const trimmedVal = inputValue.toLowerCase().trim();
+        
+        // Expresión regular para detectar si están escribiendo "/format [doc]" o si acaban de escribir "/format"
+        const matchFormatCmd = /^\/format\s+(.*)/i.exec(inputValue);
+        const matchFormatStart = /^\/format\s*$/i.test(inputValue);
+        
+        if (matchFormatCmd || matchFormatStart) {
+            const filterDocName = matchFormatCmd ? matchFormatCmd[1].toLowerCase() : '';
+            
+            const docs = [
+                ...(chapters || []).filter(c => !c.isVolume).map(c => ({ id: c.title, label: c.title, type: 'chapter' })),
+                ...(worldItems || []).map(w => ({ id: w.title, label: w.title, type: 'world' }))
+            ];
+            
+            const filteredDocs = docs.filter(d => d.label.toLowerCase().includes(filterDocName));
+            
+            return filteredDocs.map(d => ({
+                id: `/format ${d.label}`,
+                label: `✨ /format ${d.label}`,
+                description: `Formatear: ${d.label} (${d.type === 'chapter' ? 'Capítulo' : 'Master Doc'})`
+            }));
+        }
         
         // Expresión regular para detectar si están escribiendo "/mock [cmd] [doc]" o si acaban de escribir "/mock [cmd]"
         const matchMockCmd = /^\/mock\s+(patch|section|scene|content)\s+(.*)/i.exec(inputValue);

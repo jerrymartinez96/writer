@@ -361,6 +361,26 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
         return rawResponseType;
     }, [rawResponseType, content]);
 
+    // === Completed format result card ===
+    if (!isStreaming && responseType === 'format') {
+        return (
+            <div className="space-y-3 p-4 rounded-2xl border-2 border-violet-500/25 bg-gradient-to-br from-violet-500/[0.06] to-purple-600/[0.04] shadow-[0_0_18px_rgba(139,92,246,0.08)] min-w-[240px] sm:min-w-[320px] max-w-full">
+                <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-md">
+                        <span className="text-sm">✨</span>
+                    </div>
+                    <div>
+                        <p className="text-xs font-black uppercase tracking-wider text-violet-400">Formateo completado</p>
+                        <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Espaciado y saltos de línea optimizados</p>
+                    </div>
+                </div>
+                <div className="text-[11px] text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                    {content?.replace(/\*\*/g, '').replace(/✨/g, '').replace(/^\s*—\s*/gm, '→ ').trim()}
+                </div>
+            </div>
+        );
+    }
+
     // Skeleton while waiting for first chunk
     if (isStreaming && !content) {
         return (
@@ -378,28 +398,56 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
         const isPatch = content.includes('✂️');
         const isInconsistency = content.includes('⚠️');
 
-        if (isChapter || isPatch || isInconsistency) {
+        const isFormat = rawResponseType === 'format' || content.includes('Formateando');
+
+        if (isChapter || isPatch || isInconsistency || isFormat) {
             return (
-                <div className="space-y-3 p-3.5 border border-indigo-500/20 bg-indigo-500/[0.02] rounded-2xl animate-pulse min-w-[240px] sm:min-w-[320px] max-w-full shadow-[0_0_12px_rgba(99,102,241,0.05)] border-2 overflow-hidden">
-                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                <div className={`space-y-3 p-3.5 rounded-2xl animate-pulse min-w-[240px] sm:min-w-[320px] max-w-full border-2 overflow-hidden ${
+                    isFormat
+                        ? 'border-violet-500/20 bg-violet-500/[0.03] shadow-[0_0_12px_rgba(139,92,246,0.07)]'
+                        : 'border-indigo-500/20 bg-indigo-500/[0.02] shadow-[0_0_12px_rgba(99,102,241,0.05)]'
+                }`}>
+                    <div className="flex items-center gap-2 text-xs font-bold">
                         {isChapter && <FileText size={14} className="animate-spin text-emerald-400 shrink-0" style={{ animationDuration: '3s' }} />}
                         {isPatch && <FileDiff size={14} className="animate-bounce text-indigo-400 shrink-0" />}
                         {isInconsistency && <AlertTriangle size={14} className="animate-pulse text-amber-400 shrink-0" />}
-                        <span className="text-[10px] font-black uppercase tracking-wider">
+                        {isFormat && <span className="text-base shrink-0" style={{ lineHeight: 1 }}>✨</span>}
+                        <span className={`text-[10px] font-black uppercase tracking-wider ${
+                            isFormat ? 'text-violet-400' : 'text-indigo-400'
+                        }`}>
                             {isChapter && 'Generando Nuevo Capítulo...'}
                             {isPatch && 'Redactando Parche Quirúrgico...'}
                             {isInconsistency && 'Analizando Lore y Conflictos...'}
+                            {isFormat && 'Optimizando formato y espaciado...'}
                         </span>
                     </div>
 
                     <div className="space-y-2 pt-1">
-                        <div className="h-3 w-11/12 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" />
-                        <div className="h-3 w-4/5 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.15s' }} />
+                        <div className={`h-3 w-11/12 rounded bg-gradient-to-r bg-[length:200%_100%] animate-shimmer ${
+                            isFormat
+                                ? 'from-[var(--border-main)] via-violet-500/20 to-[var(--border-main)]'
+                                : 'from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)]'
+                        }`} />
+                        <div className={`h-3 w-4/5 rounded bg-gradient-to-r bg-[length:200%_100%] animate-shimmer ${
+                            isFormat
+                                ? 'from-[var(--border-main)] via-violet-500/20 to-[var(--border-main)]'
+                                : 'from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)]'
+                        }`} style={{ animationDelay: '0.15s' }} />
                     </div>
 
-                    <div className="text-[10px] font-mono text-[var(--text-muted)] opacity-60 bg-[var(--bg-app)]/40 p-2.5 rounded-xl border border-[var(--border-main)]/20 leading-relaxed max-w-full whitespace-pre-wrap break-words">
-                        {content}
-                    </div>
+                    {!isFormat && (
+                        <div className="text-[10px] font-mono text-[var(--text-muted)] opacity-60 bg-[var(--bg-app)]/40 p-2.5 rounded-xl border border-[var(--border-main)]/20 leading-relaxed max-w-full whitespace-pre-wrap break-words">
+                            {content}
+                        </div>
+                    )}
+                    {isFormat && (
+                        <div className="text-[10px] text-violet-400/60 flex items-center gap-1.5">
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <span className="ml-1">Procesando estructura del documento</span>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -610,7 +658,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
     }, [showConfirmDelete]);
 
     // Determine if this message has applicable content (to show diff button)
-    const hasApplicableContent = !isUser && !isStreaming && (responseType === 'content' || responseType === 'patch' || responseType === 'section' || responseType === 'scene');
+    const hasApplicableContent = !isUser && !isStreaming && (responseType === 'content' || responseType === 'patch' || responseType === 'section' || responseType === 'scene' || responseType === 'format');
 
     // Determine icon for the response type
     const ResponseTypeIcon = useMemo(() => {
@@ -665,10 +713,27 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
             {/* Content */}
             <div className={`flex-1 max-w-[88%] sm:max-w-[80%] ${isUser ? 'text-right' : ''}`}>
                 <div className={`inline-block text-left px-4 py-3 rounded-2xl text-sm leading-relaxed relative group transition-all ${
-                    isUser
-                        ? 'bg-[var(--accent-main)] text-white rounded-tr-md'
-                        : 'bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-tl-md text-[var(--text-main)] pr-10'
+                    isUser && message.isFormatCommand
+                        ? 'bg-gradient-to-br from-violet-600 to-purple-700 text-white rounded-tr-md shadow-lg shadow-violet-900/20'
+                        : isUser
+                            ? 'bg-[var(--accent-main)] text-white rounded-tr-md'
+                            : 'bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-tl-md text-[var(--text-main)] pr-10'
                 }`}>
+                    {/* Format Command Card (user side) */}
+                    {isUser && message.isFormatCommand && (
+                        <div className="flex items-center gap-2.5 min-w-[180px]">
+                            <div className="w-7 h-7 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                                <span className="text-sm">✨</span>
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-wider text-white/90">Formatear documento</p>
+                                <p className="text-[10px] text-white/60 mt-0.5 truncate max-w-[180px]" title={message.formatDocTitle}>
+                                    {message.formatDocTitle || 'Capítulo activo'}
+                                    {message.formatWordCount ? ` · ${message.formatWordCount.toLocaleString()} palabras` : ''}
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     {/* Floating Hover Copy Button (desktop) */}
                     {!isUser && !isStreaming && message.content && (responseType === 'analysis' || responseType === 'suggestion') && (
                         <button
@@ -684,6 +749,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                         </button>
                     )}
 
+                    {!(isUser && message.isFormatCommand) && (
                     <div
                         ref={contentRef}
                         style={!isExpanded && isExpandable ? { maxHeight: '240px', overflow: 'hidden' } : {}}
@@ -707,6 +773,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                             }`} />
                         )}
                     </div>
+                    )}
 
                     {/* Expand/Collapse Button */}
                     {isExpandable && (

@@ -233,6 +233,21 @@ export const DEEPSEEK_SCHEMAS = [
                 required: ["respuestas"]
             }
         }
+    },
+    {
+        type: "function",
+        function: {
+            name: "aplicar_formateo_lectura",
+            description: "Toma el texto completo de un documento y lo devuelve con el espaciado vertical optimizado para su lectura cómoda. NO modifica ninguna palabra, solo reorganiza los saltos de línea y párrafos para que sea fácil de leer.",
+            parameters: {
+                type: "object",
+                properties: {
+                    documento_id: { type: "string", description: "El ID o título del documento/capítulo que se está formateando." },
+                    texto_formateado: { type: "string", description: "El contenido completo del documento, idéntico al original en redacción pero con saltos de línea dobles (\\n\\n) entre cada sección, personaje, párrafo o bloque temático para mejorar la lectura." }
+                },
+                required: ["documento_id", "texto_formateado"]
+            }
+        }
     }
 ];
 
