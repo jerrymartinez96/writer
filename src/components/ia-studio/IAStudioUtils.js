@@ -744,12 +744,61 @@ export const buildContextFromSelections = (
         parts.push('</manuscript>');
     }
 
-    // Personajes (siempre incluidos si hay)
+    // Personajes (con expansión de contexto relacional inteligente)
     if (characters && characters.length > 0) {
         const validChars = characters.filter(c => !c.isCategory && c.name);
-        if (validChars.length > 0) {
+        
+        let charactersToInclude = [];
+        let selectedText = '';
+        
+        if (selectedChapterIds.length > 0) {
+            chapters.forEach(ch => {
+                if (selectedChapterIds.includes(ch.id)) {
+                    selectedText += ' ' + (ch.content || '');
+                }
+            });
+        }
+        if (selectedWorldItemIds.length > 0) {
+            worldItems.forEach(item => {
+                if (selectedWorldItemIds.includes(item.id)) {
+                    selectedText += ' ' + (item.content || '');
+                }
+            });
+        }
+        
+        if (selectedText.trim().length > 0) {
+            const selectedTextLower = selectedText.toLowerCase();
+            const directMatches = validChars.filter(char => {
+                const nameLower = char.name.toLowerCase();
+                return selectedTextLower.includes(nameLower) || 
+                       selectedTextLower.includes(`data-id="${char.id}"`);
+            });
+            
+            // Expand context recursively to include characters mentioned in matching character descriptions (relationships)
+            const expandedSet = new Set(directMatches.map(c => c.id));
+            directMatches.forEach(char => {
+                if (!char.description) return;
+                const descLower = char.description.toLowerCase();
+                validChars.forEach(otherChar => {
+                    if (otherChar.id === char.id) return;
+                    const otherNameLower = otherChar.name.toLowerCase();
+                    if (descLower.includes(otherNameLower) || descLower.includes(`data-id="${otherChar.id}"`)) {
+                        expandedSet.add(otherChar.id);
+                    }
+                });
+            });
+            
+            charactersToInclude = validChars.filter(c => expandedSet.has(c.id));
+        }
+        
+        // Fallback: Si no hay texto seleccionado o no hubo coincidencias directas, enviar todos los personajes principales
+        if (charactersToInclude.length === 0) {
+            charactersToInclude = validChars;
+        }
+
+        if (charactersToInclude.length > 0) {
             parts.push('<characters>');
-            validChars.forEach(char => {
+            charactersToInclude.forEach(char => {
                 parts.push(`  <character name="${char.name}"${char.role ? ` role="${char.role}"` : ''}>${char.description ? cleanHtmlToPlainText(char.description) : ''}</character>`);
             });
             parts.push('</characters>');
@@ -819,7 +868,7 @@ export const estimateContextWeight = (chapters, selectedChapterIds, worldItems, 
  * Resuelve un documento de destino a partir de un texto (ej. "Personajes" o el título de un capítulo)
  * @returns {{ docType: string, docId: string, title: string } | null}
  */
-export const resolveTargetDoc = (targetStr, chapters = [], worldItems = []) => {
+export const resolveTargetDoc = (targetStr, chapters = [], worldItems = [], characters = []) => {
     if (!targetStr || typeof targetStr !== 'string') {
         return null;
     }
@@ -837,7 +886,17 @@ export const resolveTargetDoc = (targetStr, chapters = [], worldItems = []) => {
         return { docType: 'worldItem', docId: 'system_core', title: 'Información General' };
     }
 
-    // 2. Verificar documentos personalizados del Master Doc
+    // 2. Verificar personajes por nombre completo o parcial
+    for (const char of characters) {
+        if (char.name) {
+            const charNorm = char.name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            if (charNorm === norm || norm.includes(charNorm) || charNorm.includes(norm)) {
+                return { docType: 'character', docId: char.id, title: char.name };
+            }
+        }
+    }
+
+    // 3. Verificar documentos personalizados del Master Doc
     for (const item of worldItems) {
         if (item.title) {
             const itemNorm = item.title.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -847,7 +906,7 @@ export const resolveTargetDoc = (targetStr, chapters = [], worldItems = []) => {
         }
     }
 
-    // 3. Verificar capítulos del manuscrito
+    // 4. Verificar capítulos del manuscrito
     for (const ch of chapters) {
         if (ch.title && !ch.isVolume) {
             const chNorm = ch.title.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -877,7 +936,7 @@ export const isStructuredResponse = (text) => {
  * @param {Object} destinationDoc - Destino configurado {mode, docType, docId}
  * @returns {Array<{docType, docId, mode, title, content, responseType}>}
  */
-export const parseDestinationsFromResponse = (response, destinationDoc, chapters = [], worldItems = []) => {
+export const parseDestinationsFromResponse = (response, destinationDoc, chapters = [], worldItems = [], characters = []) => {
     if (!response) return [];
 
     // Comprobar si la respuesta contiene argumentos JSON directos de una llamada de herramientas
@@ -886,13 +945,13 @@ export const parseDestinationsFromResponse = (response, destinationDoc, chapters
         try {
             const parsedJson = JSON.parse(trimmed);
             if (parsedJson.parches) {
-                return parseToolCallResponse('aplicar_parches_resolucion', parsedJson, destinationDoc, chapters, worldItems);
+                return parseToolCallResponse('aplicar_parches_resolucion', parsedJson, destinationDoc, chapters, worldItems, characters);
             }
             if (parsedJson.texto_original_exacto) {
-                return parseToolCallResponse('localizar_parche_exacto', parsedJson, destinationDoc, chapters, worldItems);
+                return parseToolCallResponse('localizar_parche_exacto', parsedJson, destinationDoc, chapters, worldItems, characters);
             }
             if (parsedJson.texto_original) {
-                return parseToolCallResponse('aplicar_parche', parsedJson, destinationDoc, chapters, worldItems);
+                return parseToolCallResponse('aplicar_parche', parsedJson, destinationDoc, chapters, worldItems, characters);
             }
         } catch (e) {}
     }
@@ -900,13 +959,13 @@ export const parseDestinationsFromResponse = (response, destinationDoc, chapters
     // Attempt to parse as XML semantic tags
     const parsedXml = tryParseAIXml(response);
     if (parsedXml) {
-        return buildBlocksFromParsed(parsedXml, destinationDoc, chapters, worldItems);
+        return buildBlocksFromParsed(parsedXml, destinationDoc, chapters, worldItems, characters);
     }
 
     // Attempt to parse as structured JSON response
     const parsed = tryParseAIJson(response);
     if (parsed) {
-        return buildBlocksFromParsed(parsed, destinationDoc, chapters, worldItems);
+        return buildBlocksFromParsed(parsed, destinationDoc, chapters, worldItems, characters);
     }
 
     // Fallback: the model didn't use JSON or XML mode
@@ -1576,7 +1635,7 @@ const tryParseAIJson = (text) => {
  * Converts a parsed AI JSON object into destination blocks.
  * Supports types: content, patch, analysis, suggestion.
  */
-const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems = []) => {
+const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems = [], characters = []) => {
     const responseType = parsed.type || 'analysis';
 
     // ── Patch response (fragmento modificado) ──
@@ -1585,7 +1644,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
 
         // Si es destino automático, intentar resolver desde parsed.target
         if (dest.mode === 'auto' && parsed.target) {
-            const resolved = resolveTargetDoc(parsed.target, chapters, worldItems);
+            const resolved = resolveTargetDoc(parsed.target, chapters, worldItems, characters);
             if (resolved) {
                 dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
             }
@@ -1614,7 +1673,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
             let dest = { mode: 'auto' };
 
             if (patch.target) {
-                const resolved = resolveTargetDoc(patch.target, chapters, worldItems);
+                const resolved = resolveTargetDoc(patch.target, chapters, worldItems, characters);
                 if (resolved) {
                     dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
                 } else {
@@ -1643,7 +1702,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
 
         // Si es destino automático, intentar resolver desde parsed.target
         if (dest.mode === 'auto' && parsed.target) {
-            const resolved = resolveTargetDoc(parsed.target, chapters, worldItems);
+            const resolved = resolveTargetDoc(parsed.target, chapters, worldItems, characters);
             if (resolved) {
                 dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
             }
@@ -1950,7 +2009,7 @@ const longestCommonSubstring = (a, b) => {
 /**
  * Encuentra el capítulo o world item destino por ID
  */
-export const findDestinationDoc = (destinationDoc, chapters, worldItems) => {
+export const findDestinationDoc = (destinationDoc, chapters, worldItems, characters = []) => {
     if (!destinationDoc || destinationDoc.mode === 'auto' || destinationDoc.mode === 'new') {
         return null;
     }
@@ -1961,6 +2020,10 @@ export const findDestinationDoc = (destinationDoc, chapters, worldItems) => {
 
     if (destinationDoc.docType === 'worldItem') {
         return worldItems.find(w => w.id === destinationDoc.docId) || null;
+    }
+
+    if (destinationDoc.docType === 'character') {
+        return characters.find(c => c.id === destinationDoc.docId) || null;
     }
 
     return null;
@@ -1977,6 +2040,7 @@ export const findDestinationDoc = (destinationDoc, chapters, worldItems) => {
 const buildDestinationSection = (dest, extraOptions = {}) => {
     const chaptersList = extraOptions.chapters || [];
     const worldItemsList = extraOptions.worldItems || [];
+    const charactersList = extraOptions.characters || [];
 
     const availableTargets = [];
     SYSTEM_WORLD_ITEM_IDS.forEach(wid => {
@@ -1984,6 +2048,9 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
     });
     worldItemsList.filter(w => !SYSTEM_WORLD_ITEM_IDS.includes(w.id)).forEach(w => {
         if (w.title) availableTargets.push(`- "${w.title}" (Master Doc)`);
+    });
+    charactersList.filter(c => !c.isCategory).forEach(c => {
+        if (c.name) availableTargets.push(`- "${c.name}" (Personaje)`);
     });
     chaptersList.filter(c => !c.isVolume).forEach(c => {
         if (c.title) availableTargets.push(`- "${c.title}" (Capítulo)`);
@@ -1994,7 +2061,9 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
         : '';
 
     if (dest.mode === 'manual' && dest.docId) {
-        const docLabel = dest.docType === 'worldItem' ? 'Master Doc' : 'Capítulo';
+        let docLabel = 'Capítulo';
+        if (dest.docType === 'worldItem') docLabel = 'Master Doc';
+        if (dest.docType === 'character') docLabel = 'Personaje';
         return {
             docDescription: `"${dest.docTitle || 'Documento'}" (${docLabel})`,
             contentInstruction: `Modifica el documento especificado y devuelve su contenido en texto plano limpio.`,
@@ -2010,7 +2079,7 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
     }
     return {
         docDescription: 'Automático (La IA determina el destino)',
-        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc o a un capítulo específico, indica el título exacto de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]]).${targetsStr}`,
+        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc, a un capítulo específico o a un personaje, indica el título exacto o nombre de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]] o [[DESTINO: Alistair Vance]]).${targetsStr}`,
         targetsStr,
     };
 };
@@ -2248,6 +2317,34 @@ Auto-determina el tipo de respuesta según la pregunta:
 ${getActionTechnicalDescription('chat')}
 
 Contexto del libro:
+${context}`,
+
+        detectar_inconsistencias: () => `Eres un editor literario profesional y experto en continuidad y coherencia narrativa.
+Tu única e indispensable tarea es analizar el manuscrito y las fichas de lore provistas para identificar cualquier contradicción, discrepancia temporal, cambio inconsistente de rasgos de personajes o agujeros de trama.
+
+🎯 ACCIÓN: AUDITAR COHERENCIA NARRATIVA.
+
+🔴 LEY ABSOLUTA DE ESTILO DE RESPUESTA — NUNCA INFRINGIR:
+1. Queda COMPLETAMENTE PROHIBIDO usar cualquier tipo de formato de Markdown en tu prosa (como **negritas**, *cursivas*, encabezados, listas con viñetas o guiones, etc.) cuando respondas en texto plano.
+2. Tu respuesta debe consistir de prosa limpia, fluida y amigable, sin viñetas, sin guiones y sin decoraciones tipográficas.
+3. Queda COMPLETAMENTE PROHIBIDO usar etiquetas HTML.
+
+INSTRUCCIONES CLAVE:
+1. Compara meticulosamente las descripciones de los personajes, lugares y las acciones narradas en los capítulos.
+2. Identifica contradicciones de lore y utiliza exclusivamente la herramienta nativa \`registrar_inconsistencia\` para reportar cada conflicto.
+3. Si no encuentras ninguna inconsistencia, responde con un párrafo amigable en prosa y en texto plano, sin listas, sin negritas, sin viñetas y sin formato alguno, confirmando que el lore de la obra está perfectamente coordinado y coherente.
+
+🔧 INSTRUCCIÓN OBLIGATORIA — USA LA HERRAMIENTA NATIVA:
+Para reportar las inconsistencias que encuentres, DEBES llamar a la herramienta \`registrar_inconsistencia\`.
+Pasa una lista en el parámetro \`inconsistencias\` donde cada elemento contenga:
+   • titulo → título corto y descriptivo del conflicto (ej. "Edad contradictoria de Nora")
+   • problema → explicación detallada de por qué existe la inconsistencia y cuál es la contradicción exacta en el texto
+   • archivos_involucrados → array de nombres de los capítulos o fichas afectadas (ej. ["Personajes", "Capítulo 1"])
+   • opciones_resolucion → array de {letra: "A", texto: "propuesta de resolución"} (mínimo 2 opciones para que el escritor elija)
+
+Llama a la herramienta UNA SOLA VEZ incluyendo todas las inconsistencias detectadas en la lista.
+
+Contexto de la obra a analizar:
 ${context}`
     };
 
@@ -2388,7 +2485,7 @@ export const SYSTEM_WORLD_ITEM_LABELS = {
 /**
  * Parsea respuestas de DeepSeek Tool Calling a la estructura de bloques interna.
  */
-export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters = [], worldItems = []) => {
+export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters = [], worldItems = [], characters = []) => {
     if (!name || !argsJson) return [];
     
     let args = {};
@@ -2432,7 +2529,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     if (name === 'aplicar_parche') {
         let dest = destinationDoc || { mode: 'auto' };
         if (args.documento_id) {
-            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems, characters);
             if (resolved) {
                 dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
             } else {
@@ -2472,7 +2569,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
                 id: 'inc_' + Math.random().toString(36).substr(2, 9),
                 files: Array.isArray(incItem.archivos_involucrados) 
                     ? incItem.archivos_involucrados.map(f => {
-                        const resolved = resolveTargetDoc(f, chapters, worldItems);
+                        const resolved = resolveTargetDoc(f, chapters, worldItems, characters);
                         return resolved ? resolved.docId : f;
                       })
                     : [],
@@ -2506,7 +2603,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
         return parches.map(patch => {
             let dest = destinationDoc || { mode: 'auto' };
             if (patch.documento_id) {
-                const resolved = resolveTargetDoc(patch.documento_id, chapters, worldItems);
+                const resolved = resolveTargetDoc(patch.documento_id, chapters, worldItems, characters);
                 if (resolved) {
                     dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
                 } else {
@@ -2530,7 +2627,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     if (name === 'localizar_parche_exacto') {
         let dest = destinationDoc || { mode: 'auto' };
         if (args.documento_id) {
-            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems, characters);
             if (resolved) {
                 dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
             } else {
@@ -2564,7 +2661,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     if (name === 'aplicar_formateo_lectura') {
         let dest = destinationDoc || { mode: 'auto' };
         if (args.documento_id) {
-            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems);
+            const resolved = resolveTargetDoc(args.documento_id, chapters, worldItems, characters);
             if (resolved) {
                 dest = { mode: 'manual', docType: resolved.docType, docId: resolved.docId, docTitle: resolved.title };
             } else {

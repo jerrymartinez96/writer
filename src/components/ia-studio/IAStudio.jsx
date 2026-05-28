@@ -112,14 +112,45 @@ const IAStudio = () => {
     const [chatReasoningMode, setChatReasoningMode] = useState(false);
     const [chatReasoningEffort, setChatReasoningEffort] = useState('high');
 
-    // Sync overrides with user defaults when profile is loaded
+    // Sync model preferences when activeSession or profile changes
     useEffect(() => {
-        if (profile?.aiConfig) {
+        if (activeSession) {
+            setChatModel(activeSession.selectedModel || profile?.aiConfig?.defaultModel || 'deepseek-v4-flash');
+            setChatReasoningMode(activeSession.chatReasoningMode ?? profile?.aiConfig?.reasoningMode ?? false);
+            setChatReasoningEffort(activeSession.chatReasoningEffort || profile?.aiConfig?.reasoningEffort || 'high');
+        } else if (profile?.aiConfig) {
             setChatModel(profile.aiConfig.defaultModel || 'deepseek-v4-flash');
             setChatReasoningMode(profile.aiConfig.reasoningMode ?? false);
             setChatReasoningEffort(profile.aiConfig.reasoningEffort || 'high');
         }
-    }, [profile]);
+    }, [activeSession?.id, profile?.aiConfig]);
+
+    const handleModelChange = useCallback((modelId) => {
+        setChatModel(modelId);
+        if (activeSession) {
+            SessionManager.updateSessionModelConfig(activeSession.id, { selectedModel: modelId });
+            setActiveSession(prev => prev ? { ...prev, selectedModel: modelId } : prev);
+            setSessions(SessionManager.getSessions());
+        }
+    }, [activeSession, setActiveSession, setSessions]);
+
+    const handleReasoningModeChange = useCallback((mode) => {
+        setChatReasoningMode(mode);
+        if (activeSession) {
+            SessionManager.updateSessionModelConfig(activeSession.id, { chatReasoningMode: mode });
+            setActiveSession(prev => prev ? { ...prev, chatReasoningMode: mode } : prev);
+            setSessions(SessionManager.getSessions());
+        }
+    }, [activeSession, setActiveSession, setSessions]);
+
+    const handleReasoningEffortChange = useCallback((effort) => {
+        setChatReasoningEffort(effort);
+        if (activeSession) {
+            SessionManager.updateSessionModelConfig(activeSession.id, { chatReasoningEffort: effort });
+            setActiveSession(prev => prev ? { ...prev, chatReasoningEffort: effort } : prev);
+            setSessions(SessionManager.getSessions());
+        }
+    }, [activeSession, setActiveSession, setSessions]);
 
     // Listen for action changes from sidebar
     useEffect(() => {
@@ -294,6 +325,188 @@ const IAStudio = () => {
             effectiveAction = 'seccion';
         }
 
+        // --- INTERCEPTOR DE COMANDO /DETECTAR ---
+        if (userMessage.trim().startsWith('/detectar')) {
+            const trimmedMessage = userMessage.trim();
+            const detectArgs = trimmedMessage.substring(9).trim(); // Remueve "/detectar"
+            
+            // Separar la acción (ej. "inconsistencias") de los argumentos extra
+            const spaceIndex = detectArgs.indexOf(' ');
+            const action = spaceIndex !== -1 ? detectArgs.substring(0, spaceIndex).trim() : detectArgs;
+            
+            if (action === 'inconsistencias') {
+                effectiveAction = 'detectar_inconsistencias';
+                
+                // === Mensaje visual en la burbuja ===
+                const displayUserMessage = `/detectar inconsistencias`;
+                
+                const apiKey = getApiKey();
+                if (!apiKey) {
+                    const userMsg = { id: generateMsgId(), role: 'user', content: displayUserMessage, timestamp: Date.now() };
+                    const aiMsg = { id: generateMsgId(), role: 'assistant', content: '❌ API Key de DeepSeek no configurada.', timestamp: Date.now(), responseType: 'error' };
+                    setMessages(prev => [...prev, userMsg, aiMsg]);
+                    return;
+                }
+                
+                lastUserMessageRef.current = displayUserMessage;
+                
+                // === Reducción de contexto ===
+                // Usamos buildContextFromSelections pero con compresión de capítulos y seleccionando únicamente
+                // capítulos seleccionados, personajes primarios y world items seleccionados para reducir enormemente el peso de los tokens
+                const contextText = buildContextFromSelections(
+                    activeBook,
+                    chapters,
+                    contextSelections?.chapterIds || [],
+                    characters?.filter(c => !c.isCategory), // Solo personajes reales
+                    worldItems,
+                    contextSelections?.worldItemIds || [],
+                    true // Forzar compresión de capítulos grandes
+                );
+                
+                // Mensaje simplificado para la IA
+                userMessage = `Audita el manuscrito y las fichas de lore buscando contradicciones o inconsistencias dramáticas.`;
+                
+                const modelId = chatModel || defaultModel;
+                const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
+                const systemPrompt = buildSystemPrompt('detectar_inconsistencias', contextText, destinationDoc, activeChapter || activeWorldDoc, { useNativeTools: enableTools });
+                const aiMessages = [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userMessage }
+                ];
+                
+                const userMsgId = generateMsgId();
+                const aiMsgId = generateMsgId();
+                const userMsg = { id: userMsgId, role: 'user', content: displayUserMessage, isDetectCommand: true, timestamp: Date.now() };
+                const aiMsg = { id: aiMsgId, role: 'assistant', content: '', isStreaming: true, timestamp: Date.now() };
+                
+                setMessages(prev => [...prev, userMsg, aiMsg]);
+                if (activeSession) {
+                    SessionManager.addMessage(activeSession.id, userMsg);
+                    SessionManager.addMessage(activeSession.id, aiMsg);
+                    setSessions(SessionManager.getSessions());
+                }
+                
+                setIsLoading(true);
+                if (abortControllerRef.current) abortControllerRef.current.abort();
+                abortControllerRef.current = new AbortController();
+                
+                try {
+                    const startTime = Date.now();
+                    let fullResponse = '';
+                    let lastToolCall = { name: '', args: '' };
+                    
+                    await AIService.generateStream(aiMessages, {
+                        selectedAiModel: modelId,
+                        deepseekApiKey: apiKey,
+                        reasoningMode: chatReasoningMode,
+                        reasoningEffort: chatReasoningEffort,
+                        temperature: 0.2, // Temperatura más baja para consistencia lógica
+                        signal: abortControllerRef.current.signal,
+                        enableTools,
+                        onToolCall: (name, argsText, isComplete) => {
+                            lastToolCall = { name, args: argsText };
+                            const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
+                            let displayContent = '⚠️ Analizando coherencia de lore...';
+                            let inconsistencies = undefined;
+                            
+                            if (name === 'registrar_inconsistencia') {
+                                const block = parsedBlocks[0];
+                                inconsistencies = block?.inconsistencies || [];
+                                displayContent = `⚠️ Se están detectando inconsistencias de lore...\n\n**Título:** ${inconsistencies[0]?.title || '...'}\n**Conflicto:** ${inconsistencies[0]?.problem || '...'}`;
+                            }
+                            
+                            setMessages(prev => prev.map(m =>
+                                m.id === aiMsgId ? {
+                                    ...m,
+                                    content: displayContent,
+                                    rawResponse: isComplete ? JSON.stringify({ tool_call: { name, arguments: argsText } }) : '',
+                                    responseType: name === 'registrar_inconsistencia' ? 'inconsistencies' : undefined,
+                                    inconsistencies: inconsistencies
+                                } : m
+                            ));
+                            
+                            if (activeSession) {
+                                SessionManager.updateLastAssistantMessage(
+                                    activeSession.id,
+                                    displayContent,
+                                    isComplete,
+                                    name === 'registrar_inconsistencia' ? 'inconsistencies' : undefined,
+                                    isComplete ? JSON.stringify({ tool_call: { name, arguments: argsText } }) : undefined,
+                                    undefined,
+                                    inconsistencies
+                                );
+                            }
+                        }
+                    }, (chunk) => {
+                        fullResponse += chunk;
+                        // Si el modelo decide responder en texto plano sin llamar a la herramienta
+                        setMessages(prev => prev.map(m =>
+                            m.id === aiMsgId && !lastToolCall.name ? { ...m, content: fullResponse } : m
+                        ));
+                    }, () => {});
+                    
+                    const durationMs = Date.now() - startTime;
+                    
+                    if (lastToolCall.name === 'registrar_inconsistencia') {
+                        const parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems, characters);
+                        const block = parsedBlocks[0];
+                        const inconsistencies = block?.inconsistencies || [];
+                        const displayContent = `⚠️ Se han detectado ${inconsistencies.length} inconsistencias de lore. Revisa y resuelve las tarjetas mostradas arriba.`;
+                        
+                        setMessages(prev => prev.map(m =>
+                            m.id === aiMsgId ? {
+                                ...m,
+                                content: displayContent,
+                                isStreaming: false,
+                                responseType: 'inconsistencies',
+                                duration: durationMs
+                            } : m
+                        ));
+                        
+                        if (activeSession) {
+                            SessionManager.updateLastAssistantMessage(
+                                activeSession.id,
+                                displayContent,
+                                true,
+                                'inconsistencies',
+                                JSON.stringify({ tool_call: { name: lastToolCall.name, arguments: lastToolCall.args } }),
+                                undefined,
+                                inconsistencies,
+                                durationMs
+                            );
+                            setActiveSession(SessionManager.getSession(activeSession.id));
+                            setSessions(SessionManager.getSessions());
+                        }
+                    } else {
+                        // Respuesta en texto plano (ej. coherencia perfecta)
+                        setMessages(prev => prev.map(m =>
+                            m.id === aiMsgId ? { ...m, isStreaming: false, duration: durationMs } : m
+                        ));
+                        if (activeSession) {
+                            SessionManager.updateLastAssistantMessage(activeSession.id, fullResponse, true, undefined, undefined, undefined, undefined, durationMs);
+                            setActiveSession(SessionManager.getSession(activeSession.id));
+                            setSessions(SessionManager.getSessions());
+                        }
+                    }
+                    
+                } catch (error) {
+                    if (error.name !== 'AbortError') {
+                        setMessages(prev => prev.map(m =>
+                            m.id === aiMsgId ? { ...m, content: `❌ Error al auditar coherencia: ${error.message}`, isStreaming: false, responseType: 'error' } : m
+                        ));
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+                return; // Cortar flujo aquí
+            } else {
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: `⚠️ Acción "/detectar ${action}" no reconocida o no implementada aún.`, type: 'warning' }
+                }));
+                return;
+            }
+        }
+
         // --- INTERCEPTOR DE COMANDO /FORMAT ---
         if (userMessage.trim().startsWith('/format')) {
             const trimmedMessage = userMessage.trim();
@@ -397,7 +610,7 @@ const IAStudio = () => {
 
                 const durationMs = Date.now() - startTime;
                 if (lastToolCall.name === 'aplicar_formateo_lectura') {
-                    const parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems);
+                    const parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems, characters);
                     const block = parsedBlocks[0];
                     const charCount = cleanText(block?.content || '').length;
                     const displayContent = `✨ **Formateo completado** — "${docTitle}"\n\n${charCount > 0 ? `${Math.ceil(charCount / 5)} palabras procesadas.` : ''}\n\nHaz clic en **Ver Cambios** para revisar y aplicar el nuevo espaciado.`;
@@ -552,7 +765,7 @@ const IAStudio = () => {
             
             await new Promise(resolve => setTimeout(resolve, 400));
             
-            const parsedBlocks = parseDestinationsFromResponse(fakeResponse, destinationDoc, chapters, worldItems);
+            const parsedBlocks = parseDestinationsFromResponse(fakeResponse, destinationDoc, chapters, worldItems, characters);
             const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
             const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
             const patchBlocks = parsedBlocks.filter(b => b.isPatch);
@@ -760,7 +973,7 @@ const IAStudio = () => {
                 onToolCall: (name, argsText, isComplete) => {
                     lastToolCall = { name, args: argsText };
                     
-                    const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems);
+                    const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
                     let streamResponseType = undefined;
                     let displayContent = 'Procesando comando inteligente...';
                     let inconsistencies = undefined;
@@ -868,7 +1081,7 @@ const IAStudio = () => {
                 let inconsistencies = undefined;
 
                 if (lastToolCall.name) {
-                    parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems);
+                    parsedBlocks = parseToolCallResponse(lastToolCall.name, lastToolCall.args, destinationDoc, chapters, worldItems, characters);
                     const block = parsedBlocks[0];
                     if (lastToolCall.name === 'crear_capitulo') {
                         responseType = 'content';
@@ -893,7 +1106,7 @@ const IAStudio = () => {
                         displayContent = `⚠️ Se han detectado inconsistencias de lore. Revisa y resuelve las tarjetas mostradas arriba.`;
                     }
                 } else {
-                    parsedBlocks = parseDestinationsFromResponse(fullResponse, destinationDoc, chapters, worldItems);
+                    parsedBlocks = parseDestinationsFromResponse(fullResponse, destinationDoc, chapters, worldItems, characters);
 
                     const textBlocks = parsedBlocks.filter(b => b.mode === 'text');
                     const htmlBlocks = parsedBlocks.filter(b => b.mode !== 'text');
@@ -1197,7 +1410,7 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             });
 
             // 6. Parsear destinos y mostrar visor de diferencias
-            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems);
+            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems, characters);
             if (parsedBlocks && parsedBlocks.length > 0) {
                 handleShowDiff(parsedBlocks);
             } else {
@@ -1382,7 +1595,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 temperature: 0.1
             });
 
-            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems);
+            const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems, characters);
             if (parsedBlocks && parsedBlocks.length > 0) {
                 const correctedBlock = parsedBlocks[0];
                 
@@ -1483,10 +1696,10 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             // Resolve targetDoc: manual by docId, or by title for multi-patch with unresolved docId
             let targetDoc = null;
             if (block.mode === 'manual' && block.docId) {
-                targetDoc = findDestinationDoc(block, chapters, worldItems);
+                targetDoc = findDestinationDoc(block, chapters, worldItems, characters);
             } else if (block.isPatch && block.title) {
                 // Multi-patch block without docId — buscar por título
-                targetDoc = [...(worldItems || []), ...(chapters || [])].find(d => {
+                targetDoc = [...(worldItems || []), ...(chapters || []), ...(characters || [])].find(d => {
                     const dTitle = d.title || d.name || '';
                     return dTitle.toLowerCase().trim() === block.title.toLowerCase().trim();
                 }) || null;
@@ -1775,7 +1988,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 onRenameSession={renameSession}
                 onDeleteSession={deleteSession}
                 onShowDiff={(content) => {
-                    const parsed = parseDestinationsFromResponse(content, destinationDoc, chapters, worldItems);
+                    const parsed = parseDestinationsFromResponse(content, destinationDoc, chapters, worldItems, characters);
                     handleShowDiff(parsed);
                 }}
                 isLoading={isLoading}
@@ -1787,15 +2000,15 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 QUICK_ACTIONS={QUICK_ACTIONS}
                 selectedModel={chatModel || defaultModel}
                 chatReasoningMode={chatReasoningMode}
-                onReasoningModeChange={setChatReasoningMode}
+                onReasoningModeChange={handleReasoningModeChange}
                 chatReasoningEffort={chatReasoningEffort}
-                onReasoningEffortChange={setChatReasoningEffort}
+                onReasoningEffortChange={handleReasoningEffortChange}
                 contextSelections={contextSelections}
                 activeBook={activeBook}
                 chapters={chapters}
                 characters={characters}
                 worldItems={worldItems}
-                onModelChange={setChatModel}
+                onModelChange={handleModelChange}
                 onRemoveContextItem={handleRemoveContextItem}
                 onCancelStream={handleCancelStream}
                 onRegenerate={handleRegenerate}
@@ -1848,6 +2061,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 onClose={() => setShowContextModal(false)}
                 chapters={chapters}
                 worldItems={worldItems}
+                characters={characters}
             />
         </div>
     );

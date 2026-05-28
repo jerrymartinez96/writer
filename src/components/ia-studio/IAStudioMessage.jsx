@@ -191,8 +191,8 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
                                             Reabierta
                                         </span>
                                     )}
-                                    {inc.files.map(fId => (
-                                        <span key={fId} className="text-[8px] font-bold bg-[var(--border-main)]/40 text-[var(--text-muted)] px-1.5 py-0.5 rounded">
+                                    {inc.files.map((fId, idx) => (
+                                        <span key={`${fId}-${idx}`} className="text-[8px] font-bold bg-[var(--border-main)]/40 text-[var(--text-muted)] px-1.5 py-0.5 rounded">
                                             📁 {SYSTEM_WORLD_ITEM_LABELS[fId] || fId}
                                         </span>
                                     ))}
@@ -715,9 +715,11 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                 <div className={`inline-block text-left px-4 py-3 rounded-2xl text-sm leading-relaxed relative group transition-all ${
                     isUser && message.isFormatCommand
                         ? 'bg-gradient-to-br from-violet-600 to-purple-700 text-white rounded-tr-md shadow-lg shadow-violet-900/20'
-                        : isUser
-                            ? 'bg-[var(--accent-main)] text-white rounded-tr-md'
-                            : 'bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-tl-md text-[var(--text-main)] pr-10'
+                        : isUser && message.isDetectCommand
+                            ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-tr-md shadow-lg shadow-amber-900/20'
+                            : isUser
+                                ? 'bg-[var(--accent-main)] text-white rounded-tr-md'
+                                : 'bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-tl-md text-[var(--text-main)] pr-10'
                 }`}>
                     {/* Format Command Card (user side) */}
                     {isUser && message.isFormatCommand && (
@@ -730,6 +732,20 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                                 <p className="text-[10px] text-white/60 mt-0.5 truncate max-w-[180px]" title={message.formatDocTitle}>
                                     {message.formatDocTitle || 'Capítulo activo'}
                                     {message.formatWordCount ? ` · ${message.formatWordCount.toLocaleString()} palabras` : ''}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    {/* Detect Command Card (user side) */}
+                    {isUser && message.isDetectCommand && (
+                        <div className="flex items-center gap-2.5 min-w-[180px]">
+                            <div className="w-7 h-7 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                                <Search size={13} className="text-white" strokeWidth={3} />
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-wider text-white/90">Auditar Lore</p>
+                                <p className="text-[10px] text-white/60 mt-0.5 truncate max-w-[180px]">
+                                    Detectar Inconsistencias
                                 </p>
                             </div>
                         </div>
@@ -749,7 +765,7 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                         </button>
                     )}
 
-                    {!(isUser && message.isFormatCommand) && (
+                    {!(isUser && (message.isFormatCommand || message.isDetectCommand)) && (
                     <div
                         ref={contentRef}
                         style={!isExpanded && isExpandable ? { maxHeight: '240px', overflow: 'hidden' } : {}}

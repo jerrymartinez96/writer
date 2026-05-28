@@ -399,3 +399,49 @@ INSTRUCCIONES CRÍTICAS DE REDACCIÓN, FUSIÓN Y EDICIÓN:
 NORMAS DE FORMATO:
 - Devuelve ÚNICAMENTE la ficha técnica final redactada en formato de texto plano/Markdown. No incluyas preámbulos, saludos, ni explicaciones adicionales.`;
 };
+
+/**
+ * Prompt to analyze a list of character documents and detect which ones contain multiple distinct characters,
+ * extracting them separately so they can be separated into individual files.
+ */
+export const buildMultiCharacterDetectionPrompt = (documents) => {
+    const docsStr = documents.map(d => {
+        return `=== DOCUMENTO ID: ${d.id} (Título: ${d.title}) ===\n${d.content || '(Vacío)'}\n================================================`;
+    }).join('\n\n');
+
+    return `Actúa como un analizador semántico experto de elencos literarios.
+Estás analizando la lista de documentos de personajes de un escritor para verificar si el contenido de los documentos individuales está agrupado (es decir, si un solo documento contiene descripciones de más de un personaje).
+
+Analiza detalladamente el contenido de los siguientes documentos:
+${docsStr}
+
+Tu tarea consiste en:
+1. Detectar TODOS los personajes individuales que se describen detalladamente en todos los documentos.
+2. Identificar cuáles de estos documentos contienen MÁS DE UN personaje (por ejemplo, si en un documento con ID "doc_123" y título "Sylas" también se define detalladamente a "Mirella" y "Alistair" con sus propios títulos/secciones).
+3. Devolver los perfiles de personajes individuales extraídos de forma limpia y quirúrgica.
+
+Debes responder ÚNICAMENTE con un objeto JSON válido que tenga la siguiente estructura:
+{
+  "characters": [
+    {
+      "name": "Nombre completo del personaje detectado",
+      "description": "El perfil Markdown/HTML completo y exacto de este personaje extraído quirúrgicamente (manteniendo su riqueza, títulos, párrafos y viñetas)",
+      "sourceDocId": "ID del documento original donde se encontró",
+      "sourceDocTitle": "Título del documento original"
+    }
+  ],
+  "groupedDocuments": [
+    {
+      "docId": "ID del documento que tiene múltiples personajes",
+      "docTitle": "Título del documento agrupado",
+      "characterNames": ["Nombre del Personaje 1", "Nombre del Personaje 2"]
+    }
+  ]
+}
+
+REGLAS CRÍTICAS:
+- Si un documento contiene únicamente un personaje y no hay otros descritos allí, NO lo agregues a "groupedDocuments". Solo agrégalo a "characters" para que sepamos su perfil individual.
+- "groupedDocuments" solo debe listar aquellos documentos que claramente tienen más de un personaje principal estructurado y desarrollado en su descripción (por ejemplo, encabezados distintos para cada personaje).
+- No agregues explicaciones, preámbulos ni marcas de formato Markdown como \`\`\`json. Solo devuelve el JSON válido.`;
+};
+

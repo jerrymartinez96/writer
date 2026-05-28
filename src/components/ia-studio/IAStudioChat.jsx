@@ -10,6 +10,7 @@ import {
     extractJSON, 
     parseCharactersFromMarkers,
     buildDetectionPrompt, 
+    buildMultiCharacterDetectionPrompt,
     buildRefineSuggestionsPrompt,
     buildNameProposalsPrompt, 
     buildCharacterSuggestionsPrompt, 
@@ -78,6 +79,7 @@ const IAStudioChat = ({
 
     // --- COMANDOS MOCK DE PRUEBA ---
     const COMMANDS = [
+        { id: '/detectar', label: '🔍 /detectar [acción]', description: 'Ejecutar una auditoría inteligente sobre tu obra (ej. inconsistencias)' },
         { id: '/format', label: '✨ /format [documento]', description: 'Dar formato y espaciado de lectura ultra-legible a un documento' },
         { id: '/mock patch', label: '✂️ /mock patch', description: 'Simular patch (fragmento)' },
         { id: '/mock section', label: '📄 /mock section', description: 'Simular sección de capítulo' },
@@ -90,6 +92,26 @@ const IAStudioChat = ({
 
     const getFilteredCommands = () => {
         const trimmedVal = inputValue.toLowerCase().trim();
+        
+        // Expresión regular para detectar si están escribiendo "/detectar [accion]" o si acaban de escribir "/detectar"
+        const matchDetectCmd = /^\/detectar\s+(.*)/i.exec(inputValue);
+        const matchDetectStart = /^\/detectar\s*$/i.test(inputValue);
+        
+        if (matchDetectCmd || matchDetectStart) {
+            const filterAction = matchDetectCmd ? matchDetectCmd[1].toLowerCase() : '';
+            
+            const availableActions = [
+                { id: 'inconsistencias', label: 'inconsistencias', description: 'Detectar contradicciones de lore, tiempo o personajes' }
+            ];
+            
+            const filteredActions = availableActions.filter(a => a.label.toLowerCase().includes(filterAction));
+            
+            return filteredActions.map(a => ({
+                id: `/detectar ${a.label}`,
+                label: `🔍 /detectar ${a.label}`,
+                description: a.description
+            }));
+        }
         
         // Expresión regular para detectar si están escribiendo "/format [doc]" o si acaban de escribir "/format"
         const matchFormatCmd = /^\/format\s+(.*)/i.exec(inputValue);
@@ -163,8 +185,9 @@ const IAStudioChat = ({
     };
 
     // Conversational Character Creator State
-    const { profile, updateWorldItem } = useData();
+    const { profile, updateWorldItem, createCharacter, updateCharacter, deleteCharacter } = useData();
     const [charFlow, setCharFlow] = useState(null);
+    const [separatingDocId, setSeparatingDocId] = useState(null);
     const [nameSuggestionLoading, setNameSuggestionLoading] = useState(false);
     const [nameProposals, setNameProposals] = useState([]);
     const [questionsLoading, setQuestionsLoading] = useState(false);
@@ -185,6 +208,7 @@ const IAStudioChat = ({
     useEffect(() => {
         let interval = null;
         const isLoadingStep = charFlow?.step === 'detecting' || 
+                              charFlow?.step === 'detecting_groups' || 
                               charFlow?.step === 'interview_loading' || 
                               charFlow?.step === 'synthesizing_loading' || 
                               charFlow?.step === 'loading';
@@ -637,8 +661,7 @@ const IAStudioChat = ({
         try {
             const isRefining = charFlow?.mode === 'refine';
             const existingProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
+            const docContent = characters.map(c => `👤 PERSONAJE: ${c.name}\n${(c.description || '').replace(/<[^>]*>/g, ' ')}`).join('\n\n');
             const bookContext = getBookContext();
 
             const prompt = buildChatQuestionsPrompt(
@@ -764,8 +787,7 @@ const IAStudioChat = ({
             const charName = charFlow.characterName;
             const qaList = charFlow.questions.map((q, i) => ({ question: q, answer: completedAnswers[i] }));
             const existingProfile = isRefining ? charFlow.selectedCharacter?.fragment_exacto : '';
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
+            const docContent = characters.map(c => `👤 PERSONAJE: ${c.name}\n${(c.description || '').replace(/<[^>]*>/g, ' ')}`).join('\n\n');
             const bookContext = getBookContext();
 
             const prompt = buildSynthesisPrompt(charName, selectedFocus, qaList, existingProfile, docContent, bookContext);
@@ -785,40 +807,62 @@ const IAStudioChat = ({
         }
     };
 
-    const saveToDocument = () => {
+    const saveToDocument = async () => {
         try {
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
             const isRefining = charFlow.mode === 'refine';
-            let newContent = '';
 
             if (isRefining) {
-                const originalFragment = charFlow.selectedCharacter?.fragment_exacto;
-                if (docContent.includes(originalFragment)) {
-                    newContent = docContent.replace(originalFragment, charFlow.generatedProfile);
+                const targetCharId = charFlow.selectedCharacter?.id;
+                if (targetCharId) {
+                    await updateCharacter(targetCharId, { description: charFlow.generatedProfile });
                 } else {
-                    newContent = docContent + '\n\n' + charFlow.generatedProfile;
+                    throw new Error("Missing character ID for refinement");
                 }
             } else {
-                newContent = docContent + (docContent.trim() ? '\n\n' : '') + charFlow.generatedProfile;
+                await createCharacter({
+                    name: charFlow.characterName,
+                    role: '',
+                    description: charFlow.generatedProfile,
+                    images: [],
+                    parentId: null,
+                    isCategory: false
+                });
             }
-
-            updateWorldItem('system_personajes', { content: newContent });
             
             setCharFlow(prev => ({ ...prev, step: 'success' }));
             
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: isRefining ? '¡Ficha de personaje refinada y guardada con éxito!' : '¡Nuevo personaje creado y guardado en tu documento!', type: 'success' }
+                detail: { message: isRefining ? '¡Ficha de personaje refinada y guardada con éxito!' : '¡Nuevo personaje creado y guardado en tu tablero!', type: 'success' }
             }));
         } catch (e) {
             console.error(e);
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: 'Error al guardar los cambios en el documento.', type: 'error' }
+                detail: { message: 'Error al guardar los cambios en el personaje.', type: 'error' }
             }));
         }
     };
 
-    const startRefineFlow = async () => {
+    const startRefineFlow = () => {
+        // Direct instant selection from local state characters prop
+        const list = characters.map(c => ({
+            id: c.id,
+            nombre: c.name,
+            fragment_exacto: c.description || ''
+        }));
+        
+        setCharFlow({
+            mode: 'refine',
+            step: 'select',
+            detectedCharacters: list,
+            selectedCharacter: null,
+            questions: [],
+            currentQuestionIndex: 0,
+            answers: [],
+            loading: false
+        });
+    };
+
+    const startDetectionFlow = async () => {
         const apiKey = getLocalApiKey();
         if (!apiKey) {
             window.dispatchEvent(new CustomEvent('ia-toast', {
@@ -826,38 +870,150 @@ const IAStudioChat = ({
             }));
             return;
         }
+
         setCharFlow({
             mode: 'refine',
-            step: 'detecting',
+            step: 'detecting_groups',
             detectedCharacters: [],
             selectedCharacter: null,
             questions: [],
             currentQuestionIndex: 0,
             answers: [],
-            loading: true
+            loading: true,
+            groupedDocs: []
         });
 
         try {
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
-            const prompt = buildDetectionPrompt(docContent);
-            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
-            const list = parseCharactersFromMarkers(response) || [];
-            
-            setCharFlow(prev => ({
-                ...prev,
-                detectedCharacters: list,
-                step: 'select',
-                loading: false
+            // Prepare documents list to analyze: all character documents, and the system characters document if it has content
+            const docsToAnalyze = characters.map(c => ({
+                id: c.id,
+                title: c.name,
+                content: c.description || ''
             }));
+
+            const legacyDoc = worldItems?.find(w => w.id === 'system_personajes');
+            if (legacyDoc && legacyDoc.content && legacyDoc.content.replace(/<[^>]*>/g, '').trim().length > 10) {
+                docsToAnalyze.push({
+                    id: legacyDoc.id,
+                    title: 'Master Doc Personajes (Heredado)',
+                    content: legacyDoc.content
+                });
+            }
+
+            if (docsToAnalyze.length === 0) {
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: 'No hay fichas de personajes creadas para analizar.', type: 'warning' }
+                }));
+                setCharFlow(null);
+                return;
+            }
+
+            const prompt = buildMultiCharacterDetectionPrompt(docsToAnalyze);
+            const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });
+            const parsed = extractJSON(response) || {};
+
+            const detectedCharsList = (parsed.characters || []).map(c => ({
+                id: c.sourceDocId,
+                nombre: c.name,
+                fragment_exacto: c.description || ''
+            }));
+
+            const groupedDocsList = parsed.groupedDocuments || [];
+
+            if (groupedDocsList.length > 0) {
+                setCharFlow({
+                    mode: 'refine',
+                    step: 'review_groups',
+                    detectedCharacters: detectedCharsList,
+                    selectedCharacter: null,
+                    questions: [],
+                    currentQuestionIndex: 0,
+                    answers: [],
+                    loading: false,
+                    groupedDocs: groupedDocsList,
+                    allParsedCharacters: parsed.characters || []
+                });
+            } else {
+                setCharFlow({
+                    mode: 'refine',
+                    step: 'no_groups_success',
+                    detectedCharacters: [],
+                    selectedCharacter: null,
+                    questions: [],
+                    currentQuestionIndex: 0,
+                    answers: [],
+                    loading: false,
+                    groupedDocs: [],
+                    analyzedCount: docsToAnalyze.length
+                });
+            }
         } catch (e) {
-            console.error(e);
+            console.error("Error detecting groups:", e);
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: 'Error al analizar los personajes existentes en el documento.', type: 'error' }
+                detail: { message: 'Error al escanear los documentos de personajes.', type: 'error' }
             }));
             setCharFlow(null);
         }
     };
+
+    const handleSeparateCharacters = async (group) => {
+        setSeparatingDocId(group.docId);
+        try {
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Separando personajes en fichas individuales...', type: 'info' }
+            }));
+            
+            // Get all characters from allParsedCharacters that belong to this group.docId
+            const groupChars = charFlow.allParsedCharacters.filter(c => c.sourceDocId === group.docId);
+            
+            for (const charItem of groupChars) {
+                await createCharacter({
+                    name: charItem.name,
+                    role: '',
+                    description: charItem.description,
+                    images: [],
+                    parentId: null,
+                    isCategory: false
+                });
+            }
+
+            // If it's a legacy worldItem document (e.g. system_personajes)
+            if (group.docId === 'system_personajes') {
+                await updateWorldItem('system_personajes', { content: '' });
+            } else {
+                // If it's a character document, delete the original grouped character document
+                await deleteCharacter(group.docId);
+            }
+
+            // Remove this group from groupedDocs
+            const remainingGroups = charFlow.groupedDocs.filter(g => g.docId !== group.docId);
+            
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: `¡Personajes del documento "${group.docTitle}" separados correctamente!`, type: 'success' }
+            }));
+
+            if (remainingGroups.length === 0) {
+                // Return directly to the main menu (4 options) after 1 second
+                setTimeout(() => {
+                    setSeparatingDocId(null);
+                    setCharFlow(null); // Return to main designer menu!
+                }, 1000);
+            } else {
+                setSeparatingDocId(null);
+                setCharFlow(prev => ({
+                    ...prev,
+                    groupedDocs: remainingGroups
+                }));
+            }
+        } catch (e) {
+            console.error(e);
+            setSeparatingDocId(null);
+            window.dispatchEvent(new CustomEvent('ia-toast', {
+                detail: { message: 'Error al separar los personajes.', type: 'error' }
+            }));
+        }
+    };
+
 
     const fetchRefineSuggestions = async () => {
         const apiKey = getLocalApiKey();
@@ -870,8 +1026,7 @@ const IAStudioChat = ({
 
         setRefineSuggestionsLoading(true);
         try {
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
+            const docContent = characters.map(c => `👤 PERSONAJE: ${c.name}\n${(c.description || '').replace(/<[^>]*>/g, ' ')}`).join('\n\n');
             const charName = charFlow?.characterName;
             const charProfile = charFlow?.selectedCharacter?.fragment_exacto || '';
             
@@ -937,23 +1092,26 @@ const IAStudioChat = ({
         }
     };
 
-    const addSuggestedCharacter = (sugg) => {
+    const addSuggestedCharacter = async (sugg) => {
         try {
-            const charDoc = worldItems?.find(w => w.id === 'system_personajes');
-            const docContent = charDoc?.content || '';
-            const formatted = `<h2>${sugg.nombre}</h2><p><strong>Rol Dramático:</strong> ${sugg.rol}</p><p>${sugg.concepto}</p>`;
-            const newContent = docContent + (docContent.trim() ? '\n\n' : '') + formatted;
-
-            updateWorldItem('system_personajes', { content: newContent });
+            const desc = `<p><strong>Rol Dramático:</strong> ${sugg.rol}</p><p>${sugg.concepto}</p>`;
+            await createCharacter({
+                name: sugg.nombre,
+                role: sugg.rol,
+                description: desc,
+                images: [],
+                parentId: null,
+                isCategory: false
+            });
 
             setAddedSuggestions(prev => ({ ...prev, [sugg.nombre]: true }));
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: `¡${sugg.nombre} añadido al documento!`, type: 'success' }
+                detail: { message: `¡${sugg.nombre} añadido al tablero de personajes!`, type: 'success' }
             }));
         } catch (e) {
             console.error(e);
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: 'Error al añadir la sugerencia.', type: 'error' }
+                detail: { message: 'Error al añadir el personaje sugerido.', type: 'error' }
             }));
         }
     };
@@ -967,11 +1125,11 @@ const IAStudioChat = ({
                         Crea, refina y descubre el elenco de tu novela de forma completamente conversacional e interactiva, guardando los resultados directamente en tu documento central de personajes.
                     </p>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-2xl">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-4xl">
                         {/* Card 1: Crear */}
                         <button
                             onClick={() => startCreateFlow()}
-                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-blue-500/[0.03] border border-[var(--border-main)] hover:border-blue-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left  h-30 shadow-sm"
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-blue-500/[0.03] border border-[var(--border-main)] hover:border-blue-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-36 shadow-sm flex flex-col justify-between"
                         >
                             <div>
                                 <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Crear Personaje</h4>
@@ -982,18 +1140,29 @@ const IAStudioChat = ({
                         {/* Card 2: Refinar */}
                         <button
                             onClick={() => startRefineFlow()}
-                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-indigo-500/[0.03] border border-[var(--border-main)] hover:border-indigo-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-30 shadow-sm"
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-indigo-500/[0.03] border border-[var(--border-main)] hover:border-indigo-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-36 shadow-sm flex flex-col justify-between"
                         >
                             <div>
                                 <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Refinar Existente</h4>
-                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Detecta personajes en tu documento y expande su psicología en profundidad.</p>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Elige directamente de tu tablero el personaje que deseas profundizar al instante.</p>
                             </div>
                         </button>
 
-                        {/* Card 3: Sugerir */}
+                        {/* Card 3: Detectar y Separar */}
+                        <button
+                            onClick={() => startDetectionFlow()}
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-purple-500/[0.03] border border-[var(--border-main)] hover:border-purple-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-36 shadow-sm flex flex-col justify-between"
+                        >
+                            <div>
+                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Separar Personajes</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Analiza tus fichas y el Master Doc heredado para detectar y separar personajes agrupados.</p>
+                            </div>
+                        </button>
+
+                        {/* Card 4: Sugerir */}
                         <button
                             onClick={() => startSuggestFlow()}
-                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-orange-500/[0.03] border border-[var(--border-main)] hover:border-orange-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-30 shadow-sm"
+                            className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-orange-500/[0.03] border border-[var(--border-main)] hover:border-orange-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-36 shadow-sm flex flex-col justify-between"
                         >
                             <div>
                                 <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Sugerir Ideas</h4>
@@ -1006,7 +1175,7 @@ const IAStudioChat = ({
         }
 
         // ─── 1. DETECTING CHARACTERS LOADING ───
-        if (charFlow.step === 'detecting') {
+        if (charFlow.step === 'detecting' || charFlow.step === 'detecting_groups') {
             const formatTime = (secs) => {
                 const m = Math.floor(secs / 60);
                 const s = secs % 60;
@@ -1016,15 +1185,139 @@ const IAStudioChat = ({
             return (
                 <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in fade-in duration-300 font-sans">
                     <Loader2 size={40} className="text-indigo-500 animate-spin mb-6" />
-                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic">Analizando documento...</h3>
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic">
+                        {charFlow.step === 'detecting_groups' ? 'Analizando integridad de personajes...' : 'Analizando documento...'}
+                    </h3>
                     <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed mb-5">
-                        La IA está escaneando tu documento de personajes de forma semántica en busca de perfiles existentes.
+                        {charFlow.step === 'detecting_groups' 
+                            ? 'La IA está escaneando tus documentos y el Master Doc para verificar si hay varios personajes agrupados en un solo archivo.' 
+                            : 'La IA está escaneando tu documento de personajes de forma semántica en busca de perfiles existentes.'}
                     </p>
                     
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/[0.06] border border-indigo-500/15 rounded-full text-[11px] font-mono text-indigo-500 font-bold shadow-sm">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
                         <span>Tiempo transcurrido: {formatTime(loadingTime)}</span>
                     </div>
+                </div>
+            );
+        }
+
+        // ─── 1.2 REVIEW GROUPS AND SUGGEST SEPARATION ───
+        if (charFlow.step === 'review_groups') {
+            return (
+                <div className="flex flex-col min-h-[420px] p-6 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <div className="flex items-center gap-3 mb-5">
+                        <button 
+                            onClick={() => setCharFlow(null)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--accent-soft)] text-[var(--text-muted)]"
+                        >
+                            <ArrowLeft size={16} />
+                        </button>
+                        <div>
+                            <h3 className="text-lg font-black font-serif italic text-[var(--text-main)]">Personajes Agrupados</h3>
+                            <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Integridad y organización del lore</p>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                        <div className="p-4 bg-indigo-500/[0.03] border border-indigo-500/15 rounded-2xl flex gap-3">
+                            <AlertTriangle size={20} className="text-indigo-500 shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <h4 className="text-xs font-bold text-[var(--text-main)]">¿Por qué separar los personajes?</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                                    Para que la IA de IA Studio pueda detectar de forma inteligente las **relaciones automáticas** e inyectar el contexto de cada personaje de forma precisa, te recomendamos tener **una ficha independiente por personaje**.
+                                </p>
+                            </div>
+                        </div>
+
+                        <p className="text-[11px] font-black uppercase tracking-wider text-[var(--text-muted)]">Documentos agrupados detectados:</p>
+
+                        <div className="space-y-2.5">
+                            {charFlow.groupedDocs?.map((group, idx) => (
+                                <div key={idx} className="p-4 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all hover:border-[var(--border-main)]/95 shadow-sm">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                                            <span className="font-bold text-xs text-[var(--text-main)] truncate">{group.docTitle}</span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pl-3.5">
+                                            <span className="text-[9px] text-[var(--text-muted)]">Contiene a:</span>
+                                            {group.characterNames?.map((name, i) => (
+                                                <span key={i} className="text-[9px] bg-indigo-500/10 text-indigo-500 px-1.5 py-0.5 rounded font-medium">
+                                                    {name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => handleSeparateCharacters(group)}
+                                        disabled={separatingDocId !== null}
+                                        className="sm:self-auto self-stretch flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95 shrink-0 disabled:opacity-50"
+                                    >
+                                        {separatingDocId === group.docId ? (
+                                            <>
+                                                <Loader2 size={11} className="animate-spin" /> Separando...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Scissors size={11} /> Separar Fichas
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="border-t border-[var(--border-main)]/50 pt-4 mt-4 flex items-center justify-between gap-3 shrink-0">
+                        <button
+                            onClick={() => setCharFlow(null)}
+                            className="px-5 py-2.5 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
+                        >
+                            Cancelar
+                        </button>
+                        
+                        <button
+                            onClick={() => {
+                                const list = characters.map(c => ({
+                                    id: c.id,
+                                    nombre: c.name,
+                                    fragment_exacto: c.description || ''
+                                }));
+                                setCharFlow(prev => ({ ...prev, step: 'select', detectedCharacters: list }));
+                            }}
+                            className="px-5 py-2.5 bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]/80 text-[var(--text-main)] rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
+                        >
+                            Continuar de todos modos →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 1.3 NO GROUPS SUCCESS VIEW ───
+        if (charFlow.step === 'no_groups_success') {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[420px] text-center p-8 bg-[var(--bg-editor)]/35 border border-[var(--border-main)] rounded-3xl animate-in zoom-in-95 duration-300 font-sans">
+                    <div className="w-12 h-12 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mb-5 border border-emerald-500/15">
+                        <Check size={22} strokeWidth={3} />
+                    </div>
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-2 font-serif italic">¡Fichas perfectamente organizadas!</h3>
+                    <p className="text-xs text-[var(--text-muted)] max-w-sm leading-relaxed mb-6">
+                        La IA ha analizado todos tus documentos de personajes de manera exhaustiva y **no ha detectado perfiles agrupados** en un mismo archivo. Cada personaje cuenta con su propia ficha individual, garantizando el máximo rendimiento del sistema relacional.
+                    </p>
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/[0.06] border border-emerald-500/15 rounded-full text-[11px] font-mono text-emerald-500 font-bold shadow-sm mb-8">
+                        <span>Fichas analizadas: {charFlow.analyzedCount || 0}</span>
+                    </div>
+
+                    <button
+                        onClick={() => setCharFlow(null)}
+                        className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95"
+                    >
+                        Volver al Diseñador
+                    </button>
                 </div>
             );
         }

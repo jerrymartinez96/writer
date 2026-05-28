@@ -638,10 +638,17 @@ export const DataProvider = ({ children }) => {
     // --- World Doc Mode (Master Doc sections opened in Editor) ---
     const openWorldDoc = async (docId) => {
         await flushAllSaves();
+        if (docId === 'system_personajes') {
+            setActiveView('world');
+            setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('showCharactersWorldView'));
+            }, 50);
+            return;
+        }
         const item = worldItems.find(w => w.id === docId);
         if (!item) return;
         setActiveChapter(null);
-        setActiveWorldDoc({ id: item.id, title: item.title, content: item.content || '' });
+        setActiveWorldDoc({ id: item.id, title: item.title, content: item.content || '', type: 'worldItem' });
         lastMajorBackupContentRef.current[item.id] = item.content || '';
         
         // Baseline Snapshot: if history is empty but document has content, save initial state
@@ -657,22 +664,62 @@ export const DataProvider = ({ children }) => {
         setActiveView('editor');
     };
 
+    const openCharacterDoc = async (charId) => {
+        await flushAllSaves();
+        const char = characters.find(c => c.id === charId);
+        if (!char) return;
+        setActiveChapter(null);
+        setActiveWorldDoc({
+            id: char.id,
+            title: char.name,
+            content: char.description || '',
+            type: 'character',
+            role: char.role || ''
+        });
+        lastMajorBackupContentRef.current[char.id] = char.description || '';
+        
+        // Baseline Snapshot: if history is empty but document has content, save initial state
+        const docContent = char.description || '';
+        if (docContent && docContent !== '<p></p>') {
+            getLocalSnapshots(char.id).then(async (snaps) => {
+                if (snaps.length === 0) {
+                    await saveLocalSnapshot(char.id, docContent, 'auto');
+                }
+            }).catch(err => console.error("Failed to save baseline snapshot", err));
+        }
+        
+        setActiveView('editor');
+    };
+
     const saveWorldDocContent = useCallback((html, triggerType = 'auto') => {
         if (!activeWorldDoc) return;
         setActiveWorldDoc(prev => ({ ...prev, content: html }));
-        setWorldItems(prev => prev.map(item => item.id === activeWorldDoc.id ? { ...item, content: html } : item));
-        const saveKey = `worlddoc_${activeWorldDoc.id}`;
+        
+        const docId = activeWorldDoc.id;
+        const bookId = activeBook?.id;
+        const isCharacter = activeWorldDoc.type === 'character';
+
+        if (isCharacter) {
+            setCharacters(prev => prev.map(c => c.id === docId ? { ...c, description: html } : c));
+        } else {
+            setWorldItems(prev => prev.map(item => item.id === docId ? { ...item, content: html } : item));
+        }
+
+        const saveKey = `worlddoc_${docId}`;
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
-        const docId = activeWorldDoc.id;
-        const bookId = activeBook?.id;
+
         const fn = async (forcedFlush = false) => {
             delete pendingSaves.current[saveKey];
             const isFlushing = forcedFlush;
             try {
                 if (bookId) {
-                    await updateWorldItemApi(bookId, docId, { content: html });
+                    if (isCharacter) {
+                        await updateCharacterApi(bookId, docId, { description: html });
+                    } else {
+                        await updateWorldItemApi(bookId, docId, { content: html });
+                    }
                     
                     // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
                     const lastMajor = lastMajorBackupContentRef.current[docId];
@@ -972,6 +1019,7 @@ export const DataProvider = ({ children }) => {
         activeChapter,
         activeWorldDoc,
         openWorldDoc,
+        openCharacterDoc,
         saveWorldDocContent,
         characters,
         worldItems,

@@ -11,6 +11,7 @@ const IAStudioContextConfigModal = ({
     onClose,
     chapters = [],
     worldItems = [],
+    characters = [],
 }) => {
     const { contextSelections, destinationDoc, onContextChange, onDestinationChange } = useIAStudioContext();
     const [activeTab, setActiveTab] = useState('context'); // 'context' | 'destination'
@@ -118,6 +119,13 @@ const IAStudioContextConfigModal = ({
         if (!query) return list;
         return list.filter(item => item.title.toLowerCase().includes(query));
     }, [worldItems, customWorldItems, destSearch]);
+
+    const filteredDestCharacters = useMemo(() => {
+        const query = destSearch.trim().toLowerCase();
+        const list = characters.filter(c => !c.isCategory);
+        if (!query) return list;
+        return list.filter(c => (c.name || '').toLowerCase().includes(query));
+    }, [characters, destSearch]);
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -600,7 +608,7 @@ const IAStudioContextConfigModal = ({
                                 </div>
 
                                 {/* Stack list side-by-side or stacked on mobile */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[var(--bg-editor)]/35 border border-[var(--border-main)]/50 rounded-[24px] p-3 sm:p-4.5 h-[200px] xs:h-[220px] md:h-[220px] overflow-y-auto shadow-sm">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-[var(--bg-editor)]/35 border border-[var(--border-main)]/50 rounded-[24px] p-3 sm:p-4.5 h-[200px] xs:h-[220px] md:h-[220px] overflow-y-auto shadow-sm">
                                     {/* Chapters Target List */}
                                     <div className="space-y-1 pr-1">
                                         <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 block px-2 mb-2 sticky top-0 bg-[var(--bg-editor)]/95 backdrop-blur-[3px] py-1.5 rounded-lg border border-emerald-500/10 z-10">
@@ -653,6 +661,35 @@ const IAStudioContextConfigModal = ({
                                                     >
                                                         <Globe size={12} className={isActive ? 'text-emerald-500 shrink-0 animate-pulse' : 'text-[var(--text-muted)] shrink-0'} />
                                                         <span className="truncate flex-1 text-left">{label}</span>
+                                                        {isActive && <Check size={12} className="text-emerald-500 shrink-0" />}
+                                                    </button>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+
+                                    {/* Characters Target List */}
+                                    <div className="space-y-1 border-t md:border-t-0 md:border-l border-[var(--border-main)]/30 pt-3 md:pt-0 md:pl-3">
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 block px-2 mb-2 sticky top-0 bg-[var(--bg-editor)]/95 backdrop-blur-[3px] py-1.5 rounded-lg border border-emerald-500/10 z-10">
+                                            👤 Personajes
+                                        </span>
+                                        {filteredDestCharacters.length === 0 ? (
+                                            <p className="text-[10px] text-[var(--text-muted)] opacity-50 px-2 py-2 italic">Sin personajes</p>
+                                        ) : (
+                                            filteredDestCharacters.map(c => {
+                                                const isActive = destinationDoc?.docId === c.id && destinationDoc?.docType === 'character';
+                                                return (
+                                                    <button
+                                                        key={c.id}
+                                                        onClick={() => onDestinationChange({ mode: 'manual', docId: c.id, docType: 'character', docTitle: c.name })}
+                                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
+                                                            isActive
+                                                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/25 shadow-sm shadow-emerald-500/5 hover:scale-[1.005]'
+                                                                : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 border border-transparent hover:scale-[1.005]'
+                                                        }`}
+                                                    >
+                                                        <Users size={12} className={isActive ? 'text-emerald-500 shrink-0 animate-pulse' : 'text-[var(--text-muted)] shrink-0'} />
+                                                        <span className="truncate flex-1 text-left">{c.name}</span>
                                                         {isActive && <Check size={12} className="text-emerald-500 shrink-0" />}
                                                     </button>
                                                 );

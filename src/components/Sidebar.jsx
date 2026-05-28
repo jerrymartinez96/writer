@@ -109,7 +109,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         books, activeBook, selectBook, createBook,
         chapters, activeChapter, selectChapter, createChapter, deleteChapter,
         activeView, setActiveView, reorderChapters,
-        activeWorldDoc, openWorldDoc, characters, worldItems, profile
+        activeWorldDoc, openWorldDoc, openCharacterDoc, characters, worldItems, profile
     } = useData();
     const { 
         contextSelections, 
@@ -128,6 +128,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const [isBooksOpen, setIsBooksOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [expandedVolumes, setExpandedVolumes] = useState({});
+    const [isCharactersExpanded, setIsCharactersExpanded] = useState(true);
 
     const toggleVolume = (id) => {
         setExpandedVolumes(prev => ({ ...prev, [id]: !prev[id] }));
@@ -542,30 +543,79 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                             <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-[0.2em] px-2 mb-3">
                                 Secciones
                             </div>
-                            {[
+                             {[
                                 { id: 'system_personajes', title: 'Personajes', Icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10', activeBg: 'bg-blue-500', border: 'border-l-blue-500' },
                                 { id: 'system_estructura', title: 'Estructura', Icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-500/10', activeBg: 'bg-indigo-500', border: 'border-l-indigo-500' },
                                 { id: 'system_core', title: 'Info General', Icon: Bookmark, color: 'text-orange-500', bg: 'bg-orange-500/10', activeBg: 'bg-orange-500', border: 'border-l-orange-500' },
                             ].map(({ id, title, Icon, color, bg, activeBg, border }) => {
                                 const isActive = activeWorldDoc?.id === id && activeView === 'editor';
                                 return (
-                                    <button
-                                        key={id}
-                                        onClick={() => handleSelectMobile(() => openWorldDoc(id))}
-                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-l-4 transition-all group ${
-                                            isActive
-                                                ? `${border} bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm`
-                                                : `border-l-transparent hover:bg-[var(--accent-soft)] text-[var(--text-main)]`
-                                        }`}
-                                    >
-                                        <div className={`shrink-0 p-1.5 rounded-md transition-all ${
-                                            isActive ? `${activeBg} text-white shadow-md` : `${bg} ${color}`
-                                        }`}>
-                                            <Icon size={14} />
+                                    <div key={id} className="space-y-1">
+                                        <div
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => handleSelectMobile(() => openWorldDoc(id))}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    handleSelectMobile(() => openWorldDoc(id));
+                                                }
+                                            }}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-l-4 transition-all group cursor-pointer select-none ${
+                                                isActive
+                                                    ? `${border} bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm`
+                                                    : `border-l-transparent hover:bg-[var(--accent-soft)] text-[var(--text-main)]`
+                                            }`}
+                                        >
+                                            <div className={`shrink-0 p-1.5 rounded-md transition-all ${
+                                                isActive ? `${activeBg} text-white shadow-md` : `${bg} ${color}`
+                                            }`}>
+                                                <Icon size={14} />
+                                            </div>
+                                            <span className="text-sm font-medium truncate">{title}</span>
+                                            {id === 'system_personajes' ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsCharactersExpanded(!isCharactersExpanded);
+                                                    }}
+                                                    className="ml-auto p-1.5 rounded-lg hover:bg-[var(--accent-soft)] transition-all text-[var(--text-muted)] hover:text-[var(--text-main)] shrink-0 flex items-center justify-center"
+                                                    title={isCharactersExpanded ? "Colapsar personajes" : "Expandir personajes"}
+                                                >
+                                                    <ChevronRight size={14} className={`transition-transform duration-200 ${isCharactersExpanded ? 'rotate-90' : ''}`} />
+                                                </button>
+                                            ) : (
+                                                isActive && <ChevronRight size={14} className="ml-auto text-[var(--accent-main)] shrink-0" />
+                                            )}
                                         </div>
-                                        <span className="text-sm font-medium truncate">{title}</span>
-                                        {isActive && <ChevronRight size={14} className="ml-auto text-[var(--accent-main)] shrink-0" />}
-                                    </button>
+
+                                        {id === 'system_personajes' && isCharactersExpanded && characters && characters.length > 0 && (
+                                            <div className="pl-4 space-y-1 mt-1 border-l border-[var(--border-main)]/50 ml-5 animate-in slide-in-from-top-2 duration-200">
+                                                {characters.filter(c => !c.isCategory && c.name).map(char => {
+                                                    const isCharActive = activeWorldDoc?.id === char.id && activeView === 'editor';
+                                                    return (
+                                                        <button
+                                                            key={char.id}
+                                                            onClick={() => handleSelectMobile(() => openCharacterDoc(char.id))}
+                                                            className={`w-full text-left py-2 px-3 rounded-lg text-xs font-semibold transition-all truncate flex items-center justify-between ${
+                                                                isCharActive
+                                                                    ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-black'
+                                                                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'
+                                                            }`}
+                                                        >
+                                                            <span className="truncate">{char.name}</span>
+                                                            {char.role && (
+                                                                <span className="text-[8px] font-black uppercase tracking-wider opacity-60 ml-2 shrink-0 max-w-[60px] truncate">
+                                                                    {char.role}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
                                 );
                             })}
                         </div>

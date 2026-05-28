@@ -12,7 +12,7 @@ const WorldView = () => {
         chapters, characters, worldItems,
         createCharacter, updateCharacter, deleteCharacter,
         createWorldItem, updateWorldItem, deleteWorldItem,
-        openWorldDoc
+        openWorldDoc, openCharacterDoc
     } = useData();
     const toast = useToast();
 
@@ -31,8 +31,18 @@ const WorldView = () => {
         const handleReset = () => {
             setPath([{ id: 'root', title: 'Master Doc Central', type: 'root' }]);
         };
+        const handleShowCharacters = () => {
+            setPath([
+                { id: 'root', title: 'Master Doc Central', type: 'root' },
+                { id: 'system_personajes', title: 'Personajes', type: 'characters_list' }
+            ]);
+        };
         window.addEventListener('resetWorldView', handleReset);
-        return () => window.removeEventListener('resetWorldView', handleReset);
+        window.addEventListener('showCharactersWorldView', handleShowCharacters);
+        return () => {
+            window.removeEventListener('resetWorldView', handleReset);
+            window.removeEventListener('showCharactersWorldView', handleShowCharacters);
+        };
     }, []);
 
     // Sync localContent when currentStep changes
@@ -238,7 +248,214 @@ const WorldView = () => {
         </div>
     );
 
-// renderCharacters removed
+    const handleMigrateLegacyCharacters = async () => {
+        const legacyItem = worldItems.find(w => w.id === 'system_personajes');
+        if (!legacyItem || !legacyItem.content) return;
+        
+        const contentRaw = legacyItem.content.replace(/<[^>]*>/g, '').trim();
+        if (contentRaw.length === 0) return;
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(legacyItem.content, 'text/html');
+        
+        const migrated = [];
+        
+        // Try searching by headings (H1 to H6)
+        const headings = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        if (headings.length > 0) {
+            headings.forEach((heading) => {
+                const name = heading.textContent.trim();
+                if (!name) return;
+                
+                let descriptionHtml = '';
+                let sibling = heading.nextElementSibling;
+                while (sibling && !['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(sibling.tagName)) {
+                    descriptionHtml += sibling.outerHTML;
+                    sibling = sibling.nextElementSibling;
+                }
+                
+                migrated.push({ name, description: descriptionHtml || '<p>Personaje migrado sin descripción adicional.</p>' });
+            });
+        } else {
+            // Sift through paragraphs starting with strong/b tags
+            const paragraphs = doc.querySelectorAll('p');
+            paragraphs.forEach((p) => {
+                const strong = p.querySelector('strong, b');
+                if (strong) {
+                    const name = strong.textContent.trim().replace(/[:\-–—]$/, '').trim();
+                    if (name && name.length < 50) {
+                        let desc = p.innerHTML.replace(strong.outerHTML, '').trim();
+                        desc = desc.replace(/^[:\-–—\s]+/, '').trim();
+                        migrated.push({ name, description: `<p>${desc || 'Personaje migrado sin descripción adicional.'}</p>` });
+                    }
+                }
+            });
+        }
+        
+        try {
+            if (migrated.length > 0) {
+                for (const char of migrated) {
+                    await createCharacter({
+                        name: char.name,
+                        role: '',
+                        description: char.description,
+                        images: [],
+                        parentId: null,
+                        isCategory: false
+                    });
+                }
+                // Clear out legacy content to hide the migration banner
+                await updateWorldItem('system_personajes', { content: '' });
+                toast.success(`¡Éxito! Se han migrado ${migrated.length} personajes correctamente.`);
+            } else {
+                // Fallback: Create a single character card with the whole block of text
+                await createCharacter({
+                    name: "Personajes Migrados",
+                    role: "Importado",
+                    description: legacyItem.content,
+                    images: [],
+                    parentId: null,
+                    isCategory: false
+                });
+                await updateWorldItem('system_personajes', { content: '' });
+                toast.success("Se ha importado todo el documento en una sola ficha de personajes.");
+            }
+        } catch (error) {
+            console.error("Migration failed:", error);
+            toast.error("Hubo un problema al migrar los personajes.");
+        }
+    };
+
+    const renderCharactersList = () => {
+        const legacyItem = worldItems.find(w => w.id === 'system_personajes');
+        const hasLegacyContent = legacyItem && legacyItem.content && legacyItem.content.replace(/<[^>]*>/g, '').trim().length > 0;
+        
+        const cleanPreviewText = (html) => {
+            if (!html) return '';
+            return html
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        };
+
+        return (
+            <div className="animate-in fade-in duration-500 pb-10">
+                <header className="mb-10 space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 border-b border-[var(--border-main)]">
+                        <div className="flex-1 min-w-0">
+                            <div className="inline-flex items-center px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">
+                                Master Doc
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => { setCreateType('character'); setIsCreateModalOpen(true); }}
+                                className="px-4 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 shadow-md shadow-blue-500/10 font-sans"
+                            >
+                                <Plus size={14} /> Nuevo Personaje
+                            </button>
+                        </div>
+                    </div>
+                    <div className="pt-2">
+                        <h1 className="text-3xl font-serif font-black text-[var(--text-main)] leading-tight tracking-tight">Tablero de Personajes</h1>
+                        <p className="text-[var(--text-muted)] text-sm mt-2">Gestiona las fichas individuales de cada personaje. Utiliza menciones `@` en el editor para enlazarlos y optimizar el contexto de la IA.</p>
+                    </div>
+                </header>
+
+                {/* Legacy Data Migration Banner */}
+                {hasLegacyContent && (
+                    <div className="mb-8 p-6 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-sm animate-in slide-in-from-top-4 duration-300">
+                        <div className="space-y-1">
+                            <h4 className="font-bold text-amber-500 text-sm flex items-center gap-2">
+                                <Sparkles size={16} className="text-amber-500 animate-pulse" />
+                                ¿Migrar personajes existentes?
+                            </h4>
+                            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                Detectamos texto en tu documento de personajes antiguo. Podemos dividirlo de forma inteligente e importar cada personaje como una ficha individual automáticamente.
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleMigrateLegacyCharacters}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0 self-start md:self-auto"
+                        >
+                            Migrar ahora
+                        </button>
+                    </div>
+                )}
+
+                {/* Grid of Characters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {characters.map(char => {
+                        const preview = cleanPreviewText(char.description);
+                        return (
+                            <div
+                                key={char.id}
+                                onClick={() => openCharacterDoc(char.id)}
+                                className="group bg-[var(--bg-app)] border border-[var(--border-main)] hover:border-blue-500/50 p-5 rounded-2xl cursor-pointer transition-all flex flex-col justify-between shadow-sm hover:shadow-md hover:scale-[1.02] duration-300 h-44 overflow-hidden border-l-4 border-l-blue-500"
+                            >
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-start gap-2">
+                                        <h3 className="font-bold text-base text-[var(--text-main)] group-hover:text-blue-500 transition-colors line-clamp-1 break-words">
+                                            {char.name}
+                                        </h3>
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditTarget({ id: char.id, title: char.name, type: 'character' });
+                                                    setEditTitle(char.name);
+                                                    setIsEditModalOpen(true);
+                                                }}
+                                                className="p-1 hover:text-blue-500 rounded-md transition-colors"
+                                                title="Renombrar"
+                                            >
+                                                <Pencil size={12} />
+                                            </button>
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setItemToDelete({ id: char.id, title: char.name, type: 'character', pop: false });
+                                                }}
+                                                className="p-1 hover:text-red-500 rounded-md transition-colors"
+                                                title="Eliminar"
+                                            >
+                                                <Trash2 size={12} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {char.role && (
+                                        <span className="inline-block px-2 py-0.5 rounded-full bg-blue-500/10 text-[9px] font-black uppercase tracking-wider text-blue-500">
+                                            {char.role}
+                                        </span>
+                                    )}
+                                    <p className="text-xs text-[var(--text-muted)] line-clamp-3 leading-relaxed break-words pt-1">
+                                        {preview || <span className="italic opacity-50">Sin descripción...</span>}
+                                    </p>
+                                </div>
+                                <div className="flex justify-between items-center pt-2 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-main)]/30 shrink-0 mt-auto">
+                                    <span className="font-bold uppercase tracking-widest text-[9px]">Ficha</span>
+                                    <span className="flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                                        Abrir <ChevronRight size={10} />
+                                    </span>
+                                </div>
+                            </div>
+                        );
+                    })}
+
+                    {characters.length === 0 && (
+                        <div className="col-span-full py-20 text-center border-2 border-dashed border-[var(--border-main)] rounded-3xl text-[var(--text-muted)] opacity-60 flex flex-col items-center justify-center gap-3">
+                            <Users size={36} className="text-[var(--text-muted)] opacity-50" />
+                            <div>
+                                <p className="font-bold">No tienes personajes registrados</p>
+                                <p className="text-xs mt-1">Comienza añadiendo tu primer personaje al tablero.</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
 
     // Dynamic Lists & System Notas List
     const renderWorldItemList = (parentId, typeName) => {
@@ -620,6 +837,7 @@ const WorldView = () => {
             <div className="flex-1 overflow-y-auto w-full scrollbar-hide p-6 md:p-10">
                 <div className="max-w-5xl mx-auto h-full">
                     {currentStep.type === 'root' && renderRoot()}
+                    {currentStep.type === 'characters_list' && renderCharactersList()}
 
                     {currentStep.type === 'dynamic_list' && renderWorldItemList(currentStep.id, 'Carpeta')}
                     {(currentStep.type === 'character_detail' || currentStep.type === 'world_item_detail') && renderDetail()}

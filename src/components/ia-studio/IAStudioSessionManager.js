@@ -372,6 +372,21 @@ export const saveSessionMessages = (sessionId, messages) => {
     }
 };
 
+/**
+ * Actualiza la configuración del modelo de la sesión
+ */
+export const updateSessionModelConfig = (sessionId, modelConfig) => {
+    const store = getStore();
+    const session = store.sessions.find(s => s.id === sessionId);
+    if (session) {
+        if (modelConfig.selectedModel !== undefined) session.selectedModel = modelConfig.selectedModel;
+        if (modelConfig.chatReasoningMode !== undefined) session.chatReasoningMode = modelConfig.chatReasoningMode;
+        if (modelConfig.chatReasoningEffort !== undefined) session.chatReasoningEffort = modelConfig.chatReasoningEffort;
+        session.updatedAt = Date.now();
+        saveStore(store);
+    }
+};
+
 export default {
     setBookId,
     createSession,
@@ -392,4 +407,5 @@ export default {
     exportSessionAsText,
     getActiveSessionCount,
     hasSessions,
+    updateSessionModelConfig,
 };
