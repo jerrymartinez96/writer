@@ -1,6 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { uploadImageToCloudinary } from '../services/cloudinary'
 import { Mark, mergeAttributes } from '@tiptap/react'
@@ -14,10 +14,9 @@ import { useData } from '../context/DataContext'
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Focus from '@tiptap/extension-focus'
 import createSuggestion from './MentionSuggestionConfig'
-import PremiumNarrator from './PremiumNarrator';
-import NarratorSelector from './NarratorSelector';
-import PremiumPlayer from './PremiumPlayer';
 import FinalizeModal from './FinalizeModal'
+
+
 
 
 const CharacterMention = Mark.create({
@@ -220,35 +219,69 @@ const Editor = () => {
         }
     }, [selectChapter]);
 
-    const activeChapterHeader = useMemo(() => {
-        if (!activeChapter || !chapters) return null;
+    const activeDocInfo = useMemo(() => {
+        const activeDoc = activeChapter || activeWorldDoc;
+        if (!activeDoc) return null;
 
+        const isChapter = !!activeChapter;
         let volumeLabel = '';
-        let chapterLabel = '';
+        let chapterLabel = activeDoc.title;
+        let docType = isChapter ? 'Capítulo' : 'Documento';
 
-        // Find if it belongs to a volume
-        const parentVolume = chapters.find(c => c.id === activeChapter.parentId && c.isVolume);
+        if (isChapter && chapters) {
+            // Find if it belongs to a volume
+            const parentVolume = chapters.find(c => c.id === activeChapter.parentId && c.isVolume);
+            const volumes = chapters.filter(c => c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
-        // Count volumes for numbering - sort by orderIndex
-        const volumes = chapters.filter(c => c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+            if (parentVolume) {
+                const volIndex = volumes.findIndex(v => v.id === parentVolume.id);
+                volumeLabel = `Volumen ${volIndex + 1}: ${parentVolume.title}`;
 
-        if (parentVolume) {
-            const volIndex = volumes.findIndex(v => v.id === parentVolume.id);
-            volumeLabel = `Volumen ${volIndex + 1}: ${parentVolume.title}`;
-
-            // Count chapters in this volume
-            const chaptersInVol = chapters.filter(c => c.parentId === parentVolume.id).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
-            const chapIndex = chaptersInVol.findIndex(c => c.id === activeChapter.id);
-            chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
-        } else {
-            // Standalone chapters
-            const standaloneChapters = chapters.filter(c => !c.parentId && !c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
-            const chapIndex = standaloneChapters.findIndex(c => c.id === activeChapter.id);
-            chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
+                const chaptersInVol = chapters.filter(c => c.parentId === parentVolume.id).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+                const chapIndex = chaptersInVol.findIndex(c => c.id === activeChapter.id);
+                chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
+            } else {
+                const standaloneChapters = chapters.filter(c => !c.parentId && !c.isVolume).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+                const chapIndex = standaloneChapters.findIndex(c => c.id === activeChapter.id);
+                chapterLabel = `Capítulo ${chapIndex + 1}: ${activeChapter.title}`;
+            }
+        } else if (!isChapter) {
+            // It is a world doc (e.g. Character details or general info)
+            if (activeWorldDoc.id === 'system_personajes') {
+                volumeLabel = 'Master Doc / Secciones';
+                chapterLabel = 'Personajes';
+                docType = 'Ficha del Sistema';
+            } else if (activeWorldDoc.id === 'system_estructura') {
+                volumeLabel = 'Master Doc / Secciones';
+                chapterLabel = 'Estructura';
+                docType = 'Ficha del Sistema';
+            } else if (activeWorldDoc.id === 'system_core') {
+                volumeLabel = 'Master Doc / Secciones';
+                chapterLabel = 'Info General';
+                docType = 'Ficha del Sistema';
+            } else {
+                // Individual character doc or custom world item doc
+                volumeLabel = 'Master Doc / Ficha';
+                chapterLabel = activeWorldDoc.title || 'Detalles';
+                docType = activeWorldDoc.type === 'character' ? 'Personaje' : 'Documento';
+            }
         }
 
-        return { volumeLabel, chapterLabel };
-    }, [activeChapter, chapters]);
+        // Calculate metrics
+        const plainText = activeDoc.content?.replace(/<[^>]*>/g, '') || '';
+        const charCount = plainText.length;
+        const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).filter(Boolean).length : 0;
+
+        return {
+            volumeLabel,
+            chapterLabel,
+            docType,
+            charCount,
+            wordCount,
+            status: isChapter ? (activeChapter.status || 'Borrador') : 'Master Doc',
+            isChapter
+        };
+    }, [activeChapter, activeWorldDoc, chapters]);
 
     const parentVolume = useMemo(() => {
         if (!activeChapter || !chapters) return null;
@@ -782,44 +815,7 @@ const Editor = () => {
 
     // Removal of old click handler useEffect as it's now handled by editorProps.handleClick
 
-    const [isPremiumNarratorOpen, setIsPremiumNarratorOpen] = useState(false);
-    const [isNarratorSelectorOpen, setIsNarratorSelectorOpen] = useState(false);
-    const [isPremiumPlayerOpen, setIsPremiumPlayerOpen] = useState(false);
-    const [playingChunk, setPlayingChunk] = useState(null);
 
-    // Resaltado en Editor (Narración Sincronizada)
-    useEffect(() => {
-        if (!editor || editor.isDestroyed || !playingChunk) {
-            document.querySelectorAll('.playing-chunk-highlight').forEach(el => el.classList.remove('playing-chunk-highlight'));
-            return;
-        }
-
-        const clean = (t) => t.replace(/\s+/g, ' ').trim();
-        const textToFind = clean(playingChunk.textoActual);
-        if (!textToFind) return;
-
-        const timeoutId = setTimeout(() => {
-            if (!editor.view?.dom) return;
-            const paragraphs = editor.view.dom.querySelectorAll('p, h1, h2, h3, li');
-            
-            // Limpiar todos antes de marcar el nuevo
-            document.querySelectorAll('.playing-chunk-highlight').forEach(el => el.classList.remove('playing-chunk-highlight'));
-
-            let found = false;
-            paragraphs.forEach(p => {
-                const pText = clean(p.textContent);
-                if (pText.includes(textToFind) || textToFind.includes(pText)) {
-                    p.classList.add('playing-chunk-highlight');
-                    if (!found) {
-                        p.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        found = true;
-                    }
-                }
-            });
-        }, 150);
-
-        return () => clearTimeout(timeoutId);
-    }, [playingChunk, editor]);
 
     // Update typography classes dynamically when size changes
     useEffect(() => {
@@ -1087,23 +1083,6 @@ const Editor = () => {
                                                         <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Fuentes y Diseño</span>
                                                     </div>
                                                 </button>
-
-                                                 {(profile?.googleApiKey1 || profile?.googleApiKey2) && (
-                                                    <button 
-                                                        onClick={() => { setIsNarratorSelectorOpen(true); setIsDesktopMoreOpen(false); }}
-                                                        disabled={activeChapter?.status !== 'Finalizado'}
-                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group text-left ${activeChapter?.status === 'Finalizado' ? 'hover:bg-indigo-50' : 'opacity-40 grayscale cursor-not-allowed'}`}
-                                                    >
-                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${activeChapter?.status === 'Finalizado' ? 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white' : 'bg-gray-100 text-gray-400'} transition-all`}>
-                                                            <FileAudio size={16} />
-                                                        </div>
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[11px] font-black uppercase tracking-widest">Narrador</span>
-                                                            <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Generar Audio Premium</span>
-                                                        </div>
-                                                    </button>
-                                                )}
-
                                             </div>
                                         </div>
                                     </>
@@ -1607,7 +1586,7 @@ const Editor = () => {
             </Modal>
 
             {/* Chapter Info Modal (Transparent Blur) */}
-            {isChapterInfoModalOpen && activeChapterHeader && (
+            {isChapterInfoModalOpen && activeDocInfo && (
                 <div
                     className="fixed inset-0 z-[250] flex items-center justify-center p-6 bg-black/20 backdrop-blur-md animate-in fade-in duration-300"
                     onClick={() => setIsChapterInfoModalOpen(false)}
@@ -1628,27 +1607,33 @@ const Editor = () => {
                         </button>
 
                         <div className="relative z-10 text-center">
-                            {activeChapterHeader.volumeLabel && (
+                            {activeDocInfo.volumeLabel && (
                                 <div className="text-sm font-black uppercase tracking-[0.4em] text-[var(--accent-main)] mb-6 opacity-80">
-                                    {activeChapterHeader.volumeLabel}
+                                    {activeDocInfo.volumeLabel}
                                 </div>
                             )}
 
                             <div className="w-12 h-1 bg-[var(--accent-main)] mx-auto mb-8 opacity-40 rounded-full"></div>
 
                             <h2 className="text-3xl md:text-5xl font-black font-serif text-[var(--text-main)] leading-tight tracking-tight mb-8">
-                                {activeChapterHeader.chapterLabel}
+                                {activeDocInfo.chapterLabel}
                             </h2>
 
-                            <div className="flex justify-center items-center gap-6 text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">
-                                <div className="flex items-center gap-2">
-                                    <BookOpen size={14} className="opacity-50" />
-                                    <span>{activeChapter?.content?.replace(/<[^>]*>/g, '').length || 0} Caracteres</span>
+                            <div className="grid grid-cols-3 gap-2 md:gap-4 text-xs font-black uppercase tracking-wider text-[var(--text-muted)] bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/30 rounded-3xl p-4 md:p-6 w-full max-w-md mx-auto shadow-sm">
+                                <div className="flex flex-col items-center justify-center text-center p-2 rounded-2xl hover:bg-[var(--accent-soft)]/20 transition-all">
+                                    <AlignLeft size={18} className="text-[var(--accent-main)] mb-1.5" />
+                                    <span className="text-[var(--text-main)] font-black text-sm md:text-base leading-none">{activeDocInfo.wordCount.toLocaleString()}</span>
+                                    <span className="text-[9px] opacity-60 tracking-widest mt-1">Palabras</span>
                                 </div>
-                                <div className="w-1.5 h-1.5 rounded-full bg-[var(--border-main)]"></div>
-                                <div className="flex items-center gap-2">
-                                    <Tag size={14} className="opacity-50" />
-                                    <span>Estado: {activeChapter.status || 'Borrador'}</span>
+                                <div className="flex flex-col items-center justify-center text-center p-2 rounded-2xl hover:bg-[var(--accent-soft)]/20 transition-all border-x border-[var(--border-main)]/20">
+                                    <BookOpen size={18} className="text-emerald-500 mb-1.5" />
+                                    <span className="text-[var(--text-main)] font-black text-sm md:text-base leading-none">{activeDocInfo.charCount.toLocaleString()}</span>
+                                    <span className="text-[9px] opacity-60 tracking-widest mt-1">Caract.</span>
+                                </div>
+                                <div className="flex flex-col items-center justify-center text-center p-2 rounded-2xl hover:bg-[var(--accent-soft)]/20 transition-all">
+                                    <Tag size={18} className="text-indigo-500 mb-1.5" />
+                                    <span className="text-[var(--text-main)] font-black text-[10px] md:text-xs leading-none truncate max-w-full" title={activeDocInfo.status}>{activeDocInfo.status}</span>
+                                    <span className="text-[9px] opacity-60 tracking-widest mt-1">Estado</span>
                                 </div>
                             </div>
                         </div>
@@ -1672,12 +1657,6 @@ const Editor = () => {
                 isOpen={isFinalizeModalOpen}
                 onClose={() => setIsFinalizeModalOpen(false)}
                 onConfirm={confirmFinalize}
-            />
-            <PremiumNarrator 
-                isOpen={isPremiumNarratorOpen} 
-                onClose={() => setIsPremiumNarratorOpen(false)} 
-                chapter={activeChapter}
-                bookId={activeBook?.id}
             />
 
             <Modal isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} title="Herramientas del Editor">
@@ -1785,32 +1764,6 @@ const Editor = () => {
                 </div>
             </Modal>
 
-            <NarratorSelector 
-                isOpen={isNarratorSelectorOpen}
-                onClose={() => setIsNarratorSelectorOpen(false)}
-                chapter={activeChapter}
-                bookId={activeBook?.id}
-                onOpenGenerator={() => {
-                    setIsNarratorSelectorOpen(false);
-                    setIsPremiumNarratorOpen(true);
-                }}
-                onOpenPlayer={() => {
-                    setIsNarratorSelectorOpen(false);
-                    setIsPremiumPlayerOpen(true);
-                }}
-            />
-            <PremiumPlayer 
-                isOpen={isPremiumPlayerOpen}
-                onClose={() => {
-                    setIsPremiumPlayerOpen(false);
-                    setPlayingChunk(null);
-                }}
-                chapter={activeChapter}
-                bookId={activeBook?.id}
-                onChunkChange={(chunk) => {
-                    setPlayingChunk(chunk);
-                }}
-            />
         </div>
     );
 };

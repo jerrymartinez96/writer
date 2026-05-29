@@ -19,7 +19,6 @@ import { compressData, decompressData } from './compression';
 
 const BOOKS_COLLECTION = 'books';
 const CHAPTERS_COLLECTION = 'chapters';
-const CHUNKS_COLLECTION = 'chunks';
 const USERS_COLLECTION = 'users';
 
 // Utility to generate sync tokens
@@ -637,76 +636,7 @@ export const permanentlyDeleteWorldItem = async (bookId, itemId) => {
     }
 };
 
-// --- CHAPTER CHUNKS ---
 
-export const getChapterChunks = async (bookId, chapterId) => {
-    if (!bookId || !chapterId) {
-        console.warn("getChapterChunks: bookId or chapterId is missing", { bookId, chapterId });
-        return [];
-    }
-    try {
-        const chapterRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString());
-        const q = query(collection(chapterRef, CHUNKS_COLLECTION), orderBy('orden', 'asc'));
-        const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-    } catch (error) {
-        console.error("Error getting chapter chunks: ", error);
-        throw error;
-    }
-};
-
-export const createChunk = async (bookId, chapterId, chunkData) => {
-    if (!bookId || !chapterId) {
-        throw new Error("createChunk: bookId or chapterId is missing");
-    }
-    try {
-        const chapterRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString());
-        const chunksRef = collection(chapterRef, CHUNKS_COLLECTION);
-        const docRef = await addDoc(chunksRef, {
-            ...chunkData,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        });
-        return { id: docRef.id, ...chunkData };
-    } catch (error) {
-        console.error("Error creating chunk: ", error);
-        throw error;
-    }
-};
-
-export const updateChunk = async (bookId, chapterId, chunkId, updateData) => {
-    if (!bookId || !chapterId || !chunkId) {
-        throw new Error("updateChunk: Missing required IDs");
-    }
-    try {
-        const chunkRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString(), CHUNKS_COLLECTION, chunkId.toString());
-        await updateDoc(chunkRef, {
-            ...updateData,
-            updatedAt: serverTimestamp()
-        });
-        return true;
-    } catch (error) {
-        console.error("Error updating chunk: ", error);
-        throw error;
-    }
-};
-
-export const deleteChunk = async (bookId, chapterId, chunkId) => {
-    if (!bookId || !chapterId || !chunkId) {
-        throw new Error("deleteChunk: Missing required IDs");
-    }
-    try {
-        const chunkRef = doc(db, BOOKS_COLLECTION, bookId.toString(), CHAPTERS_COLLECTION, chapterId.toString(), CHUNKS_COLLECTION, chunkId.toString());
-        await deleteDoc(chunkRef);
-        return true;
-    } catch (error) {
-        console.error("Error deleting chunk: ", error);
-        throw error;
-    }
-};
 
 // --- API KEYS CONFIG (DUAL KEY STRATEGY) ---
 

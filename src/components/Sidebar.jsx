@@ -770,14 +770,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                     ) : null}
                 </div>
 
-                {/* Footer */}
-                {!isSidebarCollapsed && activeView !== 'ia-studio' && (
-                    <div className="p-4 px-6 border-t border-[var(--border-main)] flex flex-col gap-2 bg-[var(--bg-app)]/50 shrink-0">
-                        <div className="flex justify-between items-center text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                            <span className="w-full text-center">{activeView === 'editor' ? (activeChapter?.content?.replace(/<[^>]*>?/gm, '').split(/\s+/).filter(word => word.length > 0).length || 0) : '—'} palabras</span>
-                        </div>
-                    </div>
-                )}
+
 
             </div>
 

@@ -440,24 +440,7 @@ body {
 .tts-generating {
   animation: tts-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
-/* Resaltado Premium Narrator */
-.playing-chunk-highlight {
-  background: linear-gradient(90deg, rgba(16, 185, 129, 0.08) 0%, transparent 100%);
-  border-left: 4px solid #10b981 !important;
-  padding-left: 1.5rem !important;
-  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  z-index: 1;
-}
 
-.playing-chunk-highlight::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  box-shadow: inset 10px 0 20px -10px rgba(16, 185, 129, 0.2);
-  pointer-events: none;
-  border-radius: 4px;
-}
 
 /* Reusable RichTextEditor Custom Styles */
 .rich-text-editor-wrapper {
