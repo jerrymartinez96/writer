@@ -154,6 +154,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     // Calculate Token Statistics
     const selectedChapterIds = contextSelections?.chapterIds || [];
     const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+    const selectedCharacterIds = contextSelections?.characterIds || [];
 
     const contextText = buildContextFromSelections(
         activeBook,
@@ -162,14 +163,17 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         characters,
         worldItems,
         selectedWorldItemIds,
-        compressContext
+        compressContext,
+        selectedCharacterIds
     );
 
     const contextWeight = estimateContextWeight(
         chapters || [],
         selectedChapterIds,
         worldItems || [],
-        selectedWorldItemIds
+        selectedWorldItemIds,
+        characters || [],
+        selectedCharacterIds
     );
     const contextCharCount = contextText.length;
     const contextTokens = Math.ceil(contextCharCount / 3.8);

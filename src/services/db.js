@@ -635,22 +635,3 @@ export const permanentlyDeleteWorldItem = async (bookId, itemId) => {
         throw error;
     }
 };
-
-
-
-// --- API KEYS CONFIG (DUAL KEY STRATEGY) ---
-
-export const saveGoogleApiKeys = async (userId, key1, key2) => {
-    try {
-        const userRef = doc(db, USERS_COLLECTION, userId);
-        await updateDoc(userRef, {
-            googleApiKey1: key1,
-            googleApiKey2: key2,
-            updatedAt: serverTimestamp()
-        });
-        return true;
-    } catch (error) {
-        console.error("Error saving API keys: ", error);
-        throw error;
-    }
-};

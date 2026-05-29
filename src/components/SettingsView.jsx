@@ -8,8 +8,6 @@ import ConfirmModal from './ConfirmModal';
 import { getChapters } from '../services/db';
 
 const API_LABELS = {
-    openrouter: 'OpenRouter',
-    google_direct: 'Google Direct',
     deepseek: 'DeepSeek Direct'
 };
 

@@ -88,6 +88,7 @@ export const createSession = (initialContext = null, initialDestination = null) 
         contextSelections: initialContext || {
             chapterIds: [],
             worldItemIds: [],
+            characterIds: [],
         },
         destinationDoc: initialDestination || {
             mode: 'auto',        // 'auto' | 'manual' | 'new'
@@ -266,6 +267,9 @@ export const exportSessionAsText = (sessionId) => {
     }
     if (session.contextSelections?.worldItemIds?.length) {
         lines.push(`Master Docs seleccionados: ${session.contextSelections.worldItemIds.length}`);
+    }
+    if (session.contextSelections?.characterIds?.length) {
+        lines.push(`Personajes seleccionados: ${session.contextSelections.characterIds.length}`);
     }
     const dest = session.destinationDoc;
     lines.push(`Destino: ${dest.mode === 'auto' ? 'Automático' : dest.mode === 'manual' ? dest.docTitle || 'Manual' : 'Nuevo documento'}`);

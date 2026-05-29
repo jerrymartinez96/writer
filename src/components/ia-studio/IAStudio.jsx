@@ -360,7 +360,8 @@ const IAStudio = () => {
                     characters?.filter(c => !c.isCategory), // Solo personajes reales
                     worldItems,
                     contextSelections?.worldItemIds || [],
-                    true // Forzar compresión de capítulos grandes
+                    true, // Forzar compresión de capítulos grandes
+                    contextSelections?.characterIds || []
                 );
                 
                 // Mensaje simplificado para la IA
@@ -561,7 +562,8 @@ const IAStudio = () => {
 
             const contextText = buildContextFromSelections(
                 activeBook, chapters, contextSelections?.chapterIds || [],
-                characters, worldItems, contextSelections?.worldItemIds || [], compressContext
+                characters, worldItems, contextSelections?.worldItemIds || [], compressContext,
+                contextSelections?.characterIds || []
             );
             const extraOptions = { chapters, worldItems };
             const modelId = chatModel || defaultModel;
@@ -879,7 +881,8 @@ const IAStudio = () => {
             characters,
             worldItems,
             contextSelections?.worldItemIds || [],
-            compressContext
+            compressContext,
+            contextSelections?.characterIds || []
         );
 
         // Build extra options for section mode
@@ -1371,7 +1374,8 @@ const IAStudio = () => {
                 characters,
                 worldItems,
                 contextSelections?.worldItemIds || [],
-                compressContext
+                compressContext,
+                contextSelections?.characterIds || []
             );
 
             // 4. Construir el system prompt usando el catálogo centralizado
@@ -1498,6 +1502,12 @@ NUNCA reescribas un documento completo — usa siempre la estructura de parches 
             onContextChange({
                 ...contextSelections,
                 worldItemIds: newWorldItemIds
+            });
+        } else if (type === 'character') {
+            const newCharacterIds = (contextSelections?.characterIds || []).filter(cid => cid !== id);
+            onContextChange({
+                ...contextSelections,
+                characterIds: newCharacterIds
             });
         }
     }, [contextSelections, onContextChange]);
@@ -1860,7 +1870,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                     createChapter({ title, content: htmlContent });
                 }
             } else if (block.mode === 'new') {
-                const title = block.title || 'Nuevo capítulo';
+                const title = destinationDoc?.docTitle || block.title || 'Nuevo capítulo';
                 createChapter({ title, content: htmlContent });
             }
         }

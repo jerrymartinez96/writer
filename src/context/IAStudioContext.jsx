@@ -6,7 +6,7 @@ const IAStudioContext = createContext(null);
 
 export const IAStudioProvider = ({ children }) => {
     const { activeBook } = useData();
-    const [contextSelections, setContextSelections] = useState({ chapterIds: [], worldItemIds: [] });
+    const [contextSelections, setContextSelections] = useState({ chapterIds: [], worldItemIds: [], characterIds: [] });
     const [destinationDoc, setDestinationDoc] = useState({ mode: 'auto', docId: null, docType: 'chapter', docTitle: '' });
     const [compressContext, setCompressContext] = useState(false);
     
@@ -32,7 +32,7 @@ export const IAStudioProvider = ({ children }) => {
         let sess = SessionManager.getActiveSession();
         if (!sess) {
             sess = SessionManager.createSession(
-                { chapterIds: [], worldItemIds: [] },
+                { chapterIds: [], worldItemIds: [], characterIds: [] },
                 { mode: 'auto', docId: null, docType: 'chapter', docTitle: '' }
             );
         }
@@ -41,7 +41,7 @@ export const IAStudioProvider = ({ children }) => {
         if (sess.contextSelections) {
             setContextSelections(sess.contextSelections);
         } else {
-            setContextSelections({ chapterIds: [], worldItemIds: [] });
+            setContextSelections({ chapterIds: [], worldItemIds: [], characterIds: [] });
         }
         if (sess.destinationDoc) {
             setDestinationDoc(sess.destinationDoc);

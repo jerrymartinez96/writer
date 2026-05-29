@@ -709,7 +709,8 @@ export const buildContextFromSelections = (
     characters = [],
     worldItems = [],
     selectedWorldItemIds = [],
-    compressHeavy = false
+    compressHeavy = false,
+    selectedCharacterIds = []
 ) => {
     const parts = [];
 
@@ -744,56 +745,63 @@ export const buildContextFromSelections = (
         parts.push('</manuscript>');
     }
 
-    // Personajes (con expansión de contexto relacional inteligente)
+    // Personajes (con selección explícita y/o expansión de contexto relacional inteligente)
     if (characters && characters.length > 0) {
         const validChars = characters.filter(c => !c.isCategory && c.name);
         
         let charactersToInclude = [];
-        let selectedText = '';
         
-        if (selectedChapterIds.length > 0) {
-            chapters.forEach(ch => {
-                if (selectedChapterIds.includes(ch.id)) {
-                    selectedText += ' ' + (ch.content || '');
-                }
-            });
-        }
-        if (selectedWorldItemIds.length > 0) {
-            worldItems.forEach(item => {
-                if (selectedWorldItemIds.includes(item.id)) {
-                    selectedText += ' ' + (item.content || '');
-                }
-            });
-        }
-        
-        if (selectedText.trim().length > 0) {
-            const selectedTextLower = selectedText.toLowerCase();
-            const directMatches = validChars.filter(char => {
-                const nameLower = char.name.toLowerCase();
-                return selectedTextLower.includes(nameLower) || 
-                       selectedTextLower.includes(`data-id="${char.id}"`);
-            });
+        if (selectedCharacterIds && selectedCharacterIds.length > 0) {
+            // Si el usuario seleccionó personajes específicos, incluimos esos
+            charactersToInclude = validChars.filter(c => selectedCharacterIds.includes(c.id));
+        } else {
+            // Si no seleccionó ninguno específico, usamos la detección automática o fallback
+            let selectedText = '';
             
-            // Expand context recursively to include characters mentioned in matching character descriptions (relationships)
-            const expandedSet = new Set(directMatches.map(c => c.id));
-            directMatches.forEach(char => {
-                if (!char.description) return;
-                const descLower = char.description.toLowerCase();
-                validChars.forEach(otherChar => {
-                    if (otherChar.id === char.id) return;
-                    const otherNameLower = otherChar.name.toLowerCase();
-                    if (descLower.includes(otherNameLower) || descLower.includes(`data-id="${otherChar.id}"`)) {
-                        expandedSet.add(otherChar.id);
+            if (selectedChapterIds.length > 0) {
+                chapters.forEach(ch => {
+                    if (selectedChapterIds.includes(ch.id)) {
+                        selectedText += ' ' + (ch.content || '');
                     }
                 });
-            });
+            }
+            if (selectedWorldItemIds.length > 0) {
+                worldItems.forEach(item => {
+                    if (selectedWorldItemIds.includes(item.id)) {
+                        selectedText += ' ' + (item.content || '');
+                    }
+                });
+            }
             
-            charactersToInclude = validChars.filter(c => expandedSet.has(c.id));
-        }
-        
-        // Fallback: Si no hay texto seleccionado o no hubo coincidencias directas, enviar todos los personajes principales
-        if (charactersToInclude.length === 0) {
-            charactersToInclude = validChars;
+            if (selectedText.trim().length > 0) {
+                const selectedTextLower = selectedText.toLowerCase();
+                const directMatches = validChars.filter(char => {
+                    const nameLower = char.name.toLowerCase();
+                    return selectedTextLower.includes(nameLower) || 
+                           selectedTextLower.includes(`data-id="${char.id}"`);
+                });
+                
+                // Expand context recursively to include characters mentioned in matching character descriptions (relationships)
+                const expandedSet = new Set(directMatches.map(c => c.id));
+                directMatches.forEach(char => {
+                    if (!char.description) return;
+                    const descLower = char.description.toLowerCase();
+                    validChars.forEach(otherChar => {
+                        if (otherChar.id === char.id) return;
+                        const otherNameLower = otherChar.name.toLowerCase();
+                        if (descLower.includes(otherNameLower) || descLower.includes(`data-id="${otherChar.id}"`)) {
+                            expandedSet.add(otherChar.id);
+                        }
+                    });
+                });
+                
+                charactersToInclude = validChars.filter(c => expandedSet.has(c.id));
+            }
+            
+            // Fallback: Si no hay texto seleccionado o no hubo coincidencias directas, enviar todos los personajes principales
+            if (charactersToInclude.length === 0) {
+                charactersToInclude = validChars;
+            }
         }
 
         if (charactersToInclude.length > 0) {
@@ -829,7 +837,7 @@ export const buildContextFromSelections = (
     }
 
     // Si no hay nada seleccionado
-    if (selectedChapterIds.length === 0 && selectedWorldItemIds.length === 0) {
+    if (selectedChapterIds.length === 0 && selectedWorldItemIds.length === 0 && (!selectedCharacterIds || selectedCharacterIds.length === 0)) {
         parts.push('<!-- No se ha seleccionado contexto específico. El usuario no ha indicado documentos de referencia. -->');
     }
 
@@ -840,7 +848,7 @@ export const buildContextFromSelections = (
  * Calcula el peso aproximado en tokens del contexto seleccionado.
  * Útil para mostrar advertencias en la UI.
  */
-export const estimateContextWeight = (chapters, selectedChapterIds, worldItems, selectedWorldItemIds) => {
+export const estimateContextWeight = (chapters, selectedChapterIds, worldItems, selectedWorldItemIds, characters = [], selectedCharacterIds = []) => {
     let totalChars = 0;
 
     chapters.forEach(ch => {
@@ -854,6 +862,14 @@ export const estimateContextWeight = (chapters, selectedChapterIds, worldItems, 
             totalChars += (w.content || '').length;
         }
     });
+
+    if (characters && selectedCharacterIds) {
+        characters.forEach(c => {
+            if (selectedCharacterIds.includes(c.id)) {
+                totalChars += (c.description || '').length;
+            }
+        });
+    }
 
     return {
         chars: totalChars,
@@ -974,7 +990,7 @@ export const parseDestinationsFromResponse = (response, destinationDoc, chapters
     if (html) {
         const dest = destinationDoc || { mode: 'auto' };
         if (dest.mode === 'new') {
-            const blockTitle = detectTitleFromContent(html) || 'Nuevo capítulo';
+            const blockTitle = dest.docTitle || detectTitleFromContent(html) || 'Nuevo capítulo';
             return [{ docType: 'chapter', docId: null, mode: 'new', title: blockTitle, content: html, responseType: 'content' }];
         } else if (dest.mode === 'manual' && dest.docId) {
             return [{ docType: dest.docType, docId: dest.docId, mode: 'manual', title: dest.docTitle || 'Documento', content: html, responseType: 'content' }];
@@ -1712,7 +1728,7 @@ const buildBlocksFromParsed = (parsed, destinationDoc, chapters = [], worldItems
         const isPartial = parsed.scope === 'partial';
 
         if (dest.mode === 'new') {
-            const blockTitle = parsed.title || detectTitleFromContent(parsed.text || parsed.html) || 'Nuevo capítulo';
+            const blockTitle = dest.docTitle || parsed.title || detectTitleFromContent(parsed.text || parsed.html) || 'Nuevo capítulo';
             return [{ docType: 'chapter', docId: null, mode: 'new', title: blockTitle, content: parsed.html, responseType: 'content', isPartial }];
         } else if (dest.mode === 'manual' && dest.docId) {
             return [{ docType: dest.docType, docId: dest.docId, mode: 'manual', title: dest.docTitle || 'Documento', content: parsed.html, responseType: 'content', isPartial }];

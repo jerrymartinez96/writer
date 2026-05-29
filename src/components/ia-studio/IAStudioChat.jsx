@@ -20,8 +20,6 @@ import {
 } from './CharacterChatPrompts';
 
 const API_LABELS = {
-    openrouter: 'OpenRouter',
-    google_direct: 'Google',
     deepseek: 'DeepSeek'
 };
 
@@ -263,6 +261,7 @@ const IAStudioChat = ({
 
     const selectedChapterIds = contextSelections?.chapterIds || [];
     const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+    const selectedCharacterIds = contextSelections?.characterIds || [];
 
     const currentDestLabel = () => {
         if (destinationDoc?.mode === 'auto') return 'Automático (La IA decide)';
@@ -299,6 +298,7 @@ const IAStudioChat = ({
 
         const selectedChapterIds = contextSelections?.chapterIds || [];
         const selectedWorldItemIds = contextSelections?.worldItemIds || [];
+        const selectedCharacterIds = contextSelections?.characterIds || [];
 
         const selectedChaptersCount = selectedChapterIds.length;
         const selectedWorldItemsCount = selectedWorldItemIds.length;
@@ -408,14 +408,17 @@ const IAStudioChat = ({
         characters,
         worldItems,
         selectedWorldItemIds,
-        compressContext
+        compressContext,
+        selectedCharacterIds
     );
 
     const contextWeight = estimateContextWeight(
         chapters || [],
         selectedChapterIds,
         worldItems || [],
-        selectedWorldItemIds
+        selectedWorldItemIds,
+        characters || [],
+        selectedCharacterIds
     );
     const contextCharCount = contextText.length;
     const contextTokens = Math.ceil(contextCharCount / 3.8);
