@@ -84,6 +84,7 @@ const IAStudio = () => {
     const [isLoadingAutoCorrect, setIsLoadingAutoCorrect] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
+    const [showDestinationModal, setShowDestinationModal] = useState(false);
     const [selectedAction, setSelectedAction] = useState('chat');
 
     // Modo sección: acumulación de secciones generadas
@@ -2005,6 +2006,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 selectedAction={selectedAction}
                 onNewChat={handleNewChat}
                 onOpenContext={() => setShowContextModal(true)}
+                onOpenDestination={() => setShowDestinationModal(true)}
                 onOpenSessions={() => window.dispatchEvent(new CustomEvent('open-mobile-sidebar'))}
                 onExport={handleExport}
                 QUICK_ACTIONS={QUICK_ACTIONS}
@@ -2072,6 +2074,17 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 chapters={chapters}
                 worldItems={worldItems}
                 characters={characters}
+                mode="context"
+            />
+
+            {/* Destination Config Modal */}
+            <IAStudioContextConfigModal
+                isOpen={showDestinationModal}
+                onClose={() => setShowDestinationModal(false)}
+                chapters={chapters}
+                worldItems={worldItems}
+                characters={characters}
+                mode="destination"
             />
         </div>
     );

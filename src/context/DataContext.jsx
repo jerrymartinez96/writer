@@ -600,6 +600,15 @@ export const DataProvider = ({ children }) => {
     const handleUpdateCharacter = async (charId, updateData) => {
         if (!activeBook) return;
         setCharacters(prev => prev.map(c => c.id === charId ? { ...c, ...updateData } : c));
+        
+        if (activeWorldDoc && activeWorldDoc.id === charId && activeWorldDoc.type === 'character') {
+            setActiveWorldDoc(prev => ({ 
+                ...prev, 
+                content: updateData.description !== undefined ? updateData.description : prev.content,
+                title: updateData.name !== undefined ? updateData.name : prev.title,
+                role: updateData.role !== undefined ? updateData.role : prev.role
+            }));
+        }
 
         const saveKey = `char_${charId}`;
         if (pendingSaves.current[saveKey]) {
@@ -1067,7 +1076,8 @@ export const DataProvider = ({ children }) => {
         updateProfile: handleUpdateProfile,
         uploadCover: handleUploadCover,
         editor: sharedEditor,
-        setSharedEditor
+        setSharedEditor,
+        flushAllSaves,
     };
 
     return (

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Modal from '../Modal';
 import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS } from './IAStudioUtils';
 import { useIAStudioContext } from '../../context/IAStudioContext';
@@ -12,9 +12,21 @@ const IAStudioContextConfigModal = ({
     chapters = [],
     worldItems = [],
     characters = [],
+    mode = 'context', // 'context' | 'destination'
 }) => {
     const { contextSelections, destinationDoc, onContextChange, onDestinationChange } = useIAStudioContext();
-    const [activeTab, setActiveTab] = useState('masterdoc'); // 'masterdoc' | 'manuscript' | 'destination'
+    const [activeTab, setActiveTab] = useState(mode === 'destination' ? 'destination' : 'masterdoc');
+    
+    useEffect(() => {
+        if (isOpen) {
+            if (mode === 'destination') {
+                setActiveTab('destination');
+            } else {
+                setActiveTab(prev => prev === 'destination' ? 'masterdoc' : prev);
+            }
+        }
+    }, [isOpen, mode]);
+
     const [expandedVolumes, setExpandedVolumes] = useState({});
     const [chapterSearch, setChapterSearch] = useState('');
     const [worldItemSearch, setWorldItemSearch] = useState('');
@@ -167,58 +179,44 @@ const IAStudioContextConfigModal = ({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Contexto y Destino" size="xl">
+        <Modal isOpen={isOpen} onClose={onClose} title={mode === 'destination' ? "Destino de Escritura" : "Contexto de Referencia"} size="xl">
             {/* Tabs at the top */}
-            <div className="flex gap-1 sm:gap-2 p-1 bg-[var(--bg-editor)] rounded-[20px] border border-[var(--border-main)]/60 shrink-0 mx-3 sm:mx-4 md:mx-6 mt-4.5 shadow-inner">
-                <button
-                    onClick={() => setActiveTab('masterdoc')}
-                    className={`flex-1 flex items-center justify-center gap-1 sm:gap-1.5 md:gap-2 py-2 sm:py-2.5 px-1 sm:px-2 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
-                        activeTab === 'masterdoc'
-                            ? 'bg-[var(--bg-app)] text-indigo-500 shadow-[0_4px_12px_rgba(99,102,241,0.08)] border border-[var(--border-main)]/80 scale-[1.01] font-bold'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
-                    }`}
-                >
-                    <Globe size={12} className="shrink-0" /> 
-                    <span className="hidden sm:inline">1. </span>
-                    <span className="hidden xs:inline">Master Doc</span>
-                    <span className="xs:hidden">Master</span>
-                    <span className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-black text-[8px] sm:text-[9px] shrink-0 ml-0.5 sm:ml-1">
-                        {selectedWorldItemIds.length + selectedCharacterIds.length}
-                    </span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('manuscript')}
-                    className={`flex-1 flex items-center justify-center gap-1 sm:gap-1.5 md:gap-2 py-2 sm:py-2.5 px-1 sm:px-2 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
-                        activeTab === 'manuscript'
-                            ? 'bg-[var(--bg-app)] text-indigo-500 shadow-[0_4px_12px_rgba(99,102,241,0.08)] border border-[var(--border-main)]/80 scale-[1.01] font-bold'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
-                    }`}
-                >
-                    <BookOpen size={12} className="shrink-0" /> 
-                    <span className="hidden sm:inline">2. </span>
-                    <span className="hidden xs:inline">Manuscrito</span>
-                    <span className="xs:hidden">MS</span>
-                    <span className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-black text-[8px] sm:text-[9px] shrink-0 ml-0.5 sm:ml-1">
-                        {selectedChapterIds.length}
-                    </span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('destination')}
-                    className={`flex-1 flex items-center justify-center gap-1 sm:gap-1.5 md:gap-2 py-2 sm:py-2.5 px-1 sm:px-2 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
-                        activeTab === 'destination'
-                            ? 'bg-[var(--bg-app)] text-indigo-500 shadow-[0_4px_12px_rgba(99,102,241,0.08)] border border-[var(--border-main)]/80 scale-[1.01] font-bold'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
-                    }`}
-                >
-                    <Target size={12} className="shrink-0" /> 
-                    <span className="hidden sm:inline">3. </span>
-                    <span className="hidden xs:inline">Destino</span>
-                    <span className="xs:hidden">Dest</span>
-                    <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black text-[8px] sm:text-[9px] shrink-0 ml-0.5 sm:ml-1 truncate max-w-[40px] sm:max-w-[70px]">
-                        {destinationDoc?.mode === 'auto' ? 'Auto' : destinationDoc?.mode === 'new' ? 'Nuevo' : 'Manual'}
-                    </span>
-                </button>
-            </div>
+            {mode !== 'destination' && (
+                <div className="flex gap-1 sm:gap-2 p-1 bg-[var(--bg-editor)] rounded-[20px] border border-[var(--border-main)]/60 shrink-0 mx-3 sm:mx-4 md:mx-6 mt-4.5 shadow-inner">
+                    <button
+                        onClick={() => setActiveTab('masterdoc')}
+                        className={`flex-1 flex items-center justify-center gap-1 sm:gap-1.5 md:gap-2 py-2 sm:py-2.5 px-1 sm:px-2 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                            activeTab === 'masterdoc'
+                                ? 'bg-[var(--bg-app)] text-indigo-500 shadow-[0_4px_12px_rgba(99,102,241,0.08)] border border-[var(--border-main)]/80 scale-[1.01] font-bold'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
+                        }`}
+                    >
+                        <Globe size={12} className="shrink-0" /> 
+                        <span className="hidden sm:inline">1. </span>
+                        <span className="hidden xs:inline">Master Doc</span>
+                        <span className="xs:hidden">Master</span>
+                        <span className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-black text-[8px] sm:text-[9px] shrink-0 ml-0.5 sm:ml-1">
+                            {selectedWorldItemIds.length + selectedCharacterIds.length}
+                        </span>
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('manuscript')}
+                        className={`flex-1 flex items-center justify-center gap-1 sm:gap-1.5 md:gap-2 py-2 sm:py-2.5 px-1 sm:px-2 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                            activeTab === 'manuscript'
+                                ? 'bg-[var(--bg-app)] text-indigo-500 shadow-[0_4px_12px_rgba(99,102,241,0.08)] border border-[var(--border-main)]/80 scale-[1.01] font-bold'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/30'
+                        }`}
+                    >
+                        <BookOpen size={12} className="shrink-0" /> 
+                        <span className="hidden sm:inline">2. </span>
+                        <span className="hidden xs:inline">Manuscrito</span>
+                        <span className="xs:hidden">MS</span>
+                        <span className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-black text-[8px] sm:text-[9px] shrink-0 ml-0.5 sm:ml-1">
+                            {selectedChapterIds.length}
+                        </span>
+                    </button>
+                </div>
+            )}
 
             {/* Tab Contents */}
             <div className="p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5">
@@ -860,43 +858,13 @@ const IAStudioContextConfigModal = ({
                 </div>
 
                 <div className="flex items-center justify-end gap-3 w-full sm:w-auto">
-                    {activeTab === 'masterdoc' ? (
+                    {mode === 'context' || mode === 'destination' ? (
                         <>
                             <button
                                 onClick={onClose}
                                 className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
                             >
-                                Cerrar
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('manuscript')}
-                                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95"
-                            >
-                                Siguiente: Manuscrito <ChevronRight size={12} />
-                            </button>
-                        </>
-                    ) : activeTab === 'manuscript' ? (
-                        <>
-                            <button
-                                onClick={() => setActiveTab('masterdoc')}
-                                className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
-                            >
-                                Atrás
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('destination')}
-                                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95"
-                            >
-                                Siguiente: Destino <ChevronRight size={12} />
-                            </button>
-                        </>
-                    ) : (
-                        <>
-                            <button
-                                onClick={() => setActiveTab('manuscript')}
-                                className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
-                            >
-                                Atrás
+                                Cancelar
                             </button>
                             <button
                                 onClick={onClose}
@@ -905,6 +873,53 @@ const IAStudioContextConfigModal = ({
                                 Guardar
                             </button>
                         </>
+                    ) : (
+                        activeTab === 'masterdoc' ? (
+                            <>
+                                <button
+                                    onClick={onClose}
+                                    className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
+                                >
+                                    Cerrar
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('manuscript')}
+                                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95"
+                                >
+                                    Siguiente: Manuscrito <ChevronRight size={12} />
+                                </button>
+                            </>
+                        ) : activeTab === 'manuscript' ? (
+                            <>
+                                <button
+                                    onClick={() => setActiveTab('masterdoc')}
+                                    className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
+                                >
+                                    Atrás
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('destination')}
+                                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-indigo-500/10 active:scale-95"
+                                >
+                                    Siguiente: Destino <ChevronRight size={12} />
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={() => setActiveTab('manuscript')}
+                                    className="flex-1 sm:flex-initial px-6 py-3 border border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]/35 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer active:scale-95"
+                                >
+                                    Atrás
+                                </button>
+                                <button
+                                    onClick={onClose}
+                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-md shadow-emerald-500/10 active:scale-95"
+                                >
+                                    Guardar
+                                </button>
+                            </>
+                        )
                     )}
                 </div>
             </div>

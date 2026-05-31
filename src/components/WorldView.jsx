@@ -7,6 +7,7 @@ import MasterDocOrganizerModal from './MasterDocOrganizerModal';
 import { useToast } from './Toast';
 import { uploadImageToCloudinary } from '../services/cloudinary';
 import RichTextEditor from './RichTextEditor';
+
 const WorldView = () => {
     const {
         chapters, characters, worldItems,

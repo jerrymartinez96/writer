@@ -18,6 +18,7 @@ import {
     buildAnswerSuggestionsPrompt, 
     buildSynthesisPrompt 
 } from './CharacterChatPrompts';
+import CharacterAlignmentWizard from './CharacterAlignmentWizard';
 
 const API_LABELS = {
     deepseek: 'DeepSeek'
@@ -31,6 +32,7 @@ const IAStudioChat = ({
     selectedAction,
     onNewChat,
     onOpenContext,
+    onOpenDestination,
     onOpenSessions,
     onExport,
     QUICK_ACTIONS,
@@ -185,6 +187,7 @@ const IAStudioChat = ({
     // Conversational Character Creator State
     const { profile, updateWorldItem, createCharacter, updateCharacter, deleteCharacter } = useData();
     const [charFlow, setCharFlow] = useState(null);
+    const [isAlignmentWizardOpen, setIsAlignmentWizardOpen] = useState(false);
     const [separatingDocId, setSeparatingDocId] = useState(null);
     const [nameSuggestionLoading, setNameSuggestionLoading] = useState(false);
     const [nameProposals, setNameProposals] = useState([]);
@@ -1151,14 +1154,14 @@ const IAStudioChat = ({
                             </div>
                         </button>
 
-                        {/* Card 3: Detectar y Separar */}
+                        {/* Card 3: Sincronizar Lore */}
                         <button
-                            onClick={() => startDetectionFlow()}
+                            onClick={() => setIsAlignmentWizardOpen(true)}
                             className="group p-5 bg-[var(--bg-editor)]/40 hover:bg-purple-500/[0.03] border border-[var(--border-main)] hover:border-purple-500/40 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98] text-left h-36 shadow-sm flex flex-col justify-between"
                         >
                             <div>
-                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Separar Personajes</h4>
-                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Analiza tus fichas y el Master Doc heredado para detectar y separar personajes agrupados.</p>
+                                <h4 className="font-bold text-sm text-[var(--text-main)] mb-1">Sincronizar Lore</h4>
+                                <p className="text-[10px] text-[var(--text-muted)] leading-normal">Ajusta detalles a varios personajes en lote y mantén al día la información general.</p>
                             </div>
                         </button>
 
@@ -2232,20 +2235,20 @@ const IAStudioChat = ({
                             type="button"
                             onClick={onOpenContext}
                             className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
-                            title="Configurar Contexto y Destino"
+                            title="Configurar Contexto de Referencia"
                         >
                             <BookOpen size={11} className="text-indigo-500" /> 
                             Contexto: 
                             <strong className="text-indigo-600 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/15">
-                                {selectedChapterIds.length + selectedWorldItemIds.length} elem
+                                {selectedChapterIds.length + selectedWorldItemIds.length + selectedCharacterIds.length} elem
                             </strong>
                         </button>
                         <span className="opacity-30 hidden sm:inline">·</span>
                         <button
                             type="button"
-                            onClick={onOpenContext}
+                            onClick={onOpenDestination}
                             className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
-                            title="Configurar Contexto y Destino"
+                            title="Configurar Destino de Escritura"
                         >
                             <Target size={11} className="text-emerald-500" /> 
                             Destino: 
@@ -2521,6 +2524,10 @@ const IAStudioChat = ({
                 </div>
             </Modal>
 
+            <CharacterAlignmentWizard 
+                isOpen={isAlignmentWizardOpen} 
+                onClose={() => setIsAlignmentWizardOpen(false)} 
+            />
         </div>
     );
 };
