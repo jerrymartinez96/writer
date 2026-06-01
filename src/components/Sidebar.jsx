@@ -714,14 +714,14 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     {/* Context Stat */}
                                     <div className="flex items-center justify-between text-[10px]">
                                         <span className="text-[var(--text-muted)] flex items-center gap-1">
-                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy && isEstimated ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
+                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
                                             {isEstimated ? 'Contexto:' : 'Entrada (Real):'}
                                         </span>
                                         <div className="flex items-center gap-1.5">
-                                            <span className={`font-semibold ${contextWeight.isHeavy && isEstimated ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
+                                            <span className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
                                                 {((isEstimated ? contextTokens : (cumulativeUsage?.promptTokens || 0)) / 1000).toFixed(1)} k
                                             </span>
-                                            {contextWeight.isHeavy && isEstimated && (
+                                            {contextWeight.isHeavy && (
                                                 <button
                                                     onClick={() => setCompressContext(prev => !prev)}
                                                     title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}

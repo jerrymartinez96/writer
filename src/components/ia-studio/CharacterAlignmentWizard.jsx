@@ -77,17 +77,30 @@ const CharacterAlignmentWizard = ({ isOpen, onClose }) => {
             const selectedCharactersData = characters.filter(c => selectedCharIds.includes(c.id));
             const generalInfoDoc = worldItems.find(w => w.id === 'system_core');
 
+            // Helper: strip HTML tags to plain text for clean AI context
+            const stripHtmlForContext = (html) => {
+                if (!html) return '';
+                return html
+                    .replace(/<[^>]*>/g, ' ')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+
             let contextPayload = "DOCUMENTOS A ANALIZAR Y EDITAR:\n\n";
             
             selectedCharactersData.forEach(char => {
                 contextPayload += `--- PERSONAJE (ID: ${char.id}, NOMBRE: ${char.name}) ---\n`;
                 contextPayload += `Rol: ${char.role || 'Sin rol especificado'}\n`;
-                contextPayload += `Descripción:\n${char.description || 'Sin descripción'}\n\n`;
+                contextPayload += `Descripción:\n${stripHtmlForContext(char.description) || 'Sin descripción'}\n\n`;
             });
 
             if (includeGeneralInfo && generalInfoDoc) {
                 contextPayload += `--- INFORMACIÓN GENERAL DEL LIBRO (ID: system_core, TÍTULO: ${generalInfoDoc.title}) ---\n`;
-                contextPayload += `Contenido:\n${generalInfoDoc.content || 'Sin contenido'}\n\n`;
+                contextPayload += `Contenido:\n${stripHtmlForContext(generalInfoDoc.content) || 'Sin contenido'}\n\n`;
             }
 
             const prompt = [
@@ -99,13 +112,14 @@ Tu objetivo es analizar los documentos de personajes e información general del 
 Debes utilizar la herramienta 'aplicar_parches_resolucion' para proponer los parches a aplicar.
 Cada parche debe contener:
 - 'documento_id': El ID exacto del documento (ej: el ID del personaje o 'system_core' para información general).
-- 'texto_original': Un fragmento exacto que se encuentre textualmente en el documento que vas a modificar. DEBE ser un fragmento idéntico para que el reemplazo funcione.
-- 'texto_reemplazo': El nuevo texto con los ajustes o afinamientos realizados.
+- 'texto_original': Un fragmento de texto que se encuentre LITERALMENTE en el documento, transcrito TAL COMO APARECE en el texto plano del documento (sin etiquetas HTML, sin reformatear, sin parafrasear). Este campo se usará para buscar y reemplazar el fragmento en el documento almacenado.
+- 'texto_reemplazo': El nuevo texto corregido o actualizado en prosa limpia (sin HTML ni Markdown).
 
 Reglas muy importantes:
 1. Solo propón parches para los documentos que realmente necesiten ser actualizados para cumplir con la instrucción del usuario.
 2. Si la instrucción del usuario genera consecuencias indirectas en la Información General o en otros personajes, propón parches para ellos también.
-3. Asegúrate de que el 'texto_original' sea una copia exacta de caracteres y palabras que existen en los documentos provistos, o de lo contrario el parche fallará.`
+3. El 'texto_original' debe ser una cita LITERAL y EXACTA del texto plano del documento. Copia el fragmento directamente del texto recibido, sin cambiar una sola palabra ni signo de puntuación. El sistema lo buscará en el documento original para realizar el reemplazo.
+4. No incluyas etiquetas HTML en 'texto_original' ni en 'texto_reemplazo'. El sistema maneja el HTML internamente.`
                 },
                 {
                     role: "user",

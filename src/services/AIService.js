@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * Helper: retry a fetch with exponential backoff for rate-limited requests (429).
  */
 const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) => {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
         const response = await fetchFn();
         if (response.ok) return response;
 
@@ -20,15 +20,14 @@ const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) =>
             return response;
         }
 
-        if (attempt < maxRetries) {
-            const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
-            console.warn(
-                `[AIService] Rate limited (429) on attempt ${attempt + 1}/${maxRetries}. ` +
-                `Retrying in ${Math.round(delay)}ms...`
-            );
-            await sleep(delay);
-        }
+        const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
+        console.warn(
+            `[AIService] Rate limited (429) on attempt ${attempt + 1}/${maxRetries}. ` +
+            `Retrying in ${Math.round(delay)}ms...`
+        );
+        await sleep(delay);
     }
+    // Último intento definitivo después de todos los reintentos
     return await fetchFn();
 };
 
@@ -275,11 +274,14 @@ export const AIService = {
     },
 
     /**
-     * Estimates token count (rough approximation: 1 token ≈ 4 characters)
+     * Estimates token count (rough approximation).
+     * Factor calibrado para texto en español: ~3.3 chars/token.
+     * El factor 4 es válido para inglés, pero el español usa más
+     * caracteres por token debido a vocales, acentos y sílabas largas.
      */
     estimateTokens(text) {
         if (!text) return 0;
-        return Math.ceil(text.length / 4);
+        return Math.ceil(text.length / 3.3);
     },
 
     /**

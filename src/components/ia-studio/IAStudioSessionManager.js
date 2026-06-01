@@ -54,7 +54,40 @@ const saveStore = (store) => {
         }
         localStorage.setItem(key, JSON.stringify(store));
     } catch (e) {
-        console.warn('[IAStudioSessionManager] Error saving store:', e);
+        if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22)) {
+            // El localStorage está lleno. Liberamos espacio eliminando mensajes de sesiones antiguas.
+            console.warn('[IAStudioSessionManager] localStorage lleno. Limpiando sesiones antiguas para liberar espacio...');
+            try {
+                const key = getStoreKey();
+                // Ordenar sesiones por fecha, eliminar mensajes de las más antiguas primero
+                const sorted = [...store.sessions].sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+                // Vaciar mensajes de la mitad más antigua
+                const toClean = Math.max(1, Math.floor(sorted.length / 2));
+                for (let i = 0; i < toClean; i++) {
+                    const targetId = sorted[i].id;
+                    const session = store.sessions.find(s => s.id === targetId);
+                    if (session) {
+                        // Mantener solo los últimos 5 mensajes de cada sesión antigua
+                        session.messages = session.messages.slice(-5);
+                    }
+                }
+                localStorage.setItem(key, JSON.stringify(store));
+                console.info('[IAStudioSessionManager] Espacio liberado. Sesiones antiguas compactadas.');
+            } catch (retryErr) {
+                // Si todavía falla, limpiar completamente las sesiones más antiguas
+                console.warn('[IAStudioSessionManager] No se pudo recuperar espacio. Eliminando sesiones antiguas.', retryErr);
+                try {
+                    const key = getStoreKey();
+                    // Conservar solo la sesión activa
+                    store.sessions = store.sessions.filter(s => s.id === store.activeSessionId);
+                    localStorage.setItem(key, JSON.stringify(store));
+                } catch (finalErr) {
+                    console.error('[IAStudioSessionManager] Error crítico al guardar sesión:', finalErr);
+                }
+            }
+        } else {
+            console.warn('[IAStudioSessionManager] Error saving store:', e);
+        }
     }
 };
 
