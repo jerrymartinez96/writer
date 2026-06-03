@@ -599,3 +599,22 @@ body {
   color: #ef4444;
 }
 
+/* Reading Position Bookmark Highlights */
+.bookmark-active-glow {
+  position: relative;
+  animation: bookmarkGlow 2.5s ease-out;
+  border-radius: 4px;
+}
+
+@keyframes bookmarkGlow {
+  0% {
+    background-color: var(--accent-soft);
+    box-shadow: -4px 0 0 0 var(--accent-main);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: -4px 0 0 0 transparent;
+  }
+}
+
+

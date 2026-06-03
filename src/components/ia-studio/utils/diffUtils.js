@@ -156,8 +156,9 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         };
     }
 
+    // 1. Método: Plaintext Normalized Match
     try {
-        const stripHtml = (s) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+        const stripHtml = (s) => s.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
         const plainOriginal = stripHtml(original);
         const plainDoc = stripHtml(chapterHtml);
 
@@ -167,7 +168,6 @@ export const applyPatch = (chapterHtml, original, replacement) => {
             const wordsInMatch = plainOriginal.split(/\s+/).filter(Boolean).length;
 
             const wordPositions = [];
-            const wordRegex = /[^\s<>][^<>]*/g;
             let htmlCopy = chapterHtml;
             const tagRanges = [];
             const tagRegex = /<[^>]*>/g;
@@ -199,8 +199,19 @@ export const applyPatch = (chapterHtml, original, replacement) => {
                 if (firstWord && lastWord) {
                     const htmlBefore = chapterHtml.substring(0, firstWord.charStart);
                     const htmlAfter = chapterHtml.substring(lastWord.charEnd);
-                    const hasHtmlTags = /<[a-z][^>]*>/i.test(replacement);
-                    const finalReplacement = hasHtmlTags ? replacement : `<p>${replacement}</p>`;
+                    
+                    let cleanReplacement = replacement;
+                    const trimmedRep = replacement.trim();
+                    if (trimmedRep.toLowerCase().startsWith('<p>') && trimmedRep.toLowerCase().endsWith('</p>')) {
+                        cleanReplacement = trimmedRep.substring(3, trimmedRep.length - 4);
+                    } else if (trimmedRep.toLowerCase().startsWith('<p ') && trimmedRep.toLowerCase().endsWith('</p>')) {
+                        const firstClose = trimmedRep.indexOf('>');
+                        if (firstClose !== -1) {
+                            cleanReplacement = trimmedRep.substring(firstClose + 1, trimmedRep.length - 4);
+                        }
+                    }
+                    const finalReplacement = cleanReplacement;
+                    
                     return {
                         success: true,
                         html: htmlBefore + finalReplacement + htmlAfter,
@@ -209,10 +220,11 @@ export const applyPatch = (chapterHtml, original, replacement) => {
                 }
             }
         }
-    } catch (_normErr) {
+    } catch (normErr) {
         // Continuar con los métodos siguientes si la normalización falla
     }
 
+    // 2. Método: Exact HTML Match
     if (chapterHtml.includes(original)) {
         return {
             success: true,
@@ -221,6 +233,7 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         };
     }
 
+    // 3. Método: Word Sequence Mapping (KMP + Fuzzy en palabras)
     try {
         const tokenizeHtml = (html) => {
             const tokens = [];
@@ -372,8 +385,8 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         // Ignorar silenciado en producción
     }
 
+    // 4. Método: Fuzzy Paragraph Matching
     const originalClean = cleanText(original).toLowerCase().replace(/\s+/g, ' ').trim();
-
     const paragraphRegex = /<(p|h[1-6]|li|blockquote)[^>]*>([\s\S]*?)<\/\1>/gi;
     let match;
     const paragraphs = [];
@@ -404,6 +417,7 @@ export const applyPatch = (chapterHtml, original, replacement) => {
         const newHtml = chapterHtml.substring(0, bestMatch.index)
             + replacement
             + chapterHtml.substring(bestMatch.index + bestMatch.full.length);
+        
         return { success: true, html: newHtml, method: 'fuzzy_paragraph' };
     }
 

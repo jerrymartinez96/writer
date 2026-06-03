@@ -293,6 +293,7 @@ export const DataProvider = ({ children }) => {
             fetchedWorldItems = updatedFetchedItems;
             setWorldItems(fetchedWorldItems);
 
+
             setTrashItems([...trashChaps, ...trashChars, ...trashWorlds]);
 
             // Default view
@@ -472,6 +473,25 @@ export const DataProvider = ({ children }) => {
             fn
         };
     };
+
+    // Saves readingBookmark immediately to Firebase without any debounce
+    const handleSaveReadingBookmark = async (chapterId, bookmark) => {
+        if (!activeBook) return;
+        // Update local state immediately so UI reacts at once
+        setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, readingBookmark: bookmark } : c));
+        if (activeChapter && activeChapter.id === chapterId) {
+            setActiveChapter(prev => ({ ...prev, readingBookmark: bookmark }));
+        }
+        // Write to Firebase right away
+        try {
+            await updateChapterApi(activeBook.id, chapterId, { readingBookmark: bookmark });
+            setLastSaved(new Date());
+        } catch (error) {
+            console.error("Failed to save reading bookmark", error);
+            throw error;
+        }
+    };
+
 
     const finalizeChapterCleanup = async (chapterId) => {
         try {
@@ -1045,6 +1065,7 @@ export const DataProvider = ({ children }) => {
         lazyLoadChapters,
         createChapter: handleCreateChapter,
         updateChapter: handleUpdateChapter,
+        saveReadingBookmark: handleSaveReadingBookmark,
         batchUpdateChapters: handleBatchUpdateChapters,
         deleteChapter: handleDeleteChapter,
         getChapterSnapshots: handleGetDocumentSnapshots,

@@ -1,6 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft } from 'lucide-react'
+import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft, Bookmark } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { uploadImageToCloudinary } from '../services/cloudinary'
 import { mergeAttributes } from '@tiptap/react'
@@ -26,7 +26,7 @@ import ChapterInfoModal from './editor/components/ChapterInfoModal'
 
 const Editor = () => {
     const {
-        chapters, activeChapter, saveChapterContent, characters, updateChapter,
+        chapters, activeChapter, saveChapterContent, characters, updateChapter, saveReadingBookmark,
         activeView, selectChapter, setActiveView,
         finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot,
         activeBook, profile,
@@ -87,6 +87,12 @@ const Editor = () => {
     const activeChapterRef = useRef(activeChapter);
     const saveChapterContentRef = useRef(saveChapterContent);
     const editorScrollRef = useRef(null);
+    const bookmarkRestoredRef = useRef(null);
+
+    useEffect(() => {
+        bookmarkRestoredRef.current = null;
+    }, [activeChapter?.id]);
+
 
     useEffect(() => {
         charactersRef.current = characters;
@@ -460,6 +466,52 @@ const Editor = () => {
         }
     };
 
+    const handleSaveBookmark = async () => {
+        if (!editor || !activeChapter || !editorScrollRef.current) return;
+
+        if (activeChapter.readingBookmark) {
+            try {
+                await saveReadingBookmark(activeChapter.id, null);
+                toast.success("Marcador eliminado.");
+            } catch (error) {
+                console.error("Error deleting bookmark:", error);
+                toast.error("No se pudo eliminar el marcador.");
+            }
+            return;
+        }
+
+        const container = editorScrollRef.current;
+        const elements = container.querySelectorAll('.prose p, .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6, .prose li');
+        let visibleParagraphIndex = 0;
+        let textSnippet = "";
+        const containerTop = container.getBoundingClientRect().top;
+
+        for (let i = 0; i < elements.length; i++) {
+            const rect = elements[i].getBoundingClientRect();
+            if (rect.top >= containerTop - 40) {
+                visibleParagraphIndex = i;
+                const text = elements[i].textContent || "";
+                textSnippet = text.trim().substring(0, 45);
+                break;
+            }
+        }
+
+        const scrollPercentage = container.scrollTop / (container.scrollHeight - container.clientHeight) || 0;
+
+        try {
+            await saveReadingBookmark(activeChapter.id, {
+                paragraphIndex: visibleParagraphIndex,
+                textSnippet,
+                scrollPercentage,
+                updatedAt: new Date().toISOString()
+            });
+            toast.success("Marcador guardado.");
+        } catch (error) {
+            console.error("Error saving bookmark:", error);
+            toast.error("No se pudo guardar el marcador.");
+        }
+    };
+
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -658,11 +710,59 @@ const Editor = () => {
         }
     }, [activeChapter?.id, activeChapter?.content, activeChapter?.lastSyncToken, activeWorldDoc?.id, activeWorldDoc?.content, editor]);
 
+    // Effect 1: scroll to top when the chapter changes (normal behavior)
     useEffect(() => {
-        if (editorScrollRef.current) {
-            editorScrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
-        }
+        if (!editorScrollRef.current) return;
+        editorScrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
     }, [activeChapter?.id, activeWorldDoc?.id]);
+
+    // Effect 2: when focus mode is turned ON, restore bookmark position if one exists
+    useEffect(() => {
+        if (!isFocusMode) return;
+        if (!editorScrollRef.current || !activeChapter?.readingBookmark) return;
+
+        const { paragraphIndex, textSnippet, scrollPercentage } = activeChapter.readingBookmark;
+        const container = editorScrollRef.current;
+
+        const doScroll = () => {
+            const elements = container.querySelectorAll('.prose p, .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6, .prose li');
+            if (elements.length === 0) return false;
+
+            let targetEl = null;
+
+            if (textSnippet && textSnippet.trim() !== '') {
+                for (let i = 0; i < elements.length; i++) {
+                    if (elements[i].textContent?.trim().startsWith(textSnippet)) {
+                        targetEl = elements[i];
+                        break;
+                    }
+                }
+            }
+
+            if (!targetEl && paragraphIndex !== undefined && paragraphIndex < elements.length) {
+                targetEl = elements[paragraphIndex];
+            }
+
+            if (targetEl) {
+                targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                targetEl.classList.add('bookmark-active-glow');
+                setTimeout(() => targetEl.classList.remove('bookmark-active-glow'), 2500);
+                return true;
+            } else if (scrollPercentage !== undefined) {
+                const dest = scrollPercentage * (container.scrollHeight - container.clientHeight);
+                container.scrollTo({ top: dest, behavior: 'smooth' });
+                return true;
+            }
+            return false;
+        };
+
+        // Try immediately first; if content not rendered yet retry after a short wait
+        if (!doScroll()) {
+            const timer = setTimeout(doScroll, 400);
+            return () => clearTimeout(timer);
+        }
+    }, [isFocusMode]);
+
 
     useEffect(() => {
         if (editor) {
@@ -938,7 +1038,20 @@ const Editor = () => {
             ) : (
                 <div className="flex items-center justify-between p-2 px-3 md:px-6 w-full bg-[var(--bg-app)] border-b border-[var(--border-main)]">
                     <div className="flex items-center gap-2">
-                        <button onClick={() => setIsReadingSettingsModalOpen(true)} className="p-2 rounded-lg border border-[var(--border-main)] text-[var(--text-muted)] cursor-pointer"><Settings size={16} /></button>
+                        <button onClick={() => setIsReadingSettingsModalOpen(true)} className="p-2 rounded-lg border border-[var(--border-main)] text-[var(--text-muted)] cursor-pointer" title="Ajustes de Vista"><Settings size={16} /></button>
+                        {!isWorldDocMode && activeChapter && (
+                            <button
+                                onClick={handleSaveBookmark}
+                                className={`p-2 rounded-lg border transition-all cursor-pointer ${
+                                    activeChapter.readingBookmark
+                                        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20'
+                                        : 'border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50 hover:text-indigo-500'
+                                }`}
+                                title={activeChapter.readingBookmark ? "Quitar Marcador de Lectura" : "Marcar Posición de Lectura"}
+                            >
+                                <Bookmark size={16} fill={activeChapter.readingBookmark ? "currentColor" : "none"} />
+                            </button>
+                        )}
                     </div>
                     <div className="flex items-center gap-2">
                         {!isWorldDocMode && prevChapter && <button onClick={() => handleChapterNavigation(prevChapter)} className="p-2 text-[var(--accent-main)] cursor-pointer"><ChevronLeft size={20} /></button>}

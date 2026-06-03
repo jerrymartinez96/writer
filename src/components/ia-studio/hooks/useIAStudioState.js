@@ -236,9 +236,9 @@ export const useIAStudioState = () => {
             let title = block.title || 'Documento';
 
             if (block.mode === 'manual' && block.docId) {
-                const doc = findDestinationDoc(block, chapters, worldItems);
+                const doc = findDestinationDoc(block, chapters, worldItems, characters);
                 currentContent = doc?.content || '';
-                title = block.title || doc?.title || 'Documento';
+                title = block.title || doc?.title || doc?.name || 'Documento';
             } else if (block.mode === 'auto') {
                 if (block.title && block.isPatch) {
                     const byTitle = [...(worldItems || []), ...(chapters || [])].find(d => {
@@ -296,7 +296,7 @@ export const useIAStudioState = () => {
 
         lastParsedBlocksRef.current = blocks;
         setDiffBlocks(blocks);
-    }, [chapters, worldItems, activeChapter, activeWorldDoc]);
+    }, [chapters, worldItems, activeChapter, activeWorldDoc, characters]);
 
     const getApiKey = useCallback(() => {
         const aiConfig = profile?.aiConfig || {};
@@ -1401,7 +1401,8 @@ export const useIAStudioState = () => {
                             }
                             return m;
                         });
-                        SessionManager.updateSessionMessages(activeSession.id, updatedMessages);
+                        SessionManager.saveSessionMessages(activeSession.id, updatedMessages);
+                        setActiveSession(SessionManager.getSession(activeSession.id));
                         setSessions(SessionManager.getSessions());
                     }
                 }, 100);
@@ -1853,6 +1854,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             if (isChapter) {
                 if (docId === activeChapter?.id) {
                     saveChapterContent(finalHtml, 'ia');
+                    await saveDocumentSnapshot(docId, finalHtml, 'ia');
                 } else {
                     updateChapter(docId, { content: finalHtml });
                     await saveDocumentSnapshot(docId, finalHtml, 'ia');
@@ -1860,6 +1862,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             } else if (isWorldItem) {
                 if (docId === activeWorldDoc?.id) {
                     saveWorldDocContent(finalHtml, 'ia');
+                    await saveDocumentSnapshot(docId, finalHtml, 'ia');
                 } else {
                     updateWorldItem(docId, { content: finalHtml });
                     await saveDocumentSnapshot(docId, finalHtml, 'ia');
@@ -1901,6 +1904,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                             return m;
                         });
                         SessionManager.saveSessionMessages(activeSession.id, updatedMsgList);
+                        setActiveSession(SessionManager.getSession(activeSession.id));
                         setSessions(SessionManager.getSessions());
                     }
                 }, 100);

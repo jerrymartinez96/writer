@@ -25,6 +25,20 @@ export const resolveTargetDoc = (targetStr, chapters = [], worldItems = [], char
         return null;
     }
 
+    // 0. Verificar primero coincidencia por ID exacta
+    const chById = (chapters || []).find(c => c.id === targetStr);
+    if (chById) {
+        return { docType: 'chapter', docId: chById.id, title: chById.title };
+    }
+    const itemById = (worldItems || []).find(w => w.id === targetStr);
+    if (itemById) {
+        return { docType: 'worldItem', docId: itemById.id, title: itemById.title };
+    }
+    const charById = (characters || []).find(c => c.id === targetStr);
+    if (charById) {
+        return { docType: 'character', docId: charById.id, title: charById.name };
+    }
+
     const norm = targetStr.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
     // 1. Verificar primero secciones de sistema (IDs exactos)

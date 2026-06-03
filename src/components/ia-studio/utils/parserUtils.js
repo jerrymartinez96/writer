@@ -853,10 +853,40 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     }
 
     if (name === 'crear_capitulo') {
+        let dest = destinationDoc || { mode: 'auto' };
+        
+        // 1. DESTINO ESPECÍFICO (Manual): Si seleccionaste un capítulo existente (ej. Capítulo 1 vacío)
+        if (dest.mode === 'manual' && dest.docId) {
+            return [{
+                docType: dest.docType || 'chapter',
+                docId: dest.docId,
+                mode: 'manual',
+                title: dest.docTitle || args.titulo || 'Documento',
+                content: args.contenido_html || '',
+                responseType: 'content'
+            }];
+        }
+        
+        // 2. DESTINO AUTOMÁTICO: Si la IA decide basándose en el título que generó
+        if (dest.mode === 'auto' && args.titulo) {
+            const resolved = resolveTargetDoc(args.titulo, chapters, worldItems, characters);
+            if (resolved) {
+                return [{
+                    docType: resolved.docType,
+                    docId: resolved.docId,
+                    mode: 'manual',
+                    title: resolved.title,
+                    content: args.contenido_html || '',
+                    responseType: 'content'
+                }];
+            }
+        }
+        
+        // 3. CREAR NUEVO DOCUMENTO (o Automático sin coincidencias de título)
         return [{
             docType: 'chapter',
             docId: null,
-            mode: 'new',
+            mode: dest.mode === 'new' ? 'new' : 'auto',
             title: args.titulo || 'Nuevo capítulo',
             content: args.contenido_html || '',
             responseType: 'content'

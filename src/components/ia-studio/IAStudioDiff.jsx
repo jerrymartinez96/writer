@@ -309,7 +309,7 @@ const SemanticDiffView = ({ currentContent, proposedContent, onCherryPickChange 
 // ─── Vista de patch (fragmento) ───────────────────────────────────────────────
 
 const PatchDiffView = ({ original, proposedContent, context }) => {
-    const oldText = original || '';
+    const oldText = cleanText(original || '');
     const newText = cleanText(proposedContent || '');
 
     return (
