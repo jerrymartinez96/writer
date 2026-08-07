@@ -441,6 +441,20 @@ body {
   animation: tts-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Párrafo activo cuando la narración está en pausa (respiro suave y elegante) */
+@keyframes tts-paused-breathe {
+  0%, 100% { opacity: 1; background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.12) 100%); box-shadow: -8px 0 18px -10px var(--accent-main); }
+  50% { opacity: 0.88; background: linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, rgba(99, 102, 241, 0.07) 100%); box-shadow: -8px 0 10px -12px var(--accent-main); }
+}
+
+.tts-paused {
+  border-left: 3px solid color-mix(in srgb, var(--accent-main) 70%, transparent);
+  padding-left: 1rem;
+  border-radius: 4px;
+  animation: tts-paused-breathe 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transition: all 0.3s ease;
+}
+
 
 /* Reusable RichTextEditor Custom Styles */
 .rich-text-editor-wrapper {
