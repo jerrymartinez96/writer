@@ -6,10 +6,24 @@ import ExportService from '../services/ExportService';
 import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
 import { getChapters } from '../services/db';
+import GeminiLiveService, { GEMINI_LIVE_VOICES, GEMINI_LIVE_MODELS } from '../services/GeminiLiveService';
+import { Volume2 } from 'lucide-react';
 
 const API_LABELS = {
     deepseek: 'DeepSeek Direct'
 };
+
+const GEMINI_VOICES = GEMINI_LIVE_VOICES;
+
+const NARRADOR_TONES = [
+    { id: 'auto', label: 'Auto' },
+    { id: 'neutro', label: 'Neutro' },
+    { id: 'dramatico', label: 'Dramático' },
+    { id: 'epico', label: 'Épico' },
+    { id: 'suspenso', label: 'Suspenso' },
+    { id: 'calido', label: 'Cálido' },
+    { id: 'misterioso', label: 'Misterioso' }
+];
 
 const SettingsView = () => {
     const { activeBook, updateBook, updateBookData: handleUpdateBookData, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
@@ -33,6 +47,19 @@ const SettingsView = () => {
     const [inputTokenCost, setInputTokenCost] = useState(aiConfig.inputTokenCost ?? 0.14);
     const [outputTokenCost, setOutputTokenCost] = useState(aiConfig.outputTokenCost ?? 0.28);
     const [showApiKey, setShowApiKey] = useState(false);
+
+    // Narrador (Gemini Live) states
+    const [geminiApiKey, setGeminiApiKey] = useState(aiConfig.geminiApiKey || '');
+    const [narradorVoice, setNarradorVoice] = useState(aiConfig.narradorVoice || 'Puck');
+    const [geminiLiveModel, setGeminiLiveModel] = useState(aiConfig.geminiLiveModel || 'gemini-3.1-flash-live-preview');
+    const [narradorSpeed, setNarradorSpeed] = useState(aiConfig.narradorSpeed || 1.0);
+    const [narradorTone, setNarradorTone] = useState(aiConfig.narradorTone || 'auto');
+    const [narradorAutoContinue, setNarradorAutoContinue] = useState(aiConfig.narradorAutoContinue || false);
+    const [showGeminiApiKey, setShowGeminiApiKey] = useState(false);
+    const [isGeminiVoiceMenuOpen, setIsGeminiVoiceMenuOpen] = useState(false);
+    const [isGeminiSpeedMenuOpen, setIsGeminiSpeedMenuOpen] = useState(false);
+    const [isGeminiToneMenuOpen, setIsGeminiToneMenuOpen] = useState(false);
+    const [isGeminiPreviewing, setIsGeminiPreviewing] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
     const [isSavingAI, setIsSavingAI] = useState(false);
@@ -61,6 +88,15 @@ const SettingsView = () => {
             setReasoningEffort(cfg.reasoningEffort || 'high');
             setInputTokenCost(cfg.inputTokenCost ?? 0.14);
             setOutputTokenCost(cfg.outputTokenCost ?? 0.28);
+
+            // Narrador (Gemini Live) states
+            setGeminiApiKey(cfg.geminiApiKey || '');
+            setNarradorVoice(cfg.narradorVoice || 'Puck');
+            setGeminiLiveModel(cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview');
+            setNarradorSpeed(cfg.narradorSpeed || 1.0);
+            setNarradorTone(cfg.narradorTone || 'auto');
+            setNarradorAutoContinue(cfg.narradorAutoContinue || false);
+
             hasLoadedProfile.current = true;
         }
         
@@ -83,12 +119,19 @@ const SettingsView = () => {
             try {
                 await updateProfile({
                     aiConfig: {
+                        ...(profile?.aiConfig || {}),
                         deepseekApiKey,
                         defaultModel: selectedModel,
                         reasoningMode,
                         reasoningEffort,
                         inputTokenCost,
-                        outputTokenCost
+                        outputTokenCost,
+                        geminiApiKey,
+                        narradorVoice,
+                        narradorSpeed,
+                        narradorTone,
+                        geminiLiveModel,
+                        narradorAutoContinue
                     }
                 });
             } catch (e) {
@@ -101,7 +144,7 @@ const SettingsView = () => {
         return () => {
             if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
         };
-    }, [deepseekApiKey, reasoningMode, reasoningEffort, selectedModel, inputTokenCost, outputTokenCost]);
+    }, [deepseekApiKey, reasoningMode, reasoningEffort, selectedModel, inputTokenCost, outputTokenCost, geminiApiKey, narradorVoice, narradorSpeed, narradorTone, geminiLiveModel, narradorAutoContinue]);
     
     // Export States
     const [exportFormat, setExportFormat] = useState('pdf');
@@ -437,7 +480,8 @@ const SettingsView = () => {
 
             {/* TAB: USER PROFILE AND GLOBAL AI CONFIG */}
             {activeTab === 'user' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch animate-in fade-in duration-300">
+                <div className="space-y-8 animate-in fade-in duration-300">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
                     {/* User Profile Card */}
                     <div className="lg:col-span-1 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-[32px] p-8 shadow-sm flex flex-col relative overflow-hidden h-fit">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-3xl rounded-full"></div>
@@ -655,6 +699,177 @@ const SettingsView = () => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* NARRADOR — GEMINI LIVE */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+                    {/* Narrador Info Card */}
+                    <div className="lg:col-span-1 bg-gradient-to-br from-purple-500/10 to-fuchsia-500/5 border border-purple-500/20 p-8 rounded-[32px] shadow-sm flex flex-col relative overflow-hidden h-fit">
+                        <div className="absolute -top-20 -left-20 w-48 h-48 bg-purple-500/10 blur-[80px] rounded-full"></div>
+                        <div className="relative z-10 flex flex-col items-center text-center mt-4">
+                            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4">
+                                <Volume2 size={28} className="text-white" />
+                            </div>
+                            <h3 className="text-lg font-serif font-black text-[var(--text-main)] mb-2">Narrador</h3>
+                            <p className="text-[11px] text-[var(--text-muted)] font-medium leading-relaxed">
+                                Narra tus capítulos en modo lectura con voces naturales de Gemini Live 3.1.
+                                Sin API key, se usa la voz del navegador como respaldo.
+                            </p>
+                            <div className={`mt-4 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${geminiApiKey ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                                {geminiApiKey ? '✓ Gemini Live activo' : 'Fallback navegador activo'}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Narrador Config */}
+                    <div className="lg:col-span-2 bg-gradient-to-br from-purple-500/10 to-fuchsia-500/5 border border-purple-500/20 p-8 rounded-[32px] shadow-sm relative overflow-hidden group">
+                        <div className="absolute -top-20 -right-20 w-48 h-48 bg-purple-500/10 blur-[80px] rounded-full group-hover:bg-purple-500/20 transition-all duration-1000"></div>
+                        
+                        <div className="relative z-10 h-full flex flex-col">
+                            <div className="flex-1">
+                                <h3 className="text-xl font-serif font-black text-[var(--text-main)] mb-2 flex items-center gap-3">
+                                    <Volume2 size={24} className="text-purple-500" />
+                                    Narrador — Gemini Live 3.1
+                                </h3>
+                                <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed mb-6">
+                                    Configura la voz, velocidad y tono para la narración de capítulos en modo lectura.
+                                </p>
+                            </div>
+
+                            <div className="space-y-5">
+                                {/* Gemini API Key */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-500 text-[9px] font-black flex items-center justify-center">1</span>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                                            Gemini Live API Key
+                                        </p>
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type={showGeminiApiKey ? 'text' : 'password'}
+                                            value={geminiApiKey}
+                                            onChange={(e) => setGeminiApiKey(e.target.value)}
+                                            className="w-full bg-[var(--bg-app)] border border-purple-500/30 rounded-xl px-4 py-3 pr-12 text-xs font-mono focus:ring-2 focus:ring-purple-500/20 outline-none text-[var(--text-main)]"
+                                            placeholder="AIza..."
+                                        />
+                                        <button
+                                            onClick={() => setShowGeminiApiKey(!showGeminiApiKey)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2"
+                                        >
+                                            {showGeminiApiKey ? <X size={14} /> : <Eye size={14} />}
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-[var(--text-muted)] mt-1 font-medium italic">
+                                        Obtén tu API key en Google AI Studio. Requiere modelo con soporte Live.
+                                    </p>
+                                </div>
+
+                                {/* Voice Selector */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-500 text-[9px] font-black flex items-center justify-center">2</span>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Voz Predeterminada</p>
+                                    </div>
+                                    <div className="relative">
+                                        <button
+                                            onClick={() => setIsGeminiVoiceMenuOpen(!isGeminiVoiceMenuOpen)}
+                                            className="w-full flex items-center justify-between px-4 py-3 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl hover:border-purple-500/50 transition-all"
+                                        >
+                                            <span className="text-xs font-bold text-[var(--text-main)]">
+                                                {narradorVoice} — {GEMINI_VOICES.find(v => v.id === narradorVoice)?.label || 'Selecciona voz'}
+                                            </span>
+                                            <ChevronDown size={16} className={`text-[var(--text-muted)] transition-transform ${isGeminiVoiceMenuOpen ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        {isGeminiVoiceMenuOpen && (
+                                            <>
+                                                <div className="fixed inset-0 z-40" onClick={() => setIsGeminiVoiceMenuOpen(false)}></div>
+                                                <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-56 overflow-y-auto font-sans">
+                                                    {GEMINI_VOICES.map(voice => (
+                                                        <button
+                                                            key={voice.id}
+                                                            onClick={() => { setNarradorVoice(voice.id); setIsGeminiVoiceMenuOpen(false); }}
+                                                            className={`w-full text-left px-4 py-3 text-xs font-semibold transition-all hover:bg-[var(--accent-soft)] ${
+                                                                narradorVoice === voice.id
+                                                                    ? 'bg-purple-500/10 text-purple-500'
+                                                                    : 'text-[var(--text-main)]'
+                                                            }`}
+                                                        >
+                                                            {voice.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Speed Selector */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-500 text-[9px] font-black flex items-center justify-center">3</span>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Velocidad Predeterminada</p>
+                                    </div>
+                                    <div className="grid grid-cols-5 gap-2">
+                                        {[0.5, 0.75, 1.0, 1.25, 1.5].map(s => (
+                                            <button
+                                                key={s}
+                                                onClick={() => setNarradorSpeed(s)}
+                                                className={`px-2 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer border ${
+                                                    narradorSpeed === s
+                                                        ? 'bg-purple-500 text-white border-purple-500 shadow-md shadow-purple-500/20'
+                                                        : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-purple-500/50'
+                                                }`}
+                                            >
+                                                {s}x
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Tone Selector */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-500 text-[9px] font-black flex items-center justify-center">4</span>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Tono Narrativo</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {NARRADOR_TONES.map(tone => (
+                                            <button
+                                                key={tone.id}
+                                                onClick={() => setNarradorTone(tone.id)}
+                                                className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border ${
+                                                    narradorTone === tone.id
+                                                        ? 'bg-purple-500 text-white border-purple-500 shadow-md shadow-purple-500/20'
+                                                        : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-purple-500/50'
+                                                }`}
+                                            >
+                                                {tone.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Auto-continue toggle */}
+                                <div className="flex items-center justify-between px-4 py-3 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl">
+                                    <div>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Auto-continuar capítulos</p>
+                                        <p className="text-[9px] text-[var(--text-muted)] font-medium mt-0.5">
+                                            Al terminar un capítulo, narra el siguiente automáticamente.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => setNarradorAutoContinue(!narradorAutoContinue)}
+                                        className={`relative w-11 h-6 rounded-full transition-all duration-300 shrink-0 ${narradorAutoContinue ? 'bg-purple-500' : 'bg-[var(--border-main)]'}`}
+                                    >
+                                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${narradorAutoContinue ? 'left-[22px]' : 'left-0.5'}`}></div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 </div>
             )}
 

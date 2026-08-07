@@ -23,6 +23,7 @@ import InlineNoteModal from './editor/components/InlineNoteModal'
 import DetectionModal from './editor/components/DetectionModal'
 import ReadingSettingsModal from './editor/components/ReadingSettingsModal'
 import ChapterInfoModal from './editor/components/ChapterInfoModal'
+import Narrador from './narrador/Narrador'
 
 const Editor = () => {
     const {
@@ -1209,6 +1210,18 @@ const Editor = () => {
                 isOpen={isFinalizeModalOpen}
                 onClose={() => setIsFinalizeModalOpen(false)}
                 onConfirm={confirmFinalize}
+            />
+
+            {/* Narrador — Módulo de narración con Gemini Live */}
+            <Narrador
+                editor={editor}
+                isFocusMode={isFocusMode}
+                activeBook={activeBook}
+                activeChapter={activeChapter}
+                nextChapter={nextChapter}
+                onSelectChapter={selectChapter}
+                profile={profile}
+                toast={toast}
             />
 
             {/* Mobile Menu Tools Drawer */}
