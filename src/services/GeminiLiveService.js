@@ -47,6 +47,7 @@ class GeminiLiveService {
         this._pausedPcmQueue = [];
         this._nextStartTime = null;
         this._segmentStartTime = 0;
+        this._segmentAudioStartTime = 0;
         this._segmentDuration = 0;
         this._playedDuration = 0;
         this._lastProgress = 0;
@@ -226,20 +227,21 @@ class GeminiLiveService {
 
         const now = this.audioCtx.currentTime;
         if (this._nextStartTime === null || this._nextStartTime < now) {
-            if (this._segmentStartTime > 0 && now > this._segmentStartTime) {
-                this._playedDuration += (now - this._segmentStartTime);
+            if (this._segmentAudioStartTime > 0 && now > this._segmentAudioStartTime) {
+                this._playedDuration += (now - this._segmentAudioStartTime);
             }
             this._segmentStartTime = now;
+            this._segmentAudioStartTime = 0;
             this._nextStartTime = now + 0.05;
         }
 
         const startTime = this._nextStartTime;
         this._nextStartTime = startTime + (audioBuffer.duration / this._actualPlaybackRate);
 
-        if (this._segmentStartTime === 0) {
-            this._segmentStartTime = startTime;
+        if (this._segmentAudioStartTime === 0 || startTime < this._segmentAudioStartTime) {
+            this._segmentAudioStartTime = startTime;
         }
-        this._segmentDuration = (this._nextStartTime - this._segmentStartTime) + this._playedDuration;
+        this._segmentDuration = (this._nextStartTime - this._segmentAudioStartTime) + this._playedDuration;
 
         const source = this.audioCtx.createBufferSource();
         source.buffer = audioBuffer;
@@ -301,8 +303,8 @@ class GeminiLiveService {
     _finalizeSegment() {
         this._segmentFinalized = true;
 
-        if (this._segmentStartTime > 0 && this._nextStartTime !== null) {
-            this._segmentDuration = (this._nextStartTime - this._segmentStartTime) + this._playedDuration;
+        if (this._segmentAudioStartTime > 0 && this._nextStartTime !== null) {
+            this._segmentDuration = (this._nextStartTime - this._segmentAudioStartTime) + this._playedDuration;
             this._lastProgress = this.getSegmentProgress();
         }
 
@@ -355,6 +357,7 @@ class GeminiLiveService {
         this._segmentPcmChunks = [];
         this._nextStartTime = null;
         this._segmentStartTime = 0;
+        this._segmentAudioStartTime = 0;
         this._segmentDuration = 0;
         this._playedDuration = 0;
         this._lastProgress = 0;
@@ -411,7 +414,8 @@ class GeminiLiveService {
 
         if (!this.audioCtx || this._activeSources.size === 0 || this._segmentDuration <= 0) return 0;
 
-        const elapsed = (this.audioCtx.currentTime - this._segmentStartTime) + this._playedDuration;
+        const latency = (typeof this.audioCtx.baseLatency === 'number' && this.audioCtx.baseLatency > 0) ? this.audioCtx.baseLatency : 0;
+        const elapsed = Math.max(0, (this.audioCtx.currentTime - this._segmentAudioStartTime - latency) + this._playedDuration);
         const pct = Math.max(0, Math.min(1, elapsed / this._segmentDuration));
         this._lastProgress = pct;
         return pct;
@@ -459,6 +463,7 @@ class GeminiLiveService {
         this._pausedPcmQueue = [];
         this._nextStartTime = null;
         this._segmentStartTime = 0;
+        this._segmentAudioStartTime = 0;
         this._segmentDuration = 0;
         this._playedDuration = 0;
         this._lastProgress = 0;

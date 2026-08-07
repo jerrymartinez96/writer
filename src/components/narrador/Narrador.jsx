@@ -3,7 +3,7 @@
  * Combina el hook, el launcher, el panel y los atajos de teclado.
  * Se renderiza una sola vez dentro del Editor.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNarrador } from './useNarrador';
 import NarradorLauncher from './NarradorLauncher';
 import NarradorPanel from './NarradorPanel';
@@ -32,13 +32,26 @@ const Narrador = ({
         toast
     });
 
+    const exitNarratorModeIfOn = () => {
+        if (narrador.isNarratorMode) narrador.toggleNarratorMode();
+    };
+
     // Cerrar panel al salir de modo lectura
-    React.useEffect(() => {
+    useEffect(() => {
         if (!isFocusMode) {
             setIsPanelOpen(false);
             narrador.stopNarration();
         }
     }, [isFocusMode]);
+
+    // Añadir clase de atenuación al editor cuando el modo narrador está activo
+    useEffect(() => {
+        const editorEl = editor?.view?.dom;
+        if (!editorEl) return;
+        const parent = editorEl.closest('.editor-focus-mode') || editorEl.parentElement?.parentElement;
+        if (!parent) return;
+        parent.classList.toggle('narrador-mode-active', narrador.isNarratorMode && narrador.status !== 'idle');
+    }, [narrador.isNarratorMode, narrador.status, editor]);
 
     // Atajos de teclado (solo activos en modo lectura)
     useNarradorKeyboard({
@@ -47,6 +60,7 @@ const Narrador = ({
         status: narrador.status,
         narrador,
         onClosePanel: () => {
+            exitNarratorModeIfOn();
             setIsPanelOpen(false);
             narrador.stopNarration();
         }
@@ -65,6 +79,7 @@ const Narrador = ({
                     narrador={narrador}
                     activeChapter={activeChapter}
                     onClose={() => {
+                        exitNarratorModeIfOn();
                         setIsPanelOpen(false);
                         narrador.stopNarration();
                     }}

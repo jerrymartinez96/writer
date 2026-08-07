@@ -1,28 +1,20 @@
 /**
  * useNarrador — Hook principal del módulo Narrador.
  *
- * Arquitectura basada en eventos del audio (sin estimación de progreso):
- * - GeminiLiveService emite `segmentStarted` cuando el audio real de un
- *   segmento comienza a sonar, y `segmentEnded` cuando termina.
- * - El resaltado del editor es un efecto secundario de esos eventos:
- *     segmentStarted → resaltar el párrafo actual del segmento
- *     segmentEnded   → avanzar al siguiente
- * - Un loop de sincronización (rAF/interval) distribuye el progreso del audio
- *   párrafo a párrafo dentro del segmento, resaltando UNO solo a la vez.
- * - Al pausar se deja el párrafo en curso titilando.
- * - El párrafo activo siempre se mantiene enfocado (scroll automático).
- *
- * Orquesta además: motor dual Gemini Live / Web Speech, segmentación,
- * caché con hash, turno único estricto, progreso guardado y narración
- * continua a siguiente capítulo.
+ * - Reproducción limpia: motor Gemini Live / Web Speech, segmentación,
+ *   caché con hash, turno único estricto, progreso guardado y narración
+ *   continua a siguiente capítulo.
+ * - SIN resaltado en el editor: la narración ya no marca párrafos en el
+ *   documento. La vista queda intacta.
+ * - Modo narrador: cuando se activa, se muestra la transcripción completa
+ *   del texto que se está leyendo (el propio texto del segmento).
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import GeminiLiveService from '../../services/GeminiLiveService';
-import { prepareSegments, normalizeForMatching, firstWords, countWords } from '../../services/NarradorSegmenter';
+import { prepareSegments } from '../../services/NarradorSegmenter';
 import { getCachedSegment, saveCachedSegment, getNarradorCacheSize } from '../../services/NarradorCache';
 
 const PROGRESS_PREFIX = 'narrador_progress_';
-const TTS_TRACKING_INTERVAL_MS = 120;
 
 const buildSystemInstruction = (bookTitle, synopsis, tone) => {
     const toneMap = {
@@ -70,6 +62,8 @@ export const useNarrador = ({
     const [resumeInfo, setResumeInfo] = useState(null);
     const [isContinuousMode, setIsContinuousMode] = useState(false);
     const [cacheStats, setCacheStats] = useState(null);
+    const [isNarratorMode, setIsNarratorMode] = useState(false);
+    const [currentTranscript, setCurrentTranscript] = useState('');
 
     const segmentsRef = useRef([]);
     const currentIndexRef = useRef(0);
@@ -87,17 +81,8 @@ export const useNarrador = ({
     const utteranceRef = useRef(null);
     const toastRef = useRef(toast);
     const handleSegmentCompleteRef = useRef(null);
-    const renderParagraphHighlightsRef = useRef(null);
-    const startRealTimeTrackingRef = useRef(null);
-    const stopRealTimeTrackingRef = useRef(null);
-    const clearActiveParaTrackingRef = useRef(null);
     const cacheAudioCtxRef = useRef(null);
     const cacheSourceRef = useRef(null);
-
-    // Seguimiento de resaltado párrafo a párrafo
-    const progressLoopRef = useRef(null);
-    const activeParaIndexRef = useRef(null);
-    const segmentParaInfoRef = useRef(null);
 
     useEffect(() => { statusRef.current = status; }, [status]);
     useEffect(() => { speedRef.current = speed; }, [speed]);
@@ -147,231 +132,14 @@ export const useNarrador = ({
         } catch (err) { /* ignore */ }
     }, []);
 
-    const getParagraphElements = useCallback(() => {
-        const editorEl = editorRef.current?.view?.dom;
-        if (!editorEl) return [];
-        const container = editorEl.closest('.editor-focus-mode') || editorEl.parentElement?.parentElement;
-        if (!container) return [];
-        return Array.from(container.querySelectorAll('.prose p, .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6, .prose li'));
-    }, []);
-
-    const clearActiveParaTracking = useCallback(() => {
-        activeParaIndexRef.current = null;
-        segmentParaInfoRef.current = null;
-    }, []);
-
-    const stopRealTimeTracking = useCallback(() => {
-        if (progressLoopRef.current) {
-            clearInterval(progressLoopRef.current);
-            progressLoopRef.current = null;
-        }
-    }, []);
-
-    const estimateSpeechDurationMs = useCallback((text) => {
-        const wpm = 156 * (speedRef.current || 1);
-        return (countWords(text) / (wpm / 60)) * 1000;
-    }, []);
-
-    const ensureParagraphVisible = useCallback((el) => {
-        if (!el) return;
-        try {
-            const rect = el.getBoundingClientRect();
-            const vh = window.innerHeight || document.documentElement.clientHeight;
-            if (rect.top < 60 || rect.bottom > vh - 60) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        } catch (err) { /* ignore */ }
-    }, []);
-
-    /**
-     * Calcula qué párrafo dentro del segmento corresponde a un progreso [0,1].
-     * Los `starts` son los offsets en palabras de cada párrafo del segmento.
-     */
-    const getActiveParagraphForProgress = useCallback((progress, info) => {
-        if (!info || !info.starts?.length) return null;
-        const clamped = Math.max(0, Math.min(0.999, progress || 0));
-        const wordPos = Math.floor(clamped * info.totalWords);
-        let idx = 0;
-        for (let i = 0; i < info.starts.length; i++) {
-            if (wordPos >= info.starts[i]) idx = i;
-            else break;
-        }
-        return idx;
-    }, []);
-
-    /**
-     * Construye la información de mapeo entre un segmento y los párrafos reales
-     * del editor (DOM). Busca el párrafo de inicio por coincidencia de texto
-     * normalizado (sin mezclar unidades), con un fallback proporcional seguro.
-     */
-    const buildSegmentParaInfo = useCallback((segmentIndex, paraEls) => {
+    const setCurrentTranscriptForSegment = useCallback((segmentIndex) => {
         const segment = segmentsRef.current[segmentIndex];
-        if (!segment) return null;
-
-        const paraTexts = segment.paragraphTexts?.length ? segment.paragraphTexts : [segment.text];
-        let acc = 0;
-        const starts = paraTexts.map(t => {
-            const s = acc;
-            acc += countWords(t);
-            return s;
-        });
-        const totalWords = Math.max(1, acc);
-
-        let startParaIdx = -1;
-        const needle = firstWords(normalizeForMatching(paraTexts[0] || ''), 15);
-        if (needle) {
-            for (let i = 0; i < paraEls.length; i++) {
-                const pText = normalizeForMatching(paraEls[i].innerText || paraEls[i].textContent || '');
-                if (pText.includes(needle)) {
-                    startParaIdx = i;
-                    break;
-                }
-            }
-        }
-        if (startParaIdx === -1) {
-            const totalSegments = segmentsRef.current.length || 1;
-            startParaIdx = Math.min(
-                paraEls.length - 1,
-                Math.floor(((segment.paragraphOffset?.start ?? segmentIndex) / totalSegments) * paraEls.length)
-            );
-        }
-        startParaIdx = Math.max(0, startParaIdx);
-
-        return {
-            segmentIndex,
-            paraEls,
-            startParaIdx,
-            starts,
-            totalWords,
-            paraTexts,
-            startTime: null,
-            expectedSec: null,
-            startedAt: null,
-            expectedMs: null
-        };
+        setCurrentTranscript(segment?.text || '');
     }, []);
 
-    /**
-     * Resalta SOLO el párrafo activo del segmento actual y atenúa el resto.
-     * `forcedParaIdx` permite fijar un párrafo específico (usado por el loop).
-     */
-    const renderParagraphHighlights = useCallback((segmentIndex, forcedParaIdx = null) => {
-        try {
-            const paraEls = getParagraphElements();
-            if (paraEls.length === 0) return;
-
-            const cached = segmentParaInfoRef.current;
-            const useCached = cached?.segmentIndex === segmentIndex && cached?.paraEls.length === paraEls.length;
-            const info = useCached ? cached : buildSegmentParaInfo(segmentIndex, paraEls);
-            if (!info) return;
-            segmentParaInfoRef.current = info;
-
-            let activeIdx = info.startParaIdx;
-            if (typeof forcedParaIdx === 'number') {
-                activeIdx = forcedParaIdx;
-            } else if (motorRef.current === 'gemini') {
-                let progress = 0;
-                if (cacheAudioCtxRef.current && info.startTime != null && info.expectedSec) {
-                    progress = Math.min(0.999, Math.max(0, (cacheAudioCtxRef.current.currentTime - info.startTime) / info.expectedSec));
-                } else {
-                    progress = GeminiLiveService.getSegmentProgress?.() || 0;
-                }
-                if (progress > 0) {
-                    const pIdx = getActiveParagraphForProgress(progress, info);
-                    if (pIdx !== null) activeIdx = pIdx;
-                }
-            }
-            activeIdx = Math.max(info.startParaIdx, Math.min(info.startParaIdx + info.paraTexts.length - 1, activeIdx));
-            activeParaIndexRef.current = activeIdx;
-
-            const startActive = info.startParaIdx;
-            const endActive = Math.min(info.startParaIdx + info.paraTexts.length - 1, paraEls.length - 1);
-
-            paraEls.forEach((p, i) => {
-                p.classList.remove('tts-paused', 'tts-generating');
-                const inRange = i >= startActive && i <= endActive;
-                p.classList.toggle('tts-dimmed', !inRange);
-                p.classList.toggle('tts-reading-highlight', i === activeIdx);
-            });
-
-            ensureParagraphVisible(paraEls[activeIdx]);
-        } catch (err) { /* ignore */ }
-    }, [buildSegmentParaInfo, ensureParagraphVisible, getActiveParagraphForProgress, getParagraphElements]);
-
-    useEffect(() => {
-        renderParagraphHighlightsRef.current = renderParagraphHighlights;
-    }, [renderParagraphHighlights]);
-
-    /**
-     * Sincroniza el párrafo activo con el progreso real del audio.
-     * Se ejecuta en un intervalo corto mientras se narra.
-     */
-    const syncHighlightWithProgress = useCallback(() => {
-        if (statusRef.current !== 'speaking') return;
-
-        const info = segmentParaInfoRef.current;
-        if (!info) {
-            renderParagraphHighlights(currentIndexRef.current);
-            return;
-        }
-
-        let progress = 0;
-        if (motorRef.current === 'gemini') {
-            if (cacheAudioCtxRef.current && info.startTime != null && info.expectedSec) {
-                progress = Math.min(0.999, Math.max(0, (cacheAudioCtxRef.current.currentTime - info.startTime) / info.expectedSec));
-            } else {
-                progress = GeminiLiveService.getSegmentProgress?.() || 0;
-            }
-        } else if (info.startedAt && info.expectedMs) {
-            progress = Math.min(0.999, Math.max(0, (Date.now() - info.startedAt) / info.expectedMs));
-        }
-
-        const pIdx = getActiveParagraphForProgress(progress, info);
-        if (pIdx !== null && pIdx !== activeParaIndexRef.current) {
-            activeParaIndexRef.current = pIdx;
-            renderParagraphHighlights(currentIndexRef.current, pIdx);
-        } else {
-            ensureParagraphVisible(info.paraEls[activeParaIndexRef.current ?? info.startParaIdx]);
-        }
-    }, [ensureParagraphVisible, getActiveParagraphForProgress, renderParagraphHighlights]);
-
-    const startRealTimeTracking = useCallback(() => {
-        stopRealTimeTracking();
-        progressLoopRef.current = setInterval(syncHighlightWithProgress, TTS_TRACKING_INTERVAL_MS);
-    }, [stopRealTimeTracking, syncHighlightWithProgress]);
-
-    useEffect(() => {
-        startRealTimeTrackingRef.current = startRealTimeTracking;
-    }, [startRealTimeTracking]);
-
-    useEffect(() => {
-        stopRealTimeTrackingRef.current = stopRealTimeTracking;
-    }, [stopRealTimeTracking]);
-
-    useEffect(() => {
-        clearActiveParaTrackingRef.current = clearActiveParaTracking;
-    }, [clearActiveParaTracking]);
-
-    const applyHighlight = useCallback((segmentIndex) => {
-        renderParagraphHighlights(segmentIndex);
-    }, [renderParagraphHighlights]);
-
-    const clearHighlight = useCallback(() => {
-        stopRealTimeTracking();
-        clearActiveParaTracking();
-        try {
-            const editorEl = editorRef.current?.view?.dom;
-            const container = editorEl?.closest('.editor-focus-mode');
-            if (!container) return;
-            const paragraphs = container.querySelectorAll('.prose p, .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6, .prose li');
-            paragraphs.forEach(p => {
-                p.classList.remove('tts-reading-highlight');
-                p.classList.remove('tts-dimmed');
-                p.classList.remove('tts-generating');
-                p.classList.remove('tts-paused');
-            });
-        } catch (err) { /* ignore */ }
-    }, [clearActiveParaTracking, stopRealTimeTracking]);
+    const clearTranscript = useCallback(() => {
+        setCurrentTranscript('');
+    }, []);
 
     const buildGeminiContext = useCallback(() => {
         const book = activeBookRef.current || {};
@@ -487,33 +255,21 @@ export const useNarrador = ({
                 cacheSourceRef.current = null;
                 try { audioCtx.close(); } catch { /* ignore */ }
                 cacheAudioCtxRef.current = null;
-                stopRealTimeTrackingRef.current?.();
-                clearActiveParaTrackingRef.current?.();
-                clearHighlight();
                 if (handleSegmentCompleteRef.current) {
                     handleSegmentCompleteRef.current(segmentIndex);
                 }
             };
 
-            renderParagraphHighlightsRef.current?.(segmentIndex);
-            const info = segmentParaInfoRef.current;
-            if (info) {
-                info.startTime = audioCtx.currentTime;
-                info.expectedSec = audioBuffer.duration / (speedRef.current || 1);
-            }
+            setCurrentTranscriptForSegment(segmentIndex);
             source.start();
-            startRealTimeTrackingRef.current?.();
             return true;
         } catch (err) {
             return false;
         }
-    }, [clearHighlight]);
+    }, [setCurrentTranscriptForSegment]);
 
     const handleSegmentComplete = useCallback((completedIndex) => {
         if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
-
-        stopRealTimeTrackingRef.current?.();
-        clearActiveParaTrackingRef.current?.();
 
         const next = completedIndex + 1;
         if (next < segmentsRef.current.length) {
@@ -560,7 +316,7 @@ export const useNarrador = ({
                                 }
                             } catch (reconnectErr) {
                                 setStatus('stopped');
-                                clearHighlight();
+                                clearTranscript();
                                 if (toastRef.current) toastRef.current.error('Error de narración: ' + (reconnectErr.message || 'no se pudo reconectar'));
                             }
                         }
@@ -569,7 +325,7 @@ export const useNarrador = ({
             });
         } else {
             setStatus('stopped');
-            clearHighlight();
+            clearTranscript();
             clearProgress();
 
             const hasNext = !!nextChapterRef.current;
@@ -592,7 +348,7 @@ export const useNarrador = ({
                 if (toastRef.current) toastRef.current.success('¡Capítulo narrado completamente! 🎉');
             }
         }
-    }, [buildGeminiContext, clearHighlight, clearProgress, playCachedSegment, saveProgress]);
+    }, [buildGeminiContext, clearProgress, clearTranscript, playCachedSegment, saveProgress]);
 
     useEffect(() => {
         handleSegmentCompleteRef.current = handleSegmentComplete;
@@ -602,21 +358,12 @@ export const useNarrador = ({
         const handleSegmentStarted = () => {
             if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
             if (motorRef.current !== 'gemini') return;
-            clearActiveParaTrackingRef.current?.();
-            renderParagraphHighlightsRef.current?.(currentIndexRef.current);
-            const info = segmentParaInfoRef.current;
-            if (info) {
-                info.startTime = null;
-                info.expectedSec = null;
-            }
-            startRealTimeTrackingRef.current?.();
+            setCurrentTranscriptForSegment(currentIndexRef.current);
         };
 
         const handleSegmentEnded = () => {
             if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
             if (motorRef.current !== 'gemini') return;
-            stopRealTimeTrackingRef.current?.();
-            clearActiveParaTrackingRef.current?.();
             handleSegmentComplete(currentIndexRef.current);
         };
 
@@ -626,7 +373,7 @@ export const useNarrador = ({
             GeminiLiveService.on('segmentStarted', null);
             GeminiLiveService.on('segmentEnded', null);
         };
-    }, [handleSegmentComplete]);
+    }, [handleSegmentComplete, setCurrentTranscriptForSegment]);
 
     const startNarration = useCallback(async (startIndex = 0, forceMotor = null) => {
         if (!activeChapterRef.current) return;
@@ -651,8 +398,7 @@ export const useNarrador = ({
         currentIndexRef.current = startIndex;
         setCurrentSegmentIndex(startIndex);
         sentSegmentsRef.current.clear();
-        stopRealTimeTracking();
-        clearActiveParaTracking();
+        clearTranscript();
 
         if (motor === 'web-speech') {
             if (toastRef.current) toastRef.current.info('Usando voz del navegador. Configura tu API key de Gemini en Ajustes → Mi Cuenta para una narración más natural.', 5000);
@@ -679,7 +425,7 @@ export const useNarrador = ({
 
                 const segment = segmentsRef.current[startIndex];
                 sentSegmentsRef.current.add(startIndex);
-                applyHighlight(startIndex);
+                setCurrentTranscriptForSegment(startIndex);
 
                 GeminiLiveService.sendText(segment.text, startIndex, async (pcmData) => {
                     const bookId = activeBookRef.current?.id;
@@ -701,14 +447,7 @@ export const useNarrador = ({
                         handleSegmentComplete(idx - 1);
                         return;
                     }
-                    clearActiveParaTracking();
-                    applyHighlight(idx);
-                    const info = segmentParaInfoRef.current;
-                    if (info) {
-                        info.startedAt = Date.now();
-                        info.expectedMs = estimateSpeechDurationMs(segment.text);
-                    }
-                    startRealTimeTracking();
+                    setCurrentTranscriptForSegment(idx);
                     saveProgress(idx);
                     speakWithWebSpeech(segment.text, () => {
                         if (statusRef.current !== 'paused' && statusRef.current !== 'stopped') {
@@ -720,14 +459,13 @@ export const useNarrador = ({
             }
         } catch (err) {
             setStatus('stopped');
-            clearHighlight();
+            clearTranscript();
             if (toastRef.current) toastRef.current.error(err.message || 'No se pudo iniciar la narración.');
         }
-    }, [applyHighlight, buildGeminiContext, clearActiveParaTracking, clearHighlight, estimateSpeechDurationMs, handleSegmentComplete, playCachedSegment, prepareChapterSegments, saveProgress, speakWithWebSpeech, startRealTimeTracking, stopRealTimeTracking]);
+    }, [buildGeminiContext, clearTranscript, handleSegmentComplete, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
 
     const pauseNarration = useCallback(() => {
         if (statusRef.current === 'speaking') {
-            stopRealTimeTracking();
             if (motorRef.current === 'gemini') {
                 if (cacheAudioCtxRef.current) {
                     cacheAudioCtxRef.current.suspend().catch(() => {});
@@ -737,22 +475,10 @@ export const useNarrador = ({
             } else {
                 stopWebSpeech();
             }
-
-            // Dejar titilando el párrafo que se estaba leyendo
-            try {
-                const info = segmentParaInfoRef.current;
-                const paraEls = info?.paraEls || getParagraphElements();
-                const activeIdx = activeParaIndexRef.current ?? info?.startParaIdx ?? 0;
-                paraEls.forEach(p => {
-                    p.classList.remove('tts-reading-highlight', 'tts-dimmed', 'tts-paused');
-                });
-                if (paraEls[activeIdx]) paraEls[activeIdx].classList.add('tts-paused');
-            } catch (err) { /* ignore */ }
-
             setStatus('paused');
             saveProgress(currentIndexRef.current);
         }
-    }, [getParagraphElements, saveProgress, stopRealTimeTracking, stopWebSpeech]);
+    }, [saveProgress, stopWebSpeech]);
 
     const resumeNarration = useCallback(() => {
         if (statusRef.current !== 'paused') return;
@@ -763,43 +489,31 @@ export const useNarrador = ({
             } else {
                 GeminiLiveService.resume();
             }
-            applyHighlight(currentIndexRef.current);
-            startRealTimeTracking();
             setStatus('speaking');
         } else {
             setStatus('speaking');
             const idx = currentIndexRef.current;
-            const speakSegment = (segmentIdx) => {
-                const segment = segmentsRef.current[segmentIdx];
-                if (!segment) {
-                    setStatus('stopped');
-                    return;
+            const segment = segmentsRef.current[idx];
+            if (!segment) {
+                setStatus('stopped');
+                return;
+            }
+            setCurrentTranscriptForSegment(idx);
+            saveProgress(idx);
+            speakWithWebSpeech(segment.text, () => {
+                if (statusRef.current !== 'paused' && statusRef.current !== 'stopped') {
+                    handleSegmentComplete(idx);
                 }
-                clearActiveParaTracking();
-                applyHighlight(segmentIdx);
-                const info = segmentParaInfoRef.current;
-                if (info) {
-                    info.startedAt = Date.now();
-                    info.expectedMs = estimateSpeechDurationMs(segment.text);
-                }
-                startRealTimeTracking();
-                saveProgress(segmentIdx);
-                speakWithWebSpeech(segment.text, () => {
-                    if (statusRef.current !== 'paused' && statusRef.current !== 'stopped') {
-                        handleSegmentComplete(segmentIdx);
-                    }
-                });
-            };
-            speakSegment(idx);
+            });
         }
-    }, [applyHighlight, clearActiveParaTracking, estimateSpeechDurationMs, handleSegmentComplete, saveProgress, speakWithWebSpeech, startRealTimeTracking]);
+    }, [handleSegmentComplete, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
 
     const stopNarration = useCallback(() => {
         stopAllAudio();
-        clearHighlight();
+        clearTranscript();
         setStatus('stopped');
         saveProgress(currentIndexRef.current);
-    }, [clearHighlight, saveProgress, stopAllAudio]);
+    }, [clearTranscript, saveProgress, stopAllAudio]);
 
     const skipToSegment = useCallback((index) => {
         const clamped = Math.max(0, Math.min(segmentsRef.current.length - 1, index));
@@ -811,6 +525,10 @@ export const useNarrador = ({
         sentSegmentsRef.current.clear();
         startNarration(clamped);
     }, [startNarration, stopAllAudio]);
+
+    const toggleNarratorMode = useCallback(() => {
+        setIsNarratorMode(prev => !prev);
+    }, []);
 
     const checkSavedProgress = useCallback(() => {
         if (!activeChapterRef.current) return;
@@ -843,8 +561,6 @@ export const useNarrador = ({
         if (!isFocusModeRef.current) return;
 
         stopAllAudio();
-        stopRealTimeTracking();
-        clearActiveParaTracking();
         sentSegmentsRef.current.clear();
         segmentsRef.current = [];
         setSegments([]);
@@ -853,7 +569,7 @@ export const useNarrador = ({
         setStatus('idle');
         setShowResumePrompt(false);
         setResumeInfo(null);
-        clearHighlight();
+        clearTranscript();
 
         const prepared = prepareChapterSegments();
         if (prepared.length === 0) return;
@@ -879,10 +595,9 @@ export const useNarrador = ({
 
     useEffect(() => {
         return () => {
-            stopRealTimeTracking();
             stopAllAudio();
         };
-    }, [stopAllAudio, stopRealTimeTracking]);
+    }, [stopAllAudio]);
 
     const [webVoicesAvailable, setWebVoicesAvailable] = useState(false);
     useEffect(() => {
@@ -910,11 +625,14 @@ export const useNarrador = ({
         resumeInfo,
         isContinuousMode,
         cacheStats,
+        isNarratorMode,
+        currentTranscript,
 
         setSpeed,
         setIsPanelOpen,
         setShowResumePrompt,
         setIsContinuousMode,
+        toggleNarratorMode,
 
         startNarration,
         pauseNarration,
@@ -924,8 +642,6 @@ export const useNarrador = ({
         checkSavedProgress,
         refreshCacheStats,
         prepareChapterSegments,
-        applyHighlight,
-        clearHighlight,
         saveProgress,
         hasGeminiKey: !!profileData?.aiConfig?.geminiApiKey,
         hasWebSpeech: webVoicesAvailable

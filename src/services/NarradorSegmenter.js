@@ -2,15 +2,14 @@
  * NarradorSegmenter — Divide el texto de un capítulo en segmentos narrables.
  *
  * UNIDAD DE MEDIDA: EL PÁRRAFO (no palabras).
- * - Agrupa párrafos completos hasta ~160 palabras SIN cortarlos
- * - Si un solo párrafo excede el límite, lo fracciona por ORACIONES completas
- * - Resultado: 1 segmento = 1+ párrafos completos (unidad narrativa natural)
- * - Cada segmento incluye `paragraphOffset` = rango REAL de párrafos para resaltado exacto
- * - Cada segmento incluye `paragraphTexts` = textos de los párrafos que lo componen
- *   (permite distribuir el progreso del audio párrafo a párrafo con precisión)
+ * - 1 segmento = 1 párrafo COMPLETO (nunca se corta un párrafo ni se mezcla
+ *   texto del siguiente).
+ * - Si un solo párrafo excede las 150 palabras, se fracciona por ORACIONES
+ *   completas (y todos sus trozos apuntan al mismo párrafo).
+ * - Cada segmento incluye `paragraphOffset` y `paragraphTexts` para referencia.
  */
 
-const TARGET_WORDS_PER_SEGMENT = 160;
+const TARGET_WORDS_PER_SEGMENT = 150;
 const SENTENCE_SPLIT_WORDS = 55;
 
 /**
@@ -40,6 +39,10 @@ export const cleanTextForNarration = (htmlOrText) => {
     // Normalizar espacios
     text = text
         .replace(/\u00a0/g, ' ')
+        // Insertar espacio tras puntuación si va pegada a una letra mayúscula
+        // (ej.: "archivo.Claire" → "archivo. Claire")
+        .replace(/([.!?…])([A-ZÁÉÍÓÚÜÑ])/g, '$1 $2')
+        .replace(/([.!?…])(\s{2,})/g, '$1 ')
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -110,8 +113,9 @@ const splitParagraphBySentences = (paragraph, maxWordsPerChunk) => {
 };
 
 /**
- * Segmenta el texto y devuelve segmentos con su rango de párrafos globales.
+ * Segmenta el texto y devuelve un segmento por párrafo.
  * Cada segmento: { text, paragraphStart, paragraphEnd, paragraphTexts }
+ * Solo se fracciona el párrafo que excede TARGET_WORDS_PER_SEGMENT.
  */
 export const segmentText = (plainText) => {
     if (!plainText) return [];
@@ -124,29 +128,12 @@ export const segmentText = (plainText) => {
     if (paragraphs.length === 0) return [];
 
     const segments = [];
-    let group = [];
-    let groupWordCount = 0;
-
-    const flushGroup = (endIndex) => {
-        if (group.length > 0) {
-            segments.push({
-                text: group.map(g => g.text).join(' ').trim(),
-                paragraphStart: group[0].index,
-                paragraphEnd: endIndex !== undefined ? endIndex : group[group.length - 1].index,
-                paragraphTexts: group.map(g => g.text)
-            });
-            group = [];
-            groupWordCount = 0;
-        }
-    };
 
     paragraphs.forEach((fullText, globalIndex) => {
         const paraWords = countWords(fullText);
 
-        // ¿Este párrafo individual excede el objetivo? → fraccionar por oraciones
+        // ¿Este párrafo excede el objetivo? → fraccionar por oraciones completas
         if (paraWords > TARGET_WORDS_PER_SEGMENT) {
-            flushGroup(globalIndex - 1);
-
             const fractions = splitParagraphBySentences(fullText, SENTENCE_SPLIT_WORDS);
             for (const frac of fractions) {
                 segments.push({
@@ -159,16 +146,14 @@ export const segmentText = (plainText) => {
             return;
         }
 
-        // ¿Agregar este párrafo excede el objetivo? → cerrar grupo antes
-        if (groupWordCount + paraWords > TARGET_WORDS_PER_SEGMENT && groupWordCount > 0) {
-            flushGroup(globalIndex - 1);
-        }
-
-        group.push({ index: globalIndex, text: fullText });
-        groupWordCount += paraWords;
+        // 1 párrafo = 1 segmento (sin mezclar nada del siguiente)
+        segments.push({
+            text: fullText,
+            paragraphStart: globalIndex,
+            paragraphEnd: globalIndex,
+            paragraphTexts: [fullText]
+        });
     });
-
-    flushGroup(paragraphs.length - 1);
 
     return segments;
 };
