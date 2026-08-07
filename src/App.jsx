@@ -120,7 +120,7 @@ function AppContent() {
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg transform -rotate-6">
               <FileText className="text-white" size={24} />
             </div>
-            <h2 className="text-xl font-serif font-black text-[var(--accent-main)] tracking-tight">LivingWriter</h2>
+            <h2 className="text-xl font-serif font-black text-[var(--accent-main)] tracking-tight">Verne Studio</h2>
           </div>
           <div className="flex items-center gap-4">
             <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2.5 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all">
@@ -136,7 +136,7 @@ function AppContent() {
                   <img src={user.photoURL} alt={user.displayName} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full bg-gradient-to-tr from-[var(--accent-main)] to-indigo-400 flex items-center justify-center text-white font-black text-xs sm:text-sm">
-                    {user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'LW'}
+                    {user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'VS'}
                   </div>
                 )}
               </button>
@@ -278,7 +278,7 @@ function AppContent() {
                   <img src={user.photoURL} alt={user.displayName} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full bg-gradient-to-tr from-[var(--accent-main)] to-indigo-400 flex items-center justify-center text-white font-black text-xs sm:text-sm">
-                    {user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'LW'}
+                    {user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'VS'}
                   </div>
                 )}
               </button>

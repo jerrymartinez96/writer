@@ -28,7 +28,7 @@ const Login = () => {
                     </div>
 
                     <h1 className="text-4xl font-black font-serif text-[var(--text-main)] mb-3 tracking-tight">
-                        LivingWriter <span className="text-indigo-600">AI</span>
+                        Verne Studio <span className="text-indigo-600">AI</span>
                     </h1>
                     
                     <p className="text-[var(--text-muted)] text-lg mb-10 max-w-xs font-medium">
@@ -49,7 +49,7 @@ const Login = () => {
                     </div>
 
                     <p className="mt-12 text-[var(--text-muted)] text-xs font-medium">
-                        Al continuar, aceptas que LivingWriter AI guardará tu obra de forma segura en la nube.
+                        Al continuar, aceptas que Verne Studio AI guardará tu obra de forma segura en la nube.
                     </p>
                 </div>
             </div>
