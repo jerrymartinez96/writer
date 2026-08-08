@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import IAStudioMessage from './IAStudioMessage';
-import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Loader2 } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Loader2, Wand2, Settings, Volume2 } from 'lucide-react';
 import Modal from '../Modal';
 import { buildContextFromSelections, estimateContextWeight } from './IAStudioUtils';
 import { AIService } from '../../services/AIService';
 import { useData } from '../../context/DataContext';
 import CharacterDesignerWizard from './components/CharacterDesignerWizard';
+import CoWriterSettingsModal from '../coescritor/CoWriterSettingsModal';
+import useCoWriter from '../coescritor/useCoWriter';
 
 const API_LABELS = {
     deepseek: 'DeepSeek'
@@ -67,6 +69,9 @@ const IAStudioChat = ({
     const [sectionDescriptions, setSectionDescriptions] = useState(['', '', '']);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [editSessionName, setEditSessionName] = useState('');
+    const [isCoWriterOpen, setIsCoWriterOpen] = useState(false);
+    const [isCoWriterSettingsOpen, setIsCoWriterSettingsOpen] = useState(false);
+    const [coWriterCommand, setCoWriterCommand] = useState(''); // último comando enviado al Coescritor (para re-narrar/mostrar)
 
     // --- COMANDOS MOCK DE PRUEBA ---
     const COMMANDS = [
@@ -173,6 +178,7 @@ const IAStudioChat = ({
     };
 
     const { profile } = useData();
+    const cowriter = useCoWriter();
 
     useEffect(() => {
         if (activeSession) {
@@ -426,7 +432,23 @@ const IAStudioChat = ({
             }));
             return;
         }
-        onSend(trimmed);
+        // En modo Coescritor, el texto va a DeepSeek con narración (no al chat de IA Studio).
+        if (isCoWriterOpen) {
+            console.info('[IAStudio][CoWriter] Enviando instrucción:', trimmed);
+            setCoWriterCommand(trimmed);
+            void cowriter.executeText(trimmed).catch((error) => {
+                console.error('[IAStudio][CoWriter] Error no capturado:', error);
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: `❌ Coescritor: ${error?.message || 'error desconocido'}`, type: 'error' }
+                }));
+            });
+            setInputValue('');
+            return;
+        }
+        console.info('[IAStudio][Chat] Enviando instrucción:', trimmed);
+        void Promise.resolve(onSend(trimmed)).catch((error) => {
+            console.error('[IAStudio][Chat] Error no capturado:', error);
+        });
         setInputValue('');
     };
 
@@ -598,6 +620,19 @@ const IAStudioChat = ({
                         )}
                     </div>
 
+                    {/* Configuración del Coescritor (cabecera, Idea 3) */}
+                    <button
+                        onClick={() => setIsCoWriterSettingsOpen(true)}
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                            isCoWriterOpen
+                                ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]'
+                        }`}
+                        title="Configuración del Coescritor"
+                    >
+                        <Settings size={16} />
+                    </button>
+
                     {/* Export button */}
                     {messages.length > 0 && onExport && (
                         <button
@@ -686,6 +721,126 @@ const IAStudioChat = ({
             {/* Input Area */}
             <div className="px-4 lg:px-6 py-4 border-t border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
                 <div className="max-w-3xl mx-auto space-y-3">
+                    {/* ── Buffer vivo del Coescritor: comando + estado + detener/re-narrar ── */}
+                    {(isCoWriterOpen || coWriterCommand) && (
+                        <div className={`rounded-xl border px-3 py-2 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-200 ${
+                            cowriter.isVoiceNarrating
+                                ? 'bg-emerald-500/5 border-emerald-500/25'
+                                : cowriter.status === 'processing'
+                                    ? 'bg-amber-500/5 border-amber-500/25'
+                                    : 'bg-indigo-500/5 border-indigo-500/15'
+                        }`}>
+                            <div className="flex items-center gap-2">
+                                {cowriter.isVoiceNarrating ? (
+                                    <Volume2 size={11} className="text-emerald-500 animate-pulse shrink-0" />
+                                ) : cowriter.status === 'processing' ? (
+                                    <Loader2 size={11} className="animate-spin text-amber-500 shrink-0" />
+                                ) : (
+                                    <Wand2 size={11} className="text-indigo-500 shrink-0" />
+                                )}
+                                <span className="text-[8px] font-black uppercase tracking-widest ${
+                                    cowriter.isVoiceNarrating ? 'text-emerald-500' :
+                                    cowriter.status === 'processing' ? 'text-amber-500' : 'text-indigo-500'
+                                }">
+                                    {cowriter.isVoiceNarrating ? 'Narrando respuesta…' :
+                                     cowriter.status === 'processing' ? 'Procesando con DeepSeek…' : 'Coescritor activo · respuesta por voz'}
+                                </span>
+                                <span className="ml-auto flex items-center gap-1">
+                                    {coWriterCommand && cowriter.status === 'idle' && (
+                                        <button
+                                            onClick={() => cowriter.executeText(coWriterCommand)}
+                                            className="px-2 py-0.5 rounded-lg bg-purple-500/10 text-purple-500 hover:bg-purple-500/20 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+                                            title="Volver a escuchar la respuesta"
+                                        >
+                                            🔊 Re-narrar
+                                        </button>
+                                    )}
+                                    {cowriter.isVoiceNarrating && (
+                                        <button
+                                            onClick={() => cowriter.stopNarration()}
+                                            className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+                                            title="Detener narración"
+                                        >
+                                            ⏹ Detener
+                                        </button>
+                                    )}
+                                </span>
+                            </div>
+                            {coWriterCommand && (
+                                <p className="text-[10px] text-[var(--text-muted)] leading-relaxed truncate">
+                                    <span className="font-bold text-[var(--text-main)]">› </span>{coWriterCommand}
+                                </p>
+                            )}
+                            {/* ── Insignia de acción resuelta: transparencia del chat general automatizado ── */}
+                            {cowriter.resolvedAction && cowriter.resolvedAction.label && cowriter.status === 'processing' && (
+                                <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                                    <Sparkles size={10} className="text-purple-500 shrink-0" />
+                                    <span className="text-[9px] font-bold text-purple-500 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/15 uppercase tracking-wider">
+                                        {cowriter.resolvedAction.label}
+                                    </span>
+                                    <span className="text-[8px] text-[var(--text-muted)] opacity-60 uppercase tracking-wider">
+                                        acción resuelta automáticamente
+                                    </span>
+                                </div>
+                            )}
+                            {cowriter.resultText && !cowriter.isVoiceNarrating && cowriter.status === 'idle' && !cowriter.pendingChanges && (
+                                <p className="text-[10px] font-medium text-emerald-600 leading-relaxed line-clamp-2">
+                                    {cowriter.resultText}
+                                </p>
+                            )}
+
+                            {/* ── Fase de aprobación: cambios grandes que requieren tu visto bueno ── */}
+                            {cowriter.pendingChanges && (
+                                <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-2.5 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="flex items-center gap-1.5">
+                                        <AlertTriangle size={11} className="text-amber-500 shrink-0" />
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-amber-500">
+                                            El motor de IA generó cambios · requiere aprobación
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-[var(--text-main)] leading-relaxed">
+                                        {cowriter.pendingChanges.summary}
+                                    </p>
+                                    {cowriter.pendingChanges.reasons?.length > 0 && (
+                                        <p className="text-[9px] text-[var(--text-muted)] leading-relaxed">
+                                            ⚠️ {cowriter.pendingChanges.reasons.join(' · ')}
+                                        </p>
+                                    )}
+                                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                                        <button
+                                            onClick={() => cowriter.openManualReview()}
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-[var(--text-main)] hover:border-indigo-500/40 hover:bg-indigo-500/5 text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                                            title="Abrir el documento afectado para que revises el cambio tú mismo"
+                                        >
+                                            <BookOpen size={10} />
+                                            Revisar manualmente
+                                        </button>
+                                        <button
+                                            onClick={() => cowriter.declineChanges()}
+                                            disabled={cowriter.isApplyingChanges}
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 text-[8px] font-black uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
+                                            title="Descartar los cambios propuestos sin modificar nada"
+                                        >
+                                            <X size={10} />
+                                            Descartar
+                                        </button>
+                                        <button
+                                            onClick={() => cowriter.approveChanges()}
+                                            disabled={cowriter.isApplyingChanges}
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border border-emerald-500/20 text-[8px] font-black uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
+                                            title="Aprobar y aplicar todos los cambios propuestos"
+                                        >
+                                            {cowriter.isApplyingChanges
+                                                ? <Loader2 size={10} className="animate-spin" />
+                                                : <Check size={10} />}
+                                            {cowriter.isApplyingChanges ? 'Aplicando…' : 'Aprobar y aplicar'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ── Modo Fragmento ── */}
                     {selectedAction === 'fragmento' && (
                         <div className="animate-in fade-in slide-in-from-top-2 duration-200 text-left">
@@ -854,7 +1009,11 @@ const IAStudioChat = ({
                     </div>
 
                     {/* Input + Send */}
-                    <div className="flex items-center gap-2 sm:gap-2.5 bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-2xl pl-2 sm:pl-3 pr-2.5 sm:pr-4 py-2.5 sm:py-3 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all duration-300 shadow-sm relative">
+                    <div className={`flex items-center gap-2 sm:gap-2.5 bg-[var(--bg-editor)] rounded-2xl pl-2 sm:pl-3 pr-2.5 sm:pr-4 py-2.5 sm:py-3 transition-all duration-300 shadow-sm relative ${
+                        isCoWriterOpen
+                            ? 'border-2 border-purple-500/50 bg-gradient-to-r from-indigo-500/10 to-purple-600/10 ring-2 ring-purple-500/30 shadow-[0_0_24px_rgba(139,92,246,0.25)]'
+                            : 'border border-[var(--border-main)] focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]'
+                    }`}>
                         {/* Autocomplete Dropdown */}
                         {shouldShowAutocomplete && (
                             <div className="absolute bottom-full left-0 mb-3 w-64 bg-[var(--bg-editor)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-50 overflow-hidden p-1.5 space-y-0.5 animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-200 text-left">
@@ -969,7 +1128,9 @@ const IAStudioChat = ({
                                 value={inputValue}
                                 onChange={(e) => handleInputChange(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Escribe tu mensaje... (Enter para enviar o '/' para comandos)"
+                                placeholder={isCoWriterOpen
+                                    ? "Escribe un comando para el Coescritor… ej. 'Corrige la edad de Nora de 19 a 18'"
+                                    : "Escribe tu mensaje... (Enter para enviar o '/' para comandos)"}
                                 className="flex-1 min-w-0 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
                                 rows={1}
                                 disabled={isLoading}
@@ -991,6 +1152,42 @@ const IAStudioChat = ({
                                 <span className="hidden xs:inline">Redactar Escena</span>
                             </button>
                         )}
+
+                        {/* Coescritor: botón varita que se transforma según el estado (procesando → gira, narrando → ondas y para) */}
+                        <button
+                            onClick={() => {
+                                if (cowriter.isVoiceNarrating) {
+                                    cowriter.stopNarration();
+                                } else if (cowriter.status === 'processing') {
+                                    cowriter.stopAll && cowriter.stopAll();
+                                } else {
+                                    setIsCoWriterOpen(prev => !prev);
+                                }
+                            }}
+                            disabled={isLoading}
+                            className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 cursor-pointer relative overflow-hidden ${
+                                cowriter.isVoiceNarrating
+                                    ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md ring-2 ring-emerald-400/50'
+                                    : cowriter.status === 'processing'
+                                        ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md ring-2 ring-amber-400/50'
+                                        : isCoWriterOpen
+                                            ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-md ring-2 ring-purple-500/40'
+                                            : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 hover:bg-indigo-500/20'
+                            }`}
+                            title={
+                                cowriter.isVoiceNarrating ? "Detener narración" :
+                                cowriter.status === 'processing' ? "Procesando con DeepSeek..." :
+                                (isCoWriterOpen ? "Desactivar Coescritor" : "Activar Coescritor")
+                            }
+                        >
+                            {cowriter.isVoiceNarrating ? (
+                                <Volume2 size={16} className="animate-pulse" />
+                            ) : cowriter.status === 'processing' ? (
+                                <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                                <Wand2 size={16} />
+                            )}
+                        </button>
 
                         {/* Send / Stop button */}
                         <button
@@ -1108,6 +1305,14 @@ const IAStudioChat = ({
                     </div>
                 </div>
             </Modal>
+
+            {/* Coescritor Settings Modal */}
+            <CoWriterSettingsModal
+                isOpen={isCoWriterSettingsOpen}
+                onClose={() => setIsCoWriterSettingsOpen(false)}
+                thresholdWords={cowriter.thresholdWords}
+                setThresholdWords={cowriter.setThresholdWords}
+            />
         </div>
     );
 };

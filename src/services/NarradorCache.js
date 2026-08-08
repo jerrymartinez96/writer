@@ -27,7 +27,7 @@ const getDb = () => {
  * @param {string} textHash - Hash del texto actual para invalidación
  * @returns {Promise<{pcmData: ArrayBuffer, textHash: string} | null>}
  */
-export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash) => {
+export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash, variantKey = 'default') => {
     try {
         const d = await getDb();
         const key = `${bookId}_${chapterId}_${segmentIndex}`;
@@ -35,7 +35,7 @@ export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash
         if (!entry) return null;
 
         // Invalidar por hash de texto (el texto del segmento cambió)
-        if (entry.textHash !== textHash) return null;
+        if (entry.textHash !== textHash || (entry.variantKey || 'default') !== variantKey) return null;
 
         // Invalidar por TTL
         if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
@@ -50,10 +50,22 @@ export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash
     }
 };
 
+/** Elimina únicamente la versión cacheada de un segmento. */
+export const invalidateCachedSegment = async (bookId, chapterId, segmentIndex) => {
+    try {
+        const d = await getDb();
+        await d.segments.delete(`${bookId}_${chapterId}_${segmentIndex}`);
+        return true;
+    } catch (err) {
+        console.warn('[NarradorCache] invalidate error:', err);
+        return false;
+    }
+};
+
 /**
  * Guarda un segmento en caché.
  */
-export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHash, pcmData) => {
+export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHash, pcmData, variantKey = 'default') => {
     try {
         const d = await getDb();
         const key = `${bookId}_${chapterId}_${segmentIndex}`;
@@ -63,6 +75,7 @@ export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHas
             chapterId,
             segmentIndex,
             textHash,
+            variantKey,
             pcmData,
             timestamp: Date.now()
         });
@@ -113,6 +126,7 @@ export const getNarradorCacheSize = async () => {
 export default {
     getCachedSegment,
     saveCachedSegment,
+    invalidateCachedSegment,
     clearNarradorCache,
     getNarradorCacheSize
 };

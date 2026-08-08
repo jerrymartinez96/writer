@@ -46,7 +46,14 @@ const Narrador = ({
 
     // Añadir clase de atenuación al editor cuando el modo narrador está activo
     useEffect(() => {
-        const editorEl = editor?.view?.dom;
+        // Acceso seguro al DOM del editor: `editor.view.dom` lanza una excepción
+        // en Tiptap si la vista aún no está montada. `options.element` nunca lanza.
+        let editorEl;
+        try {
+            editorEl = editor?.view?.dom || editor?.options?.element || null;
+        } catch {
+            editorEl = editor?.options?.element || null;
+        }
         if (!editorEl) return;
         const parent = editorEl.closest('.editor-focus-mode') || editorEl.parentElement?.parentElement;
         if (!parent) return;

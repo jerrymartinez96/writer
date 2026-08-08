@@ -12,7 +12,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import GeminiLiveService from '../../services/GeminiLiveService';
 import { prepareSegments } from '../../services/NarradorSegmenter';
-import { getCachedSegment, saveCachedSegment, getNarradorCacheSize } from '../../services/NarradorCache';
+import { getCachedSegment, saveCachedSegment, invalidateCachedSegment, getNarradorCacheSize } from '../../services/NarradorCache';
 
 const PROGRESS_PREFIX = 'narrador_progress_';
 
@@ -56,7 +56,7 @@ export const useNarrador = ({
     const [segments, setSegments] = useState([]);
     const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
     const [motorUsado, setMotorUsado] = useState('none'); // none | gemini | web-speech
-    const [speed, setSpeed] = useState(1.0);
+    const [speed, setSpeed] = useState(() => profileData?.aiConfig?.narradorSpeed || 1.0);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
     const [showResumePrompt, setShowResumePrompt] = useState(false);
     const [resumeInfo, setResumeInfo] = useState(null);
@@ -64,6 +64,8 @@ export const useNarrador = ({
     const [cacheStats, setCacheStats] = useState(null);
     const [isNarratorMode, setIsNarratorMode] = useState(false);
     const [currentTranscript, setCurrentTranscript] = useState('');
+    const [segmentProgress, setSegmentProgress] = useState(0);
+    const [cachedSegmentIndexes, setCachedSegmentIndexes] = useState(() => new Set());
 
     const segmentsRef = useRef([]);
     const currentIndexRef = useRef(0);
@@ -83,9 +85,22 @@ export const useNarrador = ({
     const handleSegmentCompleteRef = useRef(null);
     const cacheAudioCtxRef = useRef(null);
     const cacheSourceRef = useRef(null);
+    const playbackRunRef = useRef(0);
+    const autoContinueRef = useRef(false);
+    const cachePlaybackStartRef = useRef(0);
+    const cachePlaybackDurationRef = useRef(0);
+    const estimatedSpeechStartRef = useRef(0);
+    const estimatedSpeechDurationRef = useRef(0);
 
     useEffect(() => { statusRef.current = status; }, [status]);
-    useEffect(() => { speedRef.current = speed; }, [speed]);
+    useEffect(() => {
+        speedRef.current = speed;
+        if (motorRef.current === 'gemini') GeminiLiveService.setPlaybackRate(speed);
+    }, [speed]);
+    useEffect(() => {
+        const configuredSpeed = profileData?.aiConfig?.narradorSpeed;
+        if (configuredSpeed && statusRef.current === 'idle') setSpeed(configuredSpeed);
+    }, [profileData?.aiConfig?.narradorSpeed]);
     useEffect(() => { activeChapterRef.current = activeChapter; }, [activeChapter]);
     useEffect(() => { activeBookRef.current = activeBook; }, [activeBook]);
     useEffect(() => { editorRef.current = editor; }, [editor]);
@@ -108,7 +123,7 @@ export const useNarrador = ({
         };
         try {
             localStorage.setItem(key, JSON.stringify(payload));
-        } catch (err) { /* ignore */ }
+        } catch { /* ignore */ }
     }, []);
 
     const getSavedProgress = useCallback(() => {
@@ -119,7 +134,7 @@ export const useNarrador = ({
             if (!raw) return null;
             const parsed = JSON.parse(raw);
             return parsed;
-        } catch (err) {
+        } catch {
             return null;
         }
     }, []);
@@ -129,17 +144,41 @@ export const useNarrador = ({
         const key = `${PROGRESS_PREFIX}${activeBookRef.current.id}_${activeChapterRef.current.id}`;
         try {
             localStorage.removeItem(key);
-        } catch (err) { /* ignore */ }
+        } catch { /* ignore */ }
     }, []);
 
     const setCurrentTranscriptForSegment = useCallback((segmentIndex) => {
         const segment = segmentsRef.current[segmentIndex];
         setCurrentTranscript(segment?.text || '');
+        const wordCount = String(segment?.text || '').trim().split(/\s+/).filter(Boolean).length;
+        estimatedSpeechDurationRef.current = Math.max(1200, (wordCount / (2.35 * speedRef.current)) * 1000);
+        estimatedSpeechStartRef.current = Date.now();
+        setSegmentProgress(0);
     }, []);
 
     const clearTranscript = useCallback(() => {
         setCurrentTranscript('');
+        setSegmentProgress(0);
     }, []);
+
+    useEffect(() => {
+        if (status !== 'speaking' && status !== 'connecting') return undefined;
+        const timer = window.setInterval(() => {
+            let nextProgress = 0;
+            if (statusRef.current === 'speaking') {
+                if (motorRef.current === 'gemini' && cacheAudioCtxRef.current && cachePlaybackDurationRef.current > 0) {
+                    const elapsed = cacheAudioCtxRef.current.currentTime - cachePlaybackStartRef.current;
+                    nextProgress = elapsed / cachePlaybackDurationRef.current;
+                } else if (motorRef.current === 'gemini') {
+                    nextProgress = GeminiLiveService.getSegmentProgress();
+                } else if (estimatedSpeechDurationRef.current > 0) {
+                    nextProgress = (Date.now() - estimatedSpeechStartRef.current) / estimatedSpeechDurationRef.current;
+                }
+            }
+            setSegmentProgress(Math.max(0, Math.min(1, nextProgress)));
+        }, 100);
+        return () => window.clearInterval(timer);
+    }, [status]);
 
     const buildGeminiContext = useCallback(() => {
         const book = activeBookRef.current || {};
@@ -151,6 +190,45 @@ export const useNarrador = ({
             systemInstruction: buildSystemInstruction(book.title, book.description, cfg.narradorTone || 'auto')
         };
     }, []);
+
+    const buildAudioVariant = useCallback(() => {
+        const cfg = profileRef.current?.aiConfig || {};
+        return [
+            cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview',
+            cfg.narradorVoice || 'Puck',
+            cfg.narradorTone || 'auto',
+            'prompt-v2'
+        ].join('|');
+    }, []);
+
+    const markSegmentCached = useCallback((segmentIndex, isCached = true) => {
+        setCachedSegmentIndexes(previous => {
+            const next = new Set(previous);
+            if (isCached) next.add(segmentIndex);
+            else next.delete(segmentIndex);
+            return next;
+        });
+    }, []);
+
+    const refreshSegmentCacheStatus = useCallback(async () => {
+        const bookId = activeBookRef.current?.id;
+        const chapterId = activeChapterRef.current?.id;
+        const currentSegments = segmentsRef.current;
+        if (!bookId || !chapterId || currentSegments.length === 0) {
+            setCachedSegmentIndexes(new Set());
+            return;
+        }
+        const variantKey = buildAudioVariant();
+        const cachedIndexes = await Promise.all(currentSegments.map(async (segment, index) => {
+            const cached = await getCachedSegment(bookId, chapterId, index, segment.hash, variantKey);
+            return cached ? index : null;
+        }));
+        setCachedSegmentIndexes(new Set(cachedIndexes.filter(index => index !== null)));
+    }, [buildAudioVariant]);
+
+    useEffect(() => {
+        refreshSegmentCacheStatus();
+    }, [activeChapter?.id, profileData?.aiConfig?.geminiLiveModel, profileData?.aiConfig?.narradorTone, profileData?.aiConfig?.narradorVoice, refreshSegmentCacheStatus, segments.length]);
 
     const prepareChapterSegments = useCallback(() => {
         if (!activeChapterRef.current) return [];
@@ -189,7 +267,10 @@ export const useNarrador = ({
         utterance.rate = speedRef.current;
         utterance.pitch = 1;
         utterance.onend = onEnd;
-        utterance.onerror = onEnd;
+        utterance.onerror = (event) => {
+            if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+            toastRef.current?.error('La voz del navegador no pudo reproducir este fragmento.');
+        };
         utteranceRef.current = utterance;
         window.speechSynthesis.speak(utterance);
     }, [getSpanishVoice]);
@@ -197,7 +278,7 @@ export const useNarrador = ({
     const stopWebSpeech = useCallback(() => {
         try {
             if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        } catch (err) { /* ignore */ }
+        } catch { /* ignore */ }
     }, []);
 
     const stopAllAudio = useCallback(() => {
@@ -216,10 +297,12 @@ export const useNarrador = ({
                 try { cacheAudioCtxRef.current.close(); } catch { /* ignore */ }
                 cacheAudioCtxRef.current = null;
             }
-        } catch (err) { /* ignore */ }
+            cachePlaybackStartRef.current = 0;
+            cachePlaybackDurationRef.current = 0;
+        } catch { /* ignore */ }
     }, [stopWebSpeech]);
 
-    const playCachedSegment = useCallback(async (segmentIndex) => {
+    const playCachedSegment = useCallback(async (segmentIndex, runId = playbackRunRef.current) => {
         const segment = segmentsRef.current[segmentIndex];
         if (!segment) return false;
 
@@ -227,8 +310,9 @@ export const useNarrador = ({
         const chapterId = activeChapterRef.current?.id;
         if (!bookId || !chapterId) return false;
 
-        const cached = await getCachedSegment(bookId, chapterId, segmentIndex, segment.hash);
+        const cached = await getCachedSegment(bookId, chapterId, segmentIndex, segment.hash, buildAudioVariant());
         if (!cached?.pcmData) return false;
+        if (runId !== playbackRunRef.current) return false;
 
         try {
             if (cacheAudioCtxRef.current) {
@@ -244,6 +328,8 @@ export const useNarrador = ({
             const float32 = new Float32Array(pcm16.length);
             for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768.0;
             const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
+            cachePlaybackStartRef.current = audioCtx.currentTime;
+            cachePlaybackDurationRef.current = audioBuffer.duration / speedRef.current;
             audioBuffer.copyToChannel(float32, 0);
             const source = audioCtx.createBufferSource();
             cacheSourceRef.current = source;
@@ -255,7 +341,10 @@ export const useNarrador = ({
                 cacheSourceRef.current = null;
                 try { audioCtx.close(); } catch { /* ignore */ }
                 cacheAudioCtxRef.current = null;
-                if (handleSegmentCompleteRef.current) {
+                cachePlaybackStartRef.current = 0;
+                cachePlaybackDurationRef.current = 0;
+                setSegmentProgress(1);
+                if (runId === playbackRunRef.current && handleSegmentCompleteRef.current) {
                     handleSegmentCompleteRef.current(segmentIndex);
                 }
             };
@@ -263,12 +352,13 @@ export const useNarrador = ({
             setCurrentTranscriptForSegment(segmentIndex);
             source.start();
             return true;
-        } catch (err) {
+        } catch {
             return false;
         }
-    }, [setCurrentTranscriptForSegment]);
+    }, [buildAudioVariant, setCurrentTranscriptForSegment]);
 
-    const handleSegmentComplete = useCallback((completedIndex) => {
+    const handleSegmentComplete = useCallback((completedIndex, runId = playbackRunRef.current) => {
+        if (runId !== playbackRunRef.current) return;
         if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
 
         const next = completedIndex + 1;
@@ -277,7 +367,8 @@ export const useNarrador = ({
             setCurrentSegmentIndex(next);
             saveProgress(next);
 
-            playCachedSegment(next).then(async (played) => {
+            playCachedSegment(next, runId).then(async (played) => {
+                if (runId !== playbackRunRef.current) return;
                 if (!played && motorRef.current === 'gemini') {
                     try {
                         const segment = segmentsRef.current[next];
@@ -288,8 +379,9 @@ export const useNarrador = ({
                                 const chapterId = activeChapterRef.current?.id;
                                 if (bookId && chapterId) {
                                     try {
-                                        await saveCachedSegment(bookId, chapterId, next, segment.hash, pcmData);
-                                    } catch (err) { /* ignore */ }
+                                    await saveCachedSegment(bookId, chapterId, next, segment.hash, pcmData, buildAudioVariant());
+                                    markSegmentCached(next);
+                                    } catch { /* ignore */ }
                                 }
                             });
                         }
@@ -309,8 +401,9 @@ export const useNarrador = ({
                                         const chapterId = activeChapterRef.current?.id;
                                         if (bookId && chapterId) {
                                             try {
-                                                await saveCachedSegment(bookId, chapterId, next, segment.hash, pcmData);
-                                            } catch (err2) { /* ignore */ }
+                                            await saveCachedSegment(bookId, chapterId, next, segment.hash, pcmData, buildAudioVariant());
+                                            markSegmentCached(next);
+                                            } catch { /* ignore */ }
                                         }
                                     });
                                 }
@@ -333,13 +426,13 @@ export const useNarrador = ({
                 const chap = nextChapterRef.current;
                 const autoContinue = profileRef.current?.aiConfig?.narradorAutoContinue;
                 if (autoContinue && onSelectChapterRef.current) {
+                    autoContinueRef.current = true;
                     onSelectChapterRef.current(chap);
                     setTimeout(() => {
                         segmentsRef.current = [];
                         setSegments([]);
                         currentIndexRef.current = 0;
                         setCurrentSegmentIndex(0);
-                        setStatus('connecting');
                     }, 300);
                 } else {
                     if (toastRef.current) toastRef.current.info(`Capítulo narrado. Siguiente: "${chap?.title || ''}"`);
@@ -348,7 +441,7 @@ export const useNarrador = ({
                 if (toastRef.current) toastRef.current.success('¡Capítulo narrado completamente! 🎉');
             }
         }
-    }, [buildGeminiContext, clearProgress, clearTranscript, playCachedSegment, saveProgress]);
+    }, [buildAudioVariant, buildGeminiContext, clearProgress, clearTranscript, markSegmentCached, playCachedSegment, saveProgress]);
 
     useEffect(() => {
         handleSegmentCompleteRef.current = handleSegmentComplete;
@@ -367,18 +460,39 @@ export const useNarrador = ({
             handleSegmentComplete(currentIndexRef.current);
         };
 
+        const handleNarratorError = (error) => {
+            if (statusRef.current === 'stopped' || statusRef.current === 'idle') return;
+            statusRef.current = 'stopped';
+            setStatus('stopped');
+            clearTranscript();
+            toastRef.current?.error(error?.message || 'La narración perdió la conexión.');
+        };
+
+        const handleNarratorDisconnected = () => {
+            if (statusRef.current !== 'speaking' && statusRef.current !== 'connecting' && statusRef.current !== 'paused') return;
+            statusRef.current = 'stopped';
+            setStatus('stopped');
+            clearTranscript();
+            toastRef.current?.error('La conexión de narración se cerró. Puedes reintentar el segmento.');
+        };
+
         GeminiLiveService.on('segmentStarted', handleSegmentStarted);
         GeminiLiveService.on('segmentEnded', handleSegmentEnded);
+        GeminiLiveService.on('error', handleNarratorError);
+        GeminiLiveService.on('disconnected', handleNarratorDisconnected);
         return () => {
             GeminiLiveService.on('segmentStarted', null);
             GeminiLiveService.on('segmentEnded', null);
+            GeminiLiveService.on('error', null);
+            GeminiLiveService.on('disconnected', null);
         };
-    }, [handleSegmentComplete, setCurrentTranscriptForSegment]);
+    }, [clearTranscript, handleSegmentComplete, setCurrentTranscriptForSegment]);
 
-    const startNarration = useCallback(async (startIndex = 0, forceMotor = null) => {
+    const startNarration = useCallback(async (startIndex = 0, forceMotor = null, forceRegenerate = false) => {
         if (!activeChapterRef.current) return;
         if (statusRef.current === 'speaking' || statusRef.current === 'connecting') return;
 
+        const runId = ++playbackRunRef.current;
         const cfg = profileRef.current?.aiConfig || {};
         const useGemini = !!cfg.geminiApiKey;
         const motor = forceMotor || (useGemini ? 'gemini' : 'web-speech');
@@ -408,8 +522,17 @@ export const useNarrador = ({
 
         try {
             if (motor === 'gemini') {
-                const played = await playCachedSegment(startIndex);
+                if (forceRegenerate) {
+                    const bookId = activeBookRef.current?.id;
+                    const chapterId = activeChapterRef.current?.id;
+                    if (bookId && chapterId) {
+                        await invalidateCachedSegment(bookId, chapterId, startIndex);
+                        markSegmentCached(startIndex, false);
+                    }
+                }
+                const played = await playCachedSegment(startIndex, runId);
                 if (played) {
+                    if (runId !== playbackRunRef.current) return;
                     setStatus('speaking');
                     saveProgress(startIndex);
                     return;
@@ -421,6 +544,7 @@ export const useNarrador = ({
                     voice: ctx.voice,
                     systemInstruction: ctx.systemInstruction
                 });
+                if (runId !== playbackRunRef.current) return;
                 GeminiLiveService.setPlaybackRate(speedRef.current);
 
                 const segment = segmentsRef.current[startIndex];
@@ -432,8 +556,9 @@ export const useNarrador = ({
                     const chapterId = activeChapterRef.current?.id;
                     if (bookId && chapterId) {
                         try {
-                            await saveCachedSegment(bookId, chapterId, startIndex, segment.hash, pcmData);
-                        } catch (err) { /* ignore */ }
+                            await saveCachedSegment(bookId, chapterId, startIndex, segment.hash, pcmData, buildAudioVariant());
+                            markSegmentCached(startIndex);
+                        } catch { /* ignore */ }
                     }
                 });
 
@@ -462,7 +587,17 @@ export const useNarrador = ({
             clearTranscript();
             if (toastRef.current) toastRef.current.error(err.message || 'No se pudo iniciar la narración.');
         }
-    }, [buildGeminiContext, clearTranscript, handleSegmentComplete, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
+    }, [buildAudioVariant, buildGeminiContext, clearTranscript, handleSegmentComplete, markSegmentCached, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
+
+    const regenerateSegment = useCallback((segmentIndex = currentIndexRef.current) => {
+        const clamped = Math.max(0, Math.min(segmentsRef.current.length - 1, segmentIndex));
+        playbackRunRef.current += 1;
+        statusRef.current = 'idle';
+        stopAllAudio();
+        setStatus('idle');
+        clearTranscript();
+        startNarration(clamped, null, true);
+    }, [clearTranscript, startNarration, stopAllAudio]);
 
     const pauseNarration = useCallback(() => {
         if (statusRef.current === 'speaking') {
@@ -509,6 +644,8 @@ export const useNarrador = ({
     }, [handleSegmentComplete, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
 
     const stopNarration = useCallback(() => {
+        playbackRunRef.current += 1;
+        statusRef.current = 'stopped';
         stopAllAudio();
         clearTranscript();
         setStatus('stopped');
@@ -518,6 +655,7 @@ export const useNarrador = ({
     const skipToSegment = useCallback((index) => {
         const clamped = Math.max(0, Math.min(segmentsRef.current.length - 1, index));
         stopAllAudio();
+        playbackRunRef.current += 1;
 
         statusRef.current = 'idle';
         setStatus('idle');
@@ -575,7 +713,11 @@ export const useNarrador = ({
         if (prepared.length === 0) return;
 
         checkSavedProgress();
-    }, [activeChapter?.id]);
+        if (autoContinueRef.current) {
+            autoContinueRef.current = false;
+            setTimeout(() => startNarration(0), 0);
+        }
+    }, [activeChapter?.id, checkSavedProgress, clearTranscript, prepareChapterSegments, startNarration, stopAllAudio]);
 
     useEffect(() => {
         if (!isFocusMode && statusRef.current !== 'idle' && statusRef.current !== 'stopped') {
@@ -588,7 +730,7 @@ export const useNarrador = ({
         try {
             const stats = await getNarradorCacheSize();
             setCacheStats(stats);
-        } catch (err) {
+        } catch {
             setCacheStats(null);
         }
     }, []);
@@ -627,6 +769,9 @@ export const useNarrador = ({
         cacheStats,
         isNarratorMode,
         currentTranscript,
+        segmentProgress,
+        cachedSegmentIndexes,
+        refreshSegmentCacheStatus,
 
         setSpeed,
         setIsPanelOpen,
@@ -639,6 +784,7 @@ export const useNarrador = ({
         resumeNarration,
         stopNarration,
         skipToSegment,
+        regenerateSegment,
         checkSavedProgress,
         refreshCacheStats,
         prepareChapterSegments,

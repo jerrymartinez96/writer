@@ -144,16 +144,18 @@ export const longestCommonSubstring = (a, b) => {
  * Tolerante a diferencias menores de espacios/formato.
  */
 export const applyPatch = (chapterHtml, original, replacement) => {
-    if (!original) {
-        return { success: false, html: chapterHtml, method: 'none' };
-    }
-
     if (!chapterHtml || chapterHtml.trim() === '' || chapterHtml === '<p></p>') {
         return {
             success: true,
-            html: replacement,
+            html: replacement || '<p></p>',
             method: 'empty_document_fallback',
         };
+    }
+
+    // Un documento con contenido no puede recibir un parche sin fragmento
+    // original: en ese caso la búsqueda debe seguir fallando normalmente.
+    if (!original) {
+        return { success: false, html: chapterHtml, method: 'none' };
     }
 
     // 1. Método: Plaintext Normalized Match

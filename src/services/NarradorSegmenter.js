@@ -31,10 +31,25 @@ export const cleanTextForNarration = (htmlOrText) => {
     text = text.replace(/@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+?)<\/span>/gi, '$1');
     text = text.replace(/<span[^>]*>@?([^<]+?)<\/span>/gi, '$1');
 
-    // Strippear etiquetas HTML restantes
+    // Extraer el texto respetando los límites de los bloques de Tiptap.
+    // textContent por sí solo concatena `<p>uno</p><p>dos</p>` sin separador.
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = text;
-    text = tempDiv.textContent || '';
+    const blockTags = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE']);
+    const parts = [];
+    const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            parts.push(node.nodeValue || '');
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const isBlock = blockTags.has(node.tagName);
+        if (isBlock && parts.length > 0 && !parts[parts.length - 1].endsWith('\n')) parts.push('\n\n');
+        node.childNodes.forEach(visit);
+        if (isBlock) parts.push('\n\n');
+    };
+    tempDiv.childNodes.forEach(visit);
+    text = parts.join('');
 
     // Normalizar espacios
     text = text

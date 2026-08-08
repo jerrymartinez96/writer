@@ -108,6 +108,11 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             return;
         }
 
+        if (GeminiLiveService.connected || GeminiLiveService.isAudioActuallyActive()) {
+            toast.warning('Detén la narración actual antes de probar otra voz.');
+            return;
+        }
+
         setPreviewVoiceId(voiceId);
         setIsPreviewing(true);
 
@@ -145,7 +150,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             } else {
                 toast.error('No se pudo limpiar la caché.');
             }
-        } catch (err) {
+        } catch {
             toast.error('Error al limpiar la caché.');
         } finally {
             setIsClearingCache(false);

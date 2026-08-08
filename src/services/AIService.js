@@ -62,6 +62,20 @@ export const DEEPSEEK_SCHEMAS = [
     {
         type: "function",
         function: {
+            name: "leer_documento",
+            description: "Obtiene el contenido completo y actual de un documento del libro (capítulo, sección del Master Doc, personaje o elemento del mundo). ÚSALA cuando necesites ver el texto exacto de un documento antes de modificarlo, citarlo, o cuando el contexto compartido esté incompleto o comprimido. El documento se identifica por su título exacto (ej. 'Información General', 'Personajes', 'Capítulo 1') o por su ID.",
+            parameters: {
+                type: "object",
+                properties: {
+                    documento_id: { type: "string", description: "El título exacto o ID del documento a leer (ej. 'Información General', 'system_core', 'Personajes', 'Capítulo 1')." }
+                },
+                required: ["documento_id"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
             name: "crear_capitulo",
             description: "Crea un nuevo capítulo en el manuscrito con el título y contenido especificados.",
             parameters: {
@@ -312,6 +326,7 @@ export const AIService = {
                 temperature: temperature,
                 max_tokens: options.max_tokens || 8192,
             };
+            console.info('[AIService] Request no-stream:', { model, messageCount: messagesList.length, enableTools: !!options.enableTools });
 
             // Enable schemas for tool calling if requested
             if (options.enableTools || (typeof model === 'string' && model.startsWith('deepseek') && options.enableTools !== false)) {
@@ -351,6 +366,7 @@ export const AIService = {
             }
 
             const data = await response.json();
+            console.info('[AIService] Response no-stream:', { model, status: response.status, hasChoices: !!data.choices?.length });
             if (data.choices && data.choices[0] && data.choices[0].message) {
                 const msg = data.choices[0].message;
                 if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -398,11 +414,18 @@ export const AIService = {
             temperature: temperature,
             max_tokens: 32768
         };
+        console.info('[AIService] Request stream:', {
+            model: modelId,
+            messageCount: messages.length,
+            enableTools: !!settings?.enableTools,
+            lastRole: messages[messages.length - 1]?.role,
+            lastMessage: String(messages[messages.length - 1]?.content || '').slice(0, 160),
+        });
 
         // Inject schemas for DeepSeek tool calling if requested
         if (settings?.enableTools) {
             body.tools = DEEPSEEK_SCHEMAS;
-            body.tool_choice = "auto";
+            body.tool_choice = settings.toolChoice || "auto";
         }
 
         // Enable JSON mode if requested (only if tools are not being called)
@@ -435,6 +458,8 @@ export const AIService = {
             throw new Error(errorData?.error?.message || `Error DeepSeek (${response.status})`);
         }
 
+        console.info('[AIService] Stream conectado:', { model: modelId, status: response.status });
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -454,31 +479,41 @@ export const AIService = {
                     if (dataStr === '[DONE]' || !dataStr) continue;
                     try {
                         const data = JSON.parse(dataStr);
+                        console.debug('[AIService] SSE:', {
+                            finishReason: data.choices?.[0]?.finish_reason,
+                            hasContent: !!data.choices?.[0]?.delta?.content,
+                            toolCalls: data.choices?.[0]?.delta?.tool_calls?.length || 0,
+                        });
                         const delta = data.choices?.[0]?.delta;
                         const text = delta?.content || '';
                         if (text) onChunk(text);
 
                         // Capture tool calls
                         if (delta?.tool_calls && Array.isArray(delta.tool_calls)) {
+                            console.debug('[AIService] Tool call fragment recibido');
                             delta.tool_calls.forEach(tc => {
                                 const idx = tc.index ?? 0;
                                 if (!activeToolCalls[idx]) {
                                     activeToolCalls[idx] = {
                                         id: tc.id || '',
                                         name: tc.function?.name || '',
-                                        arguments: tc.function?.arguments || ''
+                                        arguments: tc.function?.arguments || '',
+                                        reasoningContent: delta.reasoning_content || ''
                                     };
                                 } else {
                                     if (tc.id) activeToolCalls[idx].id = tc.id;
                                     if (tc.function?.name) activeToolCalls[idx].name = tc.function.name;
                                     if (tc.function?.arguments) activeToolCalls[idx].arguments += tc.function.arguments;
+                                    if (delta.reasoning_content) activeToolCalls[idx].reasoningContent = (activeToolCalls[idx].reasoningContent || '') + delta.reasoning_content;
                                 }
 
                                 if (settings?.onToolCall && activeToolCalls[idx].name) {
                                     settings.onToolCall(
                                         activeToolCalls[idx].name,
                                         activeToolCalls[idx].arguments,
-                                        false
+                                        false,
+                                        activeToolCalls[idx].id,
+                                        activeToolCalls[idx].reasoningContent || ''
                                     );
                                 }
                             });
@@ -494,7 +529,7 @@ export const AIService = {
                             });
                         }
                     } catch (e) {
-                        console.warn("DeepSeek SSE parse error:", e);
+                        console.warn("[AIService] DeepSeek SSE parse error:", { error: e, line });
                     }
                 }
             }
@@ -502,12 +537,18 @@ export const AIService = {
 
         // Trigger completed callbacks for tool calls if any
         if (activeToolCalls.length > 0 && settings?.onToolCall) {
+            console.info('[AIService] Tool calls completos:', activeToolCalls.map(tc => ({ name: tc.name, id: tc.id })));
             activeToolCalls.forEach(tc => {
                 if (tc && tc.name) {
-                    settings.onToolCall(tc.name, tc.arguments, true);
+                    settings.onToolCall(tc.name, tc.arguments, true, tc.id, tc.reasoningContent || '');
                 }
             });
         }
+
+        console.info('[AIService] Stream finalizado:', {
+            textLength: fullResponseText.length,
+            toolCallCount: activeToolCalls.length,
+        });
 
 
     }

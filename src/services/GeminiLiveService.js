@@ -60,6 +60,8 @@ class GeminiLiveService {
         this.pendingTexts = [];
         this._cooldownUntil = 0;
         this.quotaExhausted = false;
+        this._connectTimer = null;
+        this._connectReject = null;
     }
 
     async connect(apiKey, opts = {}) {
@@ -80,25 +82,55 @@ class GeminiLiveService {
         this._ensureAudioContext();
 
         await new Promise((resolve, reject) => {
+            const connectTimeout = setTimeout(() => {
+                this._connectTimer = null;
+                this._connectReject = null;
+                try { this.ws?.close(); } catch { /* ignore */ }
+                reject(new Error('Tiempo de espera agotado al conectar con Gemini.'));
+            }, opts.timeoutMs || 15000);
+            this._connectTimer = connectTimeout;
+            this._connectReject = reject;
             try {
                 this.ws = new WebSocket(url);
-            } catch (err) { reject(err); return; }
+            } catch (err) {
+                clearTimeout(connectTimeout);
+                this._connectTimer = null;
+                this._connectReject = null;
+                reject(err);
+                return;
+            }
+            const socket = this.ws;
 
             this.ws.onopen = () => {
+                if (this.ws !== socket) return;
+                clearTimeout(connectTimeout);
+                this._connectTimer = null;
+                this._connectReject = null;
                 this.connected = true;
                 this._sendSetup(model, voice, systemInstruction);
                 resolve();
             };
 
             this.ws.onerror = () => {
+                if (this.ws !== socket) return;
                 this.connected = false;
                 this._onError?.(new Error('Error de conexión WebSocket.'));
+                clearTimeout(connectTimeout);
+                this._connectTimer = null;
+                this._connectReject = null;
                 reject(new Error('Error de conexión WebSocket.'));
             };
 
             this.ws.onclose = (ev) => {
+                if (this.ws !== socket) return;
                 this.connected = false;
                 this._cleanupPlayback();
+
+                clearTimeout(connectTimeout);
+                this._connectTimer = null;
+                const pendingReject = this._connectReject;
+                this._connectReject = null;
+                pendingReject?.(new Error('La conexión con Gemini se cerró.'));
 
                 if (ev?.code === 1011 || (ev?.reason?.includes('quota'))) {
                     this.quotaExhausted = true;
@@ -199,6 +231,7 @@ class GeminiLiveService {
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             const pcmBuffer = bytes.buffer;
+            if (pcmBuffer.byteLength < 2 || pcmBuffer.byteLength % 2 !== 0) return;
 
             if (!this._segmentPcmChunks) this._segmentPcmChunks = [];
             this._segmentPcmChunks.push(new Uint8Array(pcmBuffer.slice(0)));
@@ -438,6 +471,12 @@ class GeminiLiveService {
         this._setupSent = false;
         this.isTurnInProgress = false;
         this.pendingTexts = [];
+
+        if (this._connectTimer) clearTimeout(this._connectTimer);
+        this._connectTimer = null;
+        const pendingReject = this._connectReject;
+        this._connectReject = null;
+        pendingReject?.(new Error('Conexión cancelada.'));
 
         if (this.ws) {
             try { this.ws.close(); } catch { /* ignore */ }

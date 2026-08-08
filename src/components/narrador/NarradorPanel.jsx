@@ -2,12 +2,99 @@
  * NarradorPanel — Interfaz de control flotante para la narración de capítulos.
  * Aparece en la esquina inferior derecha durante el modo lectura.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Play, Pause, Square, SkipBack, SkipForward,
-    Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2
+    Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2, RefreshCw, CheckCircle2, CircleDashed, Loader2
 } from 'lucide-react';
 import NarradorSettingsModal from './NarradorSettingsModal';
+
+const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, skipToSegment, regenerateSegment }) => (
+    <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+        {segments.map((segment, index) => (
+            <div key={`${segment.index}-${segment.hash}`} className={`flex items-center gap-1 rounded-lg ${index === currentSegmentIndex ? 'bg-indigo-500/10' : ''}`}>
+                <button
+                    onClick={() => skipToSegment(index)}
+                    className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-[9px] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
+                    title={segment.text}
+                >
+                    <span className="mr-1 font-black text-[var(--accent-main)]">{index + 1}.</span>
+                    {segment.text}
+                </button>
+                <span
+                    className={`flex shrink-0 items-center gap-1 text-[8px] font-bold uppercase tracking-wide ${cachedSegmentIndexes.has(index) ? 'text-emerald-500' : status === 'connecting' && index === currentSegmentIndex ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}
+                    title={cachedSegmentIndexes.has(index) ? 'Audio disponible en caché' : status === 'connecting' && index === currentSegmentIndex ? 'Generando audio...' : 'Audio aún no generado'}
+                >
+                    {cachedSegmentIndexes.has(index) ? <CheckCircle2 size={12} /> : status === 'connecting' && index === currentSegmentIndex ? <Loader2 size={12} className="animate-spin" /> : <CircleDashed size={12} />}
+                    <span className="hidden sm:inline">{cachedSegmentIndexes.has(index) ? 'Caché' : status === 'connecting' && index === currentSegmentIndex ? 'Generando' : 'Pendiente'}</span>
+                </span>
+                <button
+                    onClick={() => regenerateSegment(index)}
+                    disabled={status === 'connecting'}
+                    className="p-1.5 text-[var(--text-muted)] hover:text-purple-500 disabled:opacity-30 cursor-pointer"
+                    title="Regenerar este fragmento"
+                >
+                    <RefreshCw size={12} />
+                </button>
+            </div>
+        ))}
+    </div>
+);
+
+const KaraokeTranscript = ({ text, progress, isPlaying }) => {
+    const activeWordRef = useRef(null);
+    const tokens = String(text || '').split(/(\s+)/);
+    const wordTokens = tokens.filter(token => !/^\s+$/.test(token) && token.length > 0);
+    const activeWordIndex = wordTokens.length
+        ? Math.min(wordTokens.length - 1, Math.floor(Math.max(0, Math.min(0.999, progress)) * wordTokens.length))
+        : 0;
+    const metadata = tokens.reduce((result, token) => {
+        if (/^\s+$/.test(token) || !token) {
+            result.items.push({ token, wordIndex: -1, sentenceIndex: result.sentenceIndex });
+            return result;
+        }
+        const current = { token, wordIndex: result.wordIndex + 1, sentenceIndex: result.sentenceIndex };
+        result.items.push(current);
+        result.wordIndex += 1;
+        if (/[.!?…][”’"»']?$/.test(token)) result.sentenceIndex += 1;
+        return result;
+    }, { items: [], wordIndex: -1, sentenceIndex: 0 }).items;
+    const activeSentence = metadata.find(item => item.wordIndex === activeWordIndex)?.sentenceIndex ?? 0;
+
+    useEffect(() => {
+        activeWordRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }, [activeWordIndex]);
+
+    if (!text) {
+        return <p className="text-[var(--text-muted)] italic text-lg">La transcripción aparecerá aquí al iniciar la narración.</p>;
+    }
+
+    return (
+        <p className="text-xl md:text-3xl leading-[1.9] md:leading-[2.05] tracking-[-0.015em] text-center">
+            {metadata.map((item, index) => {
+                if (item.wordIndex < 0) return <span key={index}>{item.token}</span>;
+                const isActive = item.wordIndex === activeWordIndex && isPlaying;
+                const isPast = item.wordIndex < activeWordIndex;
+                const isCurrentSentence = item.sentenceIndex === activeSentence;
+                return (
+                    <span
+                        key={index}
+                        ref={isActive ? activeWordRef : null}
+                        className="inline rounded-lg px-1 transition-all duration-300"
+                        style={{
+                            color: isActive ? 'var(--text-main)' : 'var(--text-main)',
+                            opacity: isActive ? 1 : isPast ? 0.5 : isCurrentSentence ? 0.86 : 0.34,
+                            background: isActive ? 'color-mix(in srgb, var(--accent-main) 24%, transparent)' : 'transparent',
+                            boxShadow: isActive ? '0 0 24px color-mix(in srgb, var(--accent-main) 25%, transparent)' : 'none'
+                        }}
+                    >
+                        {item.token}
+                    </span>
+                );
+            })}
+        </p>
+    );
+};
 
 const NarradorPanel = ({
     narrador,
@@ -19,6 +106,7 @@ const NarradorPanel = ({
 
     const {
         status,
+        segments,
         currentSegmentIndex,
         totalSegments,
         motorUsado,
@@ -29,11 +117,14 @@ const NarradorPanel = ({
         resumeNarration,
         stopNarration,
         skipToSegment,
+        regenerateSegment,
         refreshCacheStats,
         hasGeminiKey,
         isNarratorMode,
         toggleNarratorMode,
-        currentTranscript
+        currentTranscript,
+        segmentProgress,
+        cachedSegmentIndexes
     } = narrador;
 
     const isPlaying = status === 'speaking' || status === 'connecting';
@@ -108,24 +199,14 @@ const NarradorPanel = ({
                     </div>
 
                     {/* Cuerpo: transcripción del texto, alineada verticalmente al centro */}
-                    <div className="flex-1 flex items-center overflow-y-auto px-4 sm:px-8 md:px-12 py-6 scrollbar-hide">
-                        <div className="mx-auto max-w-4xl">
-                            {currentTranscript ? (
-                                currentTranscript
-                                    // Normalizar puntos pegados a mayúscula (ej.: "archivo.Claire")
-                                    .replace(/([.!?…])([A-ZÁÉÍÓÚÜÑ])/g, '$1 $2')
-                                    .split(/(?<=[.!?…])\s+/)
-                                    .filter(Boolean)
-                                    .map((sentence, idx) => (
-                                        <p key={idx} className="text-xl md:text-2xl leading-relaxed md:leading-loose mb-4 last:mb-0">
-                                            {sentence}
-                                        </p>
-                                    ))
-                            ) : (
-                                <p className="text-[var(--text-muted)] italic text-lg">
-                                    La transcripción aparecerá aquí al iniciar la narración.
-                                </p>
-                            )}
+                    <div className="relative flex-1 flex items-center overflow-y-auto px-4 sm:px-8 md:px-12 py-8 scrollbar-hide bg-[radial-gradient(circle_at_50%_45%,rgba(99,102,241,0.12),transparent_48%)]">
+                        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-40 -translate-y-1/2 bg-gradient-to-b from-transparent via-indigo-500/[0.035] to-transparent" />
+                        <div className="relative mx-auto w-full max-w-5xl">
+                            <KaraokeTranscript
+                                text={currentTranscript}
+                                progress={segmentProgress}
+                                isPlaying={status === 'speaking'}
+                            />
                         </div>
                     </div>
 
@@ -135,17 +216,26 @@ const NarradorPanel = ({
                             <div className="mb-3">
                                 <div className="flex items-center justify-between mb-1.5">
                                     <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
-                                        {getStatusLabel()}
+                                        {getStatusLabel()} · sincronización estimada
                                     </span>
                                     <span className="text-[9px] font-black text-[var(--text-muted)] tabular-nums">
-                                        Segmento {currentSegmentIndex + 1} de {totalSegments}
+                                        {Math.round(segmentProgress * 100)}% · segmento {currentSegmentIndex + 1} de {totalSegments}
                                     </span>
                                 </div>
                                 <div className="h-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-full overflow-hidden">
                                     <div
                                         className={`h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500 ${status === 'connecting' ? 'tts-generating' : ''}`}
-                                        style={{ width: `${progressPct}%` }}
+                                        style={{ width: `${Math.max(3, segmentProgress * 100)}%` }}
                                     ></div>
+                                </div>
+                                <div className="mt-2 flex items-end justify-center gap-1 h-5 opacity-70" aria-hidden="true">
+                                    {[0.35, 0.65, 0.95, 0.55, 0.8, 0.45, 0.75, 0.5, 0.9, 0.6, 0.4, 0.7].map((height, index) => (
+                                        <span
+                                            key={index}
+                                            className={`w-1 rounded-full bg-indigo-400 transition-transform duration-300 ${status === 'speaking' ? 'animate-pulse' : ''}`}
+                                            style={{ height: `${height * 100}%`, transform: status === 'speaking' ? `scaleY(${0.75 + ((index + Math.floor(segmentProgress * 10)) % 4) / 4})` : 'scaleY(.55)' }}
+                                        />
+                                    ))}
                                 </div>
                             </div>
 
@@ -202,6 +292,17 @@ const NarradorPanel = ({
                                 >
                                     <SkipForward size={18} />
                                 </button>
+                            </div>
+
+                            <div className="mt-4 border-t border-[var(--border-main)] pt-3">
+                                <SegmentList
+                                    segments={segments}
+                                    currentSegmentIndex={currentSegmentIndex}
+                                    status={status}
+                                    cachedSegmentIndexes={cachedSegmentIndexes}
+                                    skipToSegment={skipToSegment}
+                                    regenerateSegment={regenerateSegment}
+                                />
                             </div>
 
                             <div className="flex items-center justify-center gap-2 mt-3">
@@ -366,6 +467,17 @@ const NarradorPanel = ({
                         >
                             <SkipForward size={16} />
                         </button>
+                    </div>
+
+                    <div className="border-t border-[var(--border-main)] pt-3">
+                        <SegmentList
+                            segments={segments}
+                            currentSegmentIndex={currentSegmentIndex}
+                            status={status}
+                            cachedSegmentIndexes={cachedSegmentIndexes}
+                            skipToSegment={skipToSegment}
+                            regenerateSegment={regenerateSegment}
+                        />
                     </div>
 
                     {/* Modo narrador */}

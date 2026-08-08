@@ -771,6 +771,12 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                         style={!isExpanded && isExpandable ? { maxHeight: '240px', overflow: 'hidden' } : {}}
                         className="relative transition-all duration-300"
                     >
+                        {message.mode === 'cowriter' && (
+                            <div className="mb-1.5 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-purple-500">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                                Coescritor
+                            </div>
+                        )}
                         <MessageContent
                             message={message}
                             content={message.content}

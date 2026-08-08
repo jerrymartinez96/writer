@@ -14,7 +14,9 @@ import {
     parseInconsistenciesFromResponse,
     SYSTEM_WORLD_ITEM_LABELS,
     parseToolCallResponse,
+    QUICK_ACTIONS,
 } from '../IAStudioUtils';
+import { classifyAction } from '../utils/intentClassifier';
 
 import { AIService } from '../../../services/AIService';
 import { useData } from '../../../context/DataContext';
@@ -373,7 +375,8 @@ export const useIAStudioState = () => {
                     temperature: 0.2,
                     signal: abortControllerRef.current.signal,
                     enableTools,
-                    onToolCall: (name, argsText, isComplete) => {
+            onToolCall: (name, argsText, isComplete) => {
+                        console.info('[IAStudio][Chat] Tool call:', { name, isComplete, argsText });
                         if (isComplete) lastToolCall = { name, args: argsText };
                         const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
                         let displayContent = '⚠️ Analizando coherencia de lore...';
@@ -823,6 +826,29 @@ export const useIAStudioState = () => {
 
         const apiKey = getApiKey();
 
+        // ── Clasificación automática de intención (chat general) ──
+        // Si el usuario está en modo "chat" (sin acción manual seleccionada),
+        // se pregunta al modelo QUÉ acción corresponde antes de ejecutar.
+        // Los comandos ("/detectar", "/format", "/mock") ya fueron interceptados arriba.
+        if (effectiveAction === 'chat' && !overrideAction && apiKey) {
+            const modelId = chatModel || defaultModel;
+            const bookContext = activeBook
+                ? `Libro: ${activeBook.title || ''}${activeBook.description ? `\nSinopsis: ${activeBook.description}` : ''}`
+                : '';
+
+            const classifiedId = await classifyAction(
+                userMessage,
+                QUICK_ACTIONS || [],
+                apiKey,
+                modelId,
+                bookContext
+            );
+
+            if (classifiedId && classifiedId !== 'chat') {
+                effectiveAction = classifiedId;
+            }
+        }
+
         if (!apiKey) {
             const errorMsg = `❌ API Key de DeepSeek no configurada. Ve a Ajustes > Mi Cuenta para configurarla.`;
 
@@ -942,6 +968,7 @@ export const useIAStudioState = () => {
             let fullResponse = '';
             let finalUsage = null;
             let lastToolCall = { name: '', args: '' };
+            let lastToolReasoningContent = '';
 
             await AIService.generateStream(aiMessages, {
                 selectedAiModel: modelId,
@@ -952,8 +979,12 @@ export const useIAStudioState = () => {
                 useJsonMode: useJsonMode,
                 signal: abortControllerRef.current.signal,
                 enableTools: enableTools,
-                onToolCall: (name, argsText, isComplete) => {
-                    if (isComplete) lastToolCall = { name, args: argsText };
+                onToolCall: (name, argsText, isComplete, toolCallId, reasoningContent) => {
+                    console.info('[IAStudio][Chat] Tool call:', { name, isComplete, argsText });
+                    if (isComplete) {
+                        lastToolCall = { name, args: argsText };
+                        lastToolReasoningContent = reasoningContent || '';
+                    }
                     
                     const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
                     let streamResponseType = undefined;
@@ -1044,6 +1075,65 @@ export const useIAStudioState = () => {
             }, (usage) => {
                 finalUsage = usage;
             });
+
+            // Si el modelo primero pidió leer un documento, continuar el ciclo
+            // con el contenido real en lugar de finalizar con una respuesta vacía.
+            if (lastToolCall.name === 'leer_documento') {
+                let readArgs = {};
+                try { readArgs = JSON.parse(lastToolCall.args || '{}'); } catch (error) {
+                    console.warn('[IAStudio][Chat] Argumentos inválidos de leer_documento:', error);
+                }
+                const requestedId = readArgs.documento_id || '';
+                const readDoc = [
+                    ...(worldItems || []).filter(item => item.title),
+                    ...(chapters || []).filter(item => item.title),
+                    ...(characters || []).filter(item => item.name).map(item => ({ ...item, title: item.name })),
+                ].find(item => item.id === requestedId || item.title === requestedId);
+
+                if (readDoc) {
+                    console.info('[IAStudio][Chat] Continuando después de leer_documento:', readDoc.title);
+                    const toolId = `chat_read_${Date.now().toString(36)}`;
+                    const continuationMessages = [
+                        ...aiMessages,
+                            {
+                                role: 'assistant',
+                                content: null,
+                                ...(lastToolReasoningContent ? { reasoning_content: lastToolReasoningContent } : {}),
+                                tool_calls: [{
+                                id: toolId,
+                                type: 'function',
+                                function: { name: 'leer_documento', arguments: JSON.stringify(readArgs) },
+                            }],
+                        },
+                        {
+                            role: 'tool',
+                            tool_call_id: toolId,
+                            content: `Contenido actual de "${readDoc.title}":\n${readDoc.content || '<p></p>'}\n\n` +
+                                `Debes ejecutar ahora una modificación. No respondas con explicaciones ni texto conversacional. ` +
+                                `Llama obligatoriamente a aplicar_parche usando documento_id "${readDoc.title}". ` +
+                                `Si el documento está vacío, usa texto_original como cadena vacía y texto_reemplazo como el contenido solicitado por el escritor, en HTML limpio.`,
+                        },
+                    ];
+                    fullResponse = '';
+                    lastToolCall = { name: '', args: '' };
+                    await AIService.generateStream(continuationMessages, {
+                        selectedAiModel: modelId,
+                        deepseekApiKey: apiKey,
+                        // La continuación incluye un tool-call previo. Si se deja
+                        // thinking activo, DeepSeek exige reasoning_content en el
+                        // mensaje assistant; el stream no siempre lo entrega.
+                        reasoningMode: false,
+                        temperature: effectiveAction === 'formatear' ? 0.0 : temperature,
+                        signal: abortControllerRef.current.signal,
+                        enableTools,
+                        toolChoice: { type: 'function', function: { name: 'aplicar_parche' } },
+                        onToolCall: (name, argsText, isComplete) => {
+                            console.info('[IAStudio][Chat] Tool call continuación:', { name, isComplete, argsText });
+                            if (isComplete) lastToolCall = { name, args: argsText };
+                        },
+                    }, (chunk) => { fullResponse += chunk; }, (usage) => { finalUsage = usage; });
+                }
+            }
 
             if ((!fullResponse || fullResponse.trim().length === 0) && !lastToolCall.name) {
                 throw new Error("La IA cerró la conexión sin devolver ningún contenido. Esto puede deberse a límites de cuota, filtros de seguridad del proveedor o inestabilidad en la red.");
@@ -2016,4 +2106,3 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
         deleteSession
     };
 };
-
