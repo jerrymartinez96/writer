@@ -63,6 +63,19 @@ const compactCowriterText = (text = '', maxChars = 480) =>
         .trim()
         .slice(0, maxChars);
 
+const normalizeIntentText = (text = '') => String(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+const isCharacterCreationRequest = (text = '') => {
+    const normalized = normalizeIntentText(text);
+    const explicitChapterRequest = /\b(crea|crear|nuevo|nueva|escribe|escribir)\b[^.!?\n]{0,40}\b(capitulo|escena|documento)\b/.test(normalized);
+    if (explicitChapterRequest) return false;
+    return /\b(personaje|ficha de personaje|protagonista|antagonista|villano|heroina|heroe)\b/.test(normalized)
+        && /\b(crea|crear|agrega|agregar|anade|nuevo|nueva|inventa|disena|escribe|haz)\b/.test(normalized);
+};
+
 /**
  * Limpia una respuesta de DeepSeek de formato técnico y HTML.
  * @param {string} text
@@ -142,8 +155,8 @@ const classifyPatches = (patches) => {
 export const useCoWriter = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, worldItems, characters, profile,
-        openWorldDoc, selectChapter, saveChapterContent, saveWorldDocContent,
-        updateChapter, updateWorldItem, updateCharacter, createChapter, saveDocumentSnapshot,
+        openWorldDoc, openCharacterDoc, selectChapter, saveChapterContent, saveWorldDocContent,
+        updateChapter, updateWorldItem, updateCharacter, createCharacter, createChapter, saveDocumentSnapshot,
     } = useData();
     const {
         activeSession,
@@ -307,6 +320,24 @@ export const useCoWriter = () => {
         const failures = [];
 
         for (const patch of patches) {
+            // ── Creación de ficha individual de personaje ──
+            if (patch.mode === 'new_character') {
+                try {
+                    await createCharacter({
+                        name: patch.title,
+                        role: patch.role || '',
+                        description: ensureHtmlContent(patch.content || ''),
+                        images: [],
+                        parentId: null,
+                        isCategory: false,
+                    });
+                    successCount++;
+                } catch (createErr) {
+                    failures.push(`Error al crear el personaje "${patch.title}": ${createErr?.message || 'desconocido'}`);
+                }
+                continue;
+            }
+
             // ── Bloque de CREACIÓN de nuevo documento (crear_capitulo) ──
             if (patch.mode === 'new' || (patch.responseType === 'content' && !patch.original)) {
                 try {
@@ -367,7 +398,7 @@ export const useCoWriter = () => {
         }
 
         return { successCount, failedCount: failures.length, failures };
-    }, [chapters, worldItems, characters, activeWorldDoc, activeChapter, saveWorldDocContent, saveChapterContent, updateWorldItem, updateCharacter, createChapter, updateChapter, saveDocumentSnapshot]);
+    }, [chapters, worldItems, characters, activeWorldDoc, activeChapter, saveWorldDocContent, saveChapterContent, updateWorldItem, updateCharacter, createCharacter, createChapter, updateChapter, saveDocumentSnapshot]);
 
     const persistSharedMessage = useCallback((message) => {
         if (!activeSession?.id) return;
@@ -441,17 +472,15 @@ export const useCoWriter = () => {
         if (resolved?.docType === 'worldItem') {
             openWorldDoc(resolved.docId);
         } else if (resolved?.docType === 'character') {
-            // Abrir la vista de personajes del Master Doc
-            if (resolved.docId === 'system_personajes') {
-                openWorldDoc('system_personajes');
-            } else {
-                openWorldDoc(resolved.docId);
-            }
+            openCharacterDoc(resolved.docId);
         } else if (resolved?.docType === 'chapter') {
             const chap = chapters.find(c => c.id === resolved.docId);
             if (chap) selectChapter(chap);
         } else {
-            if (activeWorldDoc) openWorldDoc(activeWorldDoc.id);
+            if (activeWorldDoc) {
+                if (activeWorldDoc.type === 'character') openCharacterDoc(activeWorldDoc.id);
+                else openWorldDoc(activeWorldDoc.id);
+            }
             else if (activeChapter) { const chap = chapters.find(c => c.id === activeChapter.id); if (chap) selectChapter(chap); }
         }
 
@@ -459,7 +488,7 @@ export const useCoWriter = () => {
         setPendingChanges(null);
         setResultText(message);
         narrateOutput(message, null);
-    }, [pendingChanges, chapters, worldItems, characters, openWorldDoc, selectChapter, activeWorldDoc, activeChapter, narrateOutput]);
+    }, [pendingChanges, chapters, worldItems, characters, openWorldDoc, openCharacterDoc, selectChapter, activeWorldDoc, activeChapter, narrateOutput]);
 
     /**
      * Ejecuta el pipeline completo a partir de un texto del usuario.
@@ -468,6 +497,7 @@ export const useCoWriter = () => {
     const executeText = useCallback(async (userText) => {
         const trimmed = (userText || '').trim();
         if (!trimmed) return;
+        const forceCharacterCreation = isCharacterCreationRequest(trimmed);
 
         const traceId = `cw_${Date.now().toString(36)}`;
         console.group(`[CoWriter ${traceId}] Ejecutando instrucción`);
@@ -585,6 +615,8 @@ Eres un agente ejecutivo que administra los documentos del escritor. Para cumpli
 4. NUNCA inventes el texto_original: debe existir literalmente en el documento. Si no estás seguro del contenido exacto, llama primero a leer_documento.
 
 5. Respeta exactamente la solicitud del escritor. No inventes títulos, sinopsis, nombres, escenas ni información adicional. Modifica únicamente el dato o sección solicitada.
+
+6. Si el escritor pide crear o agregar un personaje, usa exclusivamente la herramienta \`crear_personaje\`. Cada personaje debe convertirse en una ficha individual con su nombre exacto; nunca escribas personajes en \`Personajes\` ni en \`system_personajes\`, porque esa sección ya no es un documento editable.
 
 Los documentos disponibles de esta obra están listados en la sección "Documentos y secciones disponibles" del prompt. Los títulos son los nombres EXACTOS que debes usar en documento_id.`;
 
@@ -704,8 +736,24 @@ Los documentos disponibles de esta obra están listados en la sección "Document
                         proposedPatches.push(...blocks);
                         console.info('Parches propuestos:', blocks);
                         assistantFinal = textAccum || '';
-                    } else if (tc.name === 'crear_capitulo') {
-                        const blocks = parseToolCallResponse(tc.name, tc.argsText, null, chapters, worldItems, characters);
+                    } else if (tc.name === 'crear_capitulo' || tc.name === 'crear_personaje') {
+                        // Algunos modelos eligen la herramienta genérica de capítulo
+                        // aunque la solicitud diga personaje. En ese caso, el destino
+                        // se determina por la intención del escritor, no por el tool call.
+                        let toolName = tc.name;
+                        let toolArgs = tc.argsText;
+                        if (forceCharacterCreation && tc.name === 'crear_capitulo') {
+                            try {
+                                const chapterArgs = JSON.parse(tc.argsText || '{}');
+                                toolName = 'crear_personaje';
+                                toolArgs = JSON.stringify({
+                                    nombre: chapterArgs.titulo,
+                                    descripcion_html: chapterArgs.contenido_html,
+                                    rol: chapterArgs.rol || '',
+                                });
+                            } catch { /* el parser tolerante usará los datos disponibles */ }
+                        }
+                        const blocks = parseToolCallResponse(toolName, toolArgs, null, chapters, worldItems, characters);
                         proposedPatches.push(...blocks);
                         assistantFinal = textAccum || '';
                     } else {

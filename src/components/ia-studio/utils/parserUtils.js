@@ -840,6 +840,10 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
             if (name === 'crear_capitulo') {
                 args.titulo = extractProp('titulo');
                 args.contenido_html = extractProp('contenido_html');
+            } else if (name === 'crear_personaje') {
+                args.nombre = extractProp('nombre');
+                args.descripcion_html = extractProp('descripcion_html');
+                args.rol = extractProp('rol');
             } else if (name === 'aplicar_parche') {
                 args.documento_id = extractProp('documento_id');
                 args.texto_original = extractProp('texto_original');
@@ -850,6 +854,18 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
                 args.problema = extractProp('problema');
             }
         } catch (innerErr) {}
+    }
+
+    if (name === 'crear_personaje') {
+        return [{
+            docType: 'character',
+            docId: null,
+            mode: 'new_character',
+            title: args.nombre || 'Nuevo personaje',
+            content: args.descripcion_html || '',
+            role: args.rol || '',
+            responseType: 'character'
+        }];
     }
 
     if (name === 'crear_capitulo') {

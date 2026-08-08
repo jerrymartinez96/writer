@@ -50,6 +50,7 @@ export const inferWhenClause = (actionId) => {
         escena: '| ÚSALA si el usuario pide planificar o escribir una escena específica.',
         formatear: '| ÚSALA si el usuario pide dar formato, espaciado o legibilidad a un documento.',
         crear_capitulo: '| ÚSALA si el usuario pide crear un capítulo o documento NUEVO.',
+        crear_personaje: '| ÚSALA SIEMPRE si el usuario pide crear, agregar, inventar o diseñar un personaje o una ficha de personaje. Nunca uses crear_capitulo para personajes.',
         leer_documento: '| ÚSALA si el usuario pide leer, mostrar o consultar el contenido de un documento.',
         chat: '| ÚSALA para dudas, conversación, preguntas rápidas o cuando nada de lo anterior encaje claramente.',
     };
@@ -111,6 +112,7 @@ const fallbackByKeywords = (userText, actions = []) => {
         escena: ['escena', 'planifica la escena'],
         formatear: ['formatea', 'formato', 'espaciado'],
         crear_capitulo: ['crea un capitulo', 'crea un capitulo', 'nuevo capitulo'],
+        crear_personaje: ['crea un personaje', 'crear un personaje', 'nuevo personaje', 'agrega un personaje', 'anade un personaje', 'crea una ficha'],
         leer_documento: ['lee el documento', 'lee la informacion', 'muestrame el documento', 'que dice', 'qué dice'],
     };
 
@@ -137,6 +139,15 @@ const fallbackByKeywords = (userText, actions = []) => {
  */
 export const classifyAction = async (userText, actions = [], apiKey, modelId = 'deepseek-v4-flash', bookContext = '') => {
     if (!apiKey || !userText) return null;
+
+    const normalizedUserText = String(userText).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const explicitChapterRequest = /\b(crea|crear|nuevo|nueva|escribe|escribir)\b[^.!?\n]{0,40}\b(capitulo|escena|documento)\b/.test(normalizedUserText);
+    const asksForCharacter = !explicitChapterRequest
+        && /\b(personaje|ficha de personaje|protagonista|antagonista|villano|heroina|heroe)\b/.test(normalizedUserText)
+        && /\b(crea|crear|agrega|agregar|anade|nuevo|nueva|inventa|disena|escribe|haz)\b/.test(normalizedUserText);
+    if (asksForCharacter && actions.some(action => action.id === 'crear_personaje')) {
+        return 'crear_personaje';
+    }
 
     console.info('[IntentClassifier] Inicio:', { userText, modelId, actions: actions.map(a => a.id) });
 

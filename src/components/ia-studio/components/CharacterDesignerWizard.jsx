@@ -25,7 +25,7 @@ const CharacterDesignerWizard = ({
     characters,
     onExit
 }) => {
-    const { profile, updateWorldItem, createCharacter, updateCharacter, deleteCharacter } = useData();
+    const { profile, createCharacter, updateCharacter, deleteCharacter } = useData();
 
     const [charFlow, setCharFlow] = useState(null);
     const [isAlignmentWizardOpen, setIsAlignmentWizardOpen] = useState(false);
@@ -388,15 +388,6 @@ const CharacterDesignerWizard = ({
                 content: c.description || ''
             }));
 
-            const legacyDoc = worldItems?.find(w => w.id === 'system_personajes');
-            if (legacyDoc && legacyDoc.content && legacyDoc.content.replace(/<[^>]*>/g, '').trim().length > 10) {
-                docsToAnalyze.push({
-                    id: legacyDoc.id,
-                    title: 'Master Doc Personajes (Heredado)',
-                    content: legacyDoc.content
-                });
-            }
-
             if (docsToAnalyze.length === 0) {
                 window.dispatchEvent(new CustomEvent('ia-toast', {
                     detail: { message: 'No hay fichas de personajes creadas para analizar.', type: 'warning' }
@@ -473,11 +464,7 @@ const CharacterDesignerWizard = ({
                 });
             }
 
-            if (group.docId === 'system_personajes') {
-                await updateWorldItem('system_personajes', { content: '' });
-            } else {
-                await deleteCharacter(group.docId);
-            }
+            await deleteCharacter(group.docId);
 
             const remainingGroups = charFlow.groupedDocs.filter(g => g.docId !== group.docId);
             

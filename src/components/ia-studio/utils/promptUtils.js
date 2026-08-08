@@ -408,7 +408,7 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
     const charactersList = extraOptions.characters || [];
 
     const availableTargets = [];
-    SYSTEM_WORLD_ITEM_IDS.forEach(wid => {
+    SYSTEM_WORLD_ITEM_IDS.filter(wid => wid !== 'system_personajes').forEach(wid => {
         availableTargets.push(`- "${SYSTEM_WORLD_ITEM_LABELS[wid] || wid}" (Sección del Master Doc)`);
     });
     worldItemsList.filter(w => !SYSTEM_WORLD_ITEM_IDS.includes(w.id)).forEach(w => {
@@ -444,7 +444,7 @@ const buildDestinationSection = (dest, extraOptions = {}) => {
     }
     return {
         docDescription: 'Automático (La IA determina el destino)',
-        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc, a un capítulo específico o a un personaje, indica el título exacto o nombre de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Personajes]] o [[DESTINO: Alistair Vance]]).${targetsStr}`,
+        contentInstruction: `Devuelve el contenido en texto plano limpio. Si el contenido modificado/añadido está destinado a una sección del Master Doc, a un capítulo específico o a un personaje, indica el título exacto o nombre de ese documento dentro del bloque de metadatos inicial como [[DESTINO: Nombre Exacto]] (ej. [[DESTINO: Información General]] o [[DESTINO: Alistair Vance]]). Nunca uses "Personajes" como documento de destino: es solo una lista virtual de fichas individuales.${targetsStr}`,
         targetsStr,
     };
 };

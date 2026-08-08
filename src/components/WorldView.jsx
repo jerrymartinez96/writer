@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../context/DataContext';
-import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check, Sparkles } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Trash2, Globe, LayoutList, Upload, Loader2, Users, BookOpen, Layers, Folder, ChevronRight, Bookmark, Pencil, ZoomIn, ZoomOut, Link as LinkIcon, Globe2, AlertTriangle, Check } from 'lucide-react';
 import Modal from './Modal';
 import MasterDocOrganizerModal from './MasterDocOrganizerModal';
 import { useToast } from './Toast';
@@ -249,88 +249,7 @@ const WorldView = () => {
         </div>
     );
 
-    const handleMigrateLegacyCharacters = async () => {
-        const legacyItem = worldItems.find(w => w.id === 'system_personajes');
-        if (!legacyItem || !legacyItem.content) return;
-        
-        const contentRaw = legacyItem.content.replace(/<[^>]*>/g, '').trim();
-        if (contentRaw.length === 0) return;
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(legacyItem.content, 'text/html');
-        
-        const migrated = [];
-        
-        // Try searching by headings (H1 to H6)
-        const headings = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
-        if (headings.length > 0) {
-            headings.forEach((heading) => {
-                const name = heading.textContent.trim();
-                if (!name) return;
-                
-                let descriptionHtml = '';
-                let sibling = heading.nextElementSibling;
-                while (sibling && !['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(sibling.tagName)) {
-                    descriptionHtml += sibling.outerHTML;
-                    sibling = sibling.nextElementSibling;
-                }
-                
-                migrated.push({ name, description: descriptionHtml || '<p>Personaje migrado sin descripción adicional.</p>' });
-            });
-        } else {
-            // Sift through paragraphs starting with strong/b tags
-            const paragraphs = doc.querySelectorAll('p');
-            paragraphs.forEach((p) => {
-                const strong = p.querySelector('strong, b');
-                if (strong) {
-                    const name = strong.textContent.trim().replace(/[:\-–—]$/, '').trim();
-                    if (name && name.length < 50) {
-                        let desc = p.innerHTML.replace(strong.outerHTML, '').trim();
-                        desc = desc.replace(/^[:\-–—\s]+/, '').trim();
-                        migrated.push({ name, description: `<p>${desc || 'Personaje migrado sin descripción adicional.'}</p>` });
-                    }
-                }
-            });
-        }
-        
-        try {
-            if (migrated.length > 0) {
-                for (const char of migrated) {
-                    await createCharacter({
-                        name: char.name,
-                        role: '',
-                        description: char.description,
-                        images: [],
-                        parentId: null,
-                        isCategory: false
-                    });
-                }
-                // Clear out legacy content to hide the migration banner
-                await updateWorldItem('system_personajes', { content: '' });
-                toast.success(`¡Éxito! Se han migrado ${migrated.length} personajes correctamente.`);
-            } else {
-                // Fallback: Create a single character card with the whole block of text
-                await createCharacter({
-                    name: "Personajes Migrados",
-                    role: "Importado",
-                    description: legacyItem.content,
-                    images: [],
-                    parentId: null,
-                    isCategory: false
-                });
-                await updateWorldItem('system_personajes', { content: '' });
-                toast.success("Se ha importado todo el documento en una sola ficha de personajes.");
-            }
-        } catch (error) {
-            console.error("Migration failed:", error);
-            toast.error("Hubo un problema al migrar los personajes.");
-        }
-    };
-
     const renderCharactersList = () => {
-        const legacyItem = worldItems.find(w => w.id === 'system_personajes');
-        const hasLegacyContent = legacyItem && legacyItem.content && legacyItem.content.replace(/<[^>]*>/g, '').trim().length > 0;
-        
         const cleanPreviewText = (html) => {
             if (!html) return '';
             return html
@@ -363,27 +282,6 @@ const WorldView = () => {
                         <p className="text-[var(--text-muted)] text-sm mt-2">Gestiona las fichas individuales de cada personaje. Utiliza menciones `@` en el editor para enlazarlos y optimizar el contexto de la IA.</p>
                     </div>
                 </header>
-
-                {/* Legacy Data Migration Banner */}
-                {hasLegacyContent && (
-                    <div className="mb-8 p-6 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-sm animate-in slide-in-from-top-4 duration-300">
-                        <div className="space-y-1">
-                            <h4 className="font-bold text-amber-500 text-sm flex items-center gap-2">
-                                <Sparkles size={16} className="text-amber-500 animate-pulse" />
-                                ¿Migrar personajes existentes?
-                            </h4>
-                            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                                Detectamos texto en tu documento de personajes antiguo. Podemos dividirlo de forma inteligente e importar cada personaje como una ficha individual automáticamente.
-                            </p>
-                        </div>
-                        <button
-                            onClick={handleMigrateLegacyCharacters}
-                            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0 self-start md:self-auto"
-                        >
-                            Migrar ahora
-                        </button>
-                    </div>
-                )}
 
                 {/* Grid of Characters */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

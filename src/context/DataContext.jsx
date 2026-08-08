@@ -262,13 +262,14 @@ export const DataProvider = ({ children }) => {
             const trashChars = allCharacters.filter(c => c.deletedAt).map(c => ({ ...c, collectionType: 'characters' }));
             setCharacters(fetchedCharacters);
 
-            // Load World Items
+            // Load World Items. `system_personajes` is a legacy document and is
+            // intentionally excluded: characters live in the characters collection.
             const allWorldItems = await getWorld(book.id);
-            let fetchedWorldItems = allWorldItems.filter(i => !i.deletedAt);
-            const trashWorlds = allWorldItems.filter(i => i.deletedAt).map(c => ({ ...c, collectionType: 'world' }));
+            let fetchedWorldItems = allWorldItems.filter(i => !i.deletedAt && i.id !== 'system_personajes');
+            const trashWorlds = allWorldItems.filter(i => i.deletedAt && i.id !== 'system_personajes').map(c => ({ ...c, collectionType: 'world' }));
 
             // Ensure the three system documents exist
-            const systemIds = ['system_personajes', 'system_estructura', 'system_core'];
+            const systemIds = ['system_estructura', 'system_core'];
             const updatedFetchedItems = [...fetchedWorldItems];
             for (const sysId of systemIds) {
                 const existing = fetchedWorldItems.find(item => item.id === sysId);

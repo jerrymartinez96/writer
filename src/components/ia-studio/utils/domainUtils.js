@@ -42,9 +42,8 @@ export const resolveTargetDoc = (targetStr, chapters = [], worldItems = [], char
     const norm = targetStr.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
     // 1. Verificar primero secciones de sistema (IDs exactos)
-    if (norm === 'personajes' || norm === 'system_personajes') {
-        return { docType: 'worldItem', docId: 'system_personajes', title: 'Personajes' };
-    }
+    // "Personajes" is a virtual list, never a writable document. Resolve only
+    // individual character names below.
     if (norm === 'estructura' || norm === 'system_estructura' || norm.includes('estructura de capitulo') || norm.includes('estructura de capitulos')) {
         return { docType: 'worldItem', docId: 'system_estructura', title: 'Estructura' };
     }

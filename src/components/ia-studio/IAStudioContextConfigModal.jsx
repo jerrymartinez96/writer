@@ -600,7 +600,7 @@ const IAStudioContextConfigModal = ({
                                         if (firstCh) {
                                             onDestinationChange({ mode: 'manual', docId: firstCh.id, docType: 'chapter', docTitle: firstCh.title });
                                         } else {
-                                            onDestinationChange({ mode: 'manual', docId: 'system_personajes', docType: 'worldItem', docTitle: 'Personajes' });
+                                            onDestinationChange({ mode: 'new', docId: null, docType: 'chapter', docTitle: '' });
                                         }
                                     }
                                 }}

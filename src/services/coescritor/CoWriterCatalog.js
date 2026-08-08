@@ -51,11 +51,11 @@ export const COWRITER_CATALOG = [
             type: 'function',
             function: {
                 name: 'leer_documento',
-                description: 'Obtiene el contenido completo y actual de un documento del libro (capítulo, sección del Master Doc, personaje o elemento del mundo). ÚSALA cuando necesites ver el texto exacto de un documento antes de modificarlo, citarlo, o cuando el contexto compartido esté incompleto o comprimido. El documento se identifica por su título exacto (ej. "Información General", "Personajes", "Capítulo 1") o por su ID.',
+                description: 'Obtiene el contenido completo y actual de un documento del libro (capítulo, sección del Master Doc, ficha de personaje o elemento del mundo). ÚSALA cuando necesites ver el texto exacto de un documento antes de modificarlo, citarlo, o cuando el contexto compartido esté incompleto o comprimido. El documento se identifica por su título exacto (ej. "Información General", nombre de personaje, "Capítulo 1") o por su ID.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        documento_id: { type: 'string', description: 'El título exacto o ID del documento a leer (ej. "Información General", "system_core", "Personajes", "Capítulo 1").' }
+                        documento_id: { type: 'string', description: 'El título exacto o ID del documento a leer (ej. "Información General", "system_core", "Alistair Vance", "Capítulo 1"). No uses "Personajes" porque ya no es un documento.' }
                     },
                     required: ['documento_id']
                 }
@@ -137,6 +137,30 @@ export const COWRITER_CATALOG = [
                         contenido_html: { type: 'string', description: 'El contenido narrativo en formato HTML limpio para el editor.' }
                     },
                     required: ['titulo', 'contenido_html']
+                }
+            }
+        },
+    },
+    {
+        id: 'crear_personaje',
+        label: '👤 Crear personaje',
+        description: 'Crea una ficha individual de personaje con nombre y descripción.',
+        voiceKeywords: ['crea un personaje', 'crear personaje', 'nuevo personaje', 'agrega un personaje', 'añade un personaje'],
+        voiceStrategy: VOICE_STRATEGY.SUMMARIZE,
+        isTool: true,
+        deepSeekSchema: {
+            type: 'function',
+            function: {
+                name: 'crear_personaje',
+                description: 'Crea una ficha individual de personaje. Nunca guardes personajes en el documento o sección "Personajes".',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        nombre: { type: 'string', description: 'Nombre exacto del personaje.' },
+                        descripcion_html: { type: 'string', description: 'Descripción o ficha del personaje en HTML limpio.' },
+                        rol: { type: 'string', description: 'Rol narrativo opcional del personaje.' }
+                    },
+                    required: ['nombre', 'descripcion_html']
                 }
             }
         },
