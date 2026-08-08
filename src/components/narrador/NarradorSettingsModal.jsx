@@ -8,7 +8,7 @@ import Modal from '../Modal';
 import GeminiLiveService, { GEMINI_LIVE_VOICES, GEMINI_LIVE_MODELS } from '../../services/GeminiLiveService';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../Toast';
-import { clearNarradorCache, getNarradorCacheSize } from '../../services/NarradorCache';
+import { clearNarradorCache, getNarradorCacheSize, getNarradorStorageSettings, saveNarradorStorageSettings, chooseNarradorDirectory } from '../../services/NarradorCache';
 
 const TONES = [
     { id: 'auto', label: 'Auto' },
@@ -38,6 +38,8 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     const [isClearingCache, setIsClearingCache] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
+    const [keepPermanent, setKeepPermanent] = useState(false);
+    const [folderName, setFolderName] = useState('');
 
     // Sync with profile when opened
     useEffect(() => {
@@ -49,6 +51,10 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             setTone(cfg.narradorTone || 'auto');
             setModel(cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview');
             setAutoContinue(cfg.narradorAutoContinue || false);
+            getNarradorStorageSettings().then(storage => {
+                setKeepPermanent(!!storage.keepPermanent);
+                setFolderName(storage.folderName || '');
+            });
         }
     }, [isOpen, profile]);
 
@@ -154,6 +160,22 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             toast.error('Error al limpiar la caché.');
         } finally {
             setIsClearingCache(false);
+        }
+    };
+
+    const handlePermanentStorageToggle = async () => {
+        const next = !keepPermanent;
+        setKeepPermanent(next);
+        await saveNarradorStorageSettings({ keepPermanent: next });
+    };
+
+    const handleChooseFolder = async () => {
+        try {
+            const name = await chooseNarradorDirectory();
+            setFolderName(name);
+            setKeepPermanent(true);
+        } catch (err) {
+            if (err?.name !== 'AbortError') toast.error(err.message || 'No se pudo seleccionar la carpeta.');
         }
     };
 
@@ -343,6 +365,38 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                     </div>
                     <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
                         El audio se cachea localmente por 7 días. Los segmentos editados se regeneran automáticamente.
+                    </p>
+                </div>
+
+                {/* Permanent storage */}
+                <div className="pt-4 border-t border-[var(--border-main)] space-y-3">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Conservar audios permanentemente</p>
+                            <p className="text-[9px] text-[var(--text-muted)] font-medium mt-0.5">
+                                Evita que los fragmentos guardados se eliminen con el caché temporal de 7 días.
+                            </p>
+                        </div>
+                        <button
+                            onClick={handlePermanentStorageToggle}
+                            className={`relative w-11 h-6 rounded-full transition-all duration-300 shrink-0 ${keepPermanent ? 'bg-emerald-500' : 'bg-[var(--border-main)]'}`}
+                            title="Activar almacenamiento permanente"
+                        >
+                            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${keepPermanent ? 'left-[22px]' : 'left-0.5'}`}></div>
+                        </button>
+                    </div>
+                    <button
+                        onClick={handleChooseFolder}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-[var(--bg-editor)] border border-[var(--border-main)] hover:border-emerald-500/50 text-left transition-all cursor-pointer"
+                    >
+                        <span className="min-w-0">
+                            <span className="block text-[10px] font-black uppercase tracking-widest text-[var(--text-main)]">Guardar también en carpeta</span>
+                            <span className="block truncate text-[9px] text-[var(--text-muted)] mt-0.5">{folderName || 'Seleccionar carpeta del dispositivo'}</span>
+                        </span>
+                        <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-emerald-500">Elegir</span>
+                    </button>
+                    <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
+                        La carpeta requiere permiso del navegador y permanece vinculada a este dispositivo.
                     </p>
                 </div>
             </div>

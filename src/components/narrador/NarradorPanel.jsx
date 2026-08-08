@@ -2,7 +2,7 @@
  * NarradorPanel — Interfaz de control flotante para la narración de capítulos.
  * Aparece en la esquina inferior derecha durante el modo lectura.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
     Play, Pause, Square, SkipBack, SkipForward,
     Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2, RefreshCw, CheckCircle2, CircleDashed, Loader2
@@ -41,29 +41,27 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
     </div>
 );
 
-const KaraokeTranscript = ({ text, progress, isPlaying }) => {
-    const activeWordRef = useRef(null);
-    const tokens = String(text || '').split(/(\s+)/);
-    const wordTokens = tokens.filter(token => !/^\s+$/.test(token) && token.length > 0);
-    const activeWordIndex = wordTokens.length
-        ? Math.min(wordTokens.length - 1, Math.floor(Math.max(0, Math.min(0.999, progress)) * wordTokens.length))
+const KaraokeTranscript = ({ text, progress, isPlaying, isSyncReady }) => {
+    const sentences = String(text || '')
+        .replace(/([.!?…])([A-ZÁÉÍÓÚÜÑ])/g, '$1 $2')
+        .split(/(?<=[.!?…])\s+/)
+        .filter(Boolean);
+    const sentenceWeights = sentences.map(sentence => {
+        const words = sentence.trim().split(/\s+/).filter(Boolean).length;
+        const commas = (sentence.match(/[,;:]/g) || []).length;
+        const dashes = (sentence.match(/[—–-]/g) || []).length;
+        const lengthAdjustment = Math.min(1.5, sentence.length / 140);
+        return Math.max(1, words + (commas * 0.35) + (dashes * 0.45) + lengthAdjustment);
+    });
+    const totalWeight = sentenceWeights.reduce((sum, weight) => sum + weight, 0);
+    const targetWeight = Math.max(0, Math.min(0.999, progress)) * totalWeight;
+    let accumulatedWeight = 0;
+    const activeSentence = sentences.length
+        ? sentenceWeights.findIndex(weight => {
+            accumulatedWeight += weight;
+            return accumulatedWeight > targetWeight;
+        })
         : 0;
-    const metadata = tokens.reduce((result, token) => {
-        if (/^\s+$/.test(token) || !token) {
-            result.items.push({ token, wordIndex: -1, sentenceIndex: result.sentenceIndex });
-            return result;
-        }
-        const current = { token, wordIndex: result.wordIndex + 1, sentenceIndex: result.sentenceIndex };
-        result.items.push(current);
-        result.wordIndex += 1;
-        if (/[.!?…][”’"»']?$/.test(token)) result.sentenceIndex += 1;
-        return result;
-    }, { items: [], wordIndex: -1, sentenceIndex: 0 }).items;
-    const activeSentence = metadata.find(item => item.wordIndex === activeWordIndex)?.sentenceIndex ?? 0;
-
-    useEffect(() => {
-        activeWordRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    }, [activeWordIndex]);
 
     if (!text) {
         return <p className="text-[var(--text-muted)] italic text-lg">La transcripción aparecerá aquí al iniciar la narración.</p>;
@@ -71,24 +69,21 @@ const KaraokeTranscript = ({ text, progress, isPlaying }) => {
 
     return (
         <p className="text-xl md:text-3xl leading-[1.9] md:leading-[2.05] tracking-[-0.015em] text-center">
-            {metadata.map((item, index) => {
-                if (item.wordIndex < 0) return <span key={index}>{item.token}</span>;
-                const isActive = item.wordIndex === activeWordIndex && isPlaying;
-                const isPast = item.wordIndex < activeWordIndex;
-                const isCurrentSentence = item.sentenceIndex === activeSentence;
+            {sentences.map((sentence, index) => {
+                const isActive = index === activeSentence && isPlaying && isSyncReady;
+                const isPast = index < activeSentence;
                 return (
                     <span
                         key={index}
-                        ref={isActive ? activeWordRef : null}
-                        className="inline rounded-lg px-1 transition-all duration-300"
+                        className="inline rounded-xl px-1.5 transition-all duration-500"
                         style={{
-                            color: isActive ? 'var(--text-main)' : 'var(--text-main)',
-                            opacity: isActive ? 1 : isPast ? 0.5 : isCurrentSentence ? 0.86 : 0.34,
-                            background: isActive ? 'color-mix(in srgb, var(--accent-main) 24%, transparent)' : 'transparent',
-                            boxShadow: isActive ? '0 0 24px color-mix(in srgb, var(--accent-main) 25%, transparent)' : 'none'
+                            color: 'var(--text-main)',
+                            opacity: isActive ? 1 : isPast ? 0.48 : 0.36,
+                            background: isActive ? 'color-mix(in srgb, var(--accent-main) 18%, transparent)' : 'transparent',
+                            boxShadow: isActive ? '0 0 24px color-mix(in srgb, var(--accent-main) 18%, transparent)' : 'none'
                         }}
                     >
-                        {item.token}
+                        {sentence}{index < sentences.length - 1 ? ' ' : ''}
                     </span>
                 );
             })}
@@ -124,6 +119,7 @@ const NarradorPanel = ({
         toggleNarratorMode,
         currentTranscript,
         segmentProgress,
+        isSegmentSyncReady,
         cachedSegmentIndexes
     } = narrador;
 
@@ -206,6 +202,7 @@ const NarradorPanel = ({
                                 text={currentTranscript}
                                 progress={segmentProgress}
                                 isPlaying={status === 'speaking'}
+                                isSyncReady={isSegmentSyncReady}
                             />
                         </div>
                     </div>
