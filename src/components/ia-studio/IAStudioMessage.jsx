@@ -1,11 +1,122 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { User, Bot, FileDiff, Copy, Check, RotateCw, RotateCcw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2, Film, AlertTriangle, Wrench, CheckCircle2 } from 'lucide-react';
-import { parseInconsistenciesFromResponse, SYSTEM_WORLD_ITEM_LABELS } from './IAStudioUtils';
+import { User, Bot, FileDiff, Copy, Check, RotateCw, RotateCcw, FileText, Lightbulb, Search, ChevronDown, ChevronUp, Trash2, Film, AlertTriangle, Wrench, CheckCircle2, Loader2, X, Sparkles } from 'lucide-react';
+import { parseInconsistenciesFromResponse, parseSuggestionsFromResponse, getDocumentDisplayLabel } from './IAStudioUtils';
+
+const ReviewModal = ({ title, count, icon, accent = 'purple', onClose, children }) => {
+    const palette = accent === 'amber'
+        ? { text: 'text-amber-500', soft: 'bg-amber-500/10', border: 'border-amber-500/20', glow: 'shadow-[0_0_35px_rgba(245,158,11,0.08)]' }
+        : { text: 'text-purple-500', soft: 'bg-purple-500/10', border: 'border-purple-500/20', glow: 'shadow-[0_0_35px_rgba(168,85,247,0.08)]' };
+
+    return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-0 sm:p-4 animate-in fade-in duration-200">
+        <div className={`relative flex h-full w-full flex-col overflow-hidden bg-[var(--bg-app)] sm:h-[92vh] sm:max-w-6xl sm:rounded-[2rem] sm:border sm:border-[var(--border-main)] ${palette.glow} shadow-[0_30px_100px_rgba(0,0,0,0.65)]`}>
+            <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-purple-500/[0.07] to-transparent pointer-events-none" />
+            <div className="relative flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/85 px-4 py-3 backdrop-blur-xl sm:px-7 sm:py-5">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${palette.soft} ${palette.text} ring-1 ${palette.border}`}>{icon}</div>
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                            <h3 className="truncate text-sm font-black uppercase tracking-wider text-[var(--text-main)] sm:text-base">{title}</h3>
+                            <span className={`hidden rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-wider sm:inline-flex ${palette.soft} ${palette.text} ${palette.border}`}>Revisión guiada</span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{count} elemento{count === 1 ? '' : 's'} · selecciona una tarjeta para trabajarla</p>
+                    </div>
+                </div>
+                <button onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)]/50 text-[var(--text-muted)] transition-all hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-500 active:scale-95" aria-label="Cerrar revisión"><X size={17} /></button>
+            </div>
+            <div className="relative min-h-0 flex-1 overflow-y-auto p-3 sm:p-7">
+                <div className="mx-auto w-full max-w-5xl">{children}</div>
+            </div>
+            <div className="relative flex shrink-0 items-center justify-between border-t border-[var(--border-main)] bg-[var(--bg-editor)]/70 px-4 py-2.5 text-[9px] text-[var(--text-muted)] sm:px-7">
+                <span className="flex items-center gap-1.5"><Sparkles size={11} className={palette.text} /> Revisa cada propuesta antes de continuar</span>
+                <span className="hidden sm:inline">ESC para cerrar</span>
+            </div>
+        </div>
+    </div>
+    );
+};
+
+const SuggestionCardsView = ({ message, onSuggestionAction, isModal = false }) => {
+    const suggestions = useMemo(() => parseSuggestionsFromResponse(message.rawResponse || message.content), [message.rawResponse, message.content]);
+    const [edited, setEdited] = useState({});
+    const [hidden, setHidden] = useState({});
+    const [isOpen, setIsOpen] = useState(false);
+
+    const impactClass = {
+        bajo: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+        medio: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+        alto: 'bg-rose-500/10 text-rose-500 border-rose-500/20',
+    };
+
+    if (!isModal) {
+        return (
+            <>
+                <button onClick={() => setIsOpen(true)} className="flex w-full items-center justify-between rounded-2xl border border-purple-500/25 bg-purple-500/[0.06] px-4 py-3 text-left hover:bg-purple-500/[0.1]">
+                    <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-purple-500"><Lightbulb size={15} /> Propuestas creativas</span>
+                    <span className="rounded-lg bg-purple-500 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Revisar {suggestions.length}</span>
+                </button>
+                {isOpen && <ReviewModal title="Propuestas creativas" count={suggestions.length} accent="purple" icon={<Lightbulb size={17} />} onClose={() => setIsOpen(false)}><SuggestionCardsView message={message} onSuggestionAction={onSuggestionAction} isModal /></ReviewModal>}
+            </>
+        );
+    }
+
+    return (
+        <div className="space-y-3 my-2">
+            <div className="flex items-center gap-2 px-1 text-[10px] font-black uppercase tracking-widest text-purple-500">
+                <Lightbulb size={14} /> Propuestas creativas
+            </div>
+            {suggestions.map(suggestion => {
+                if (hidden[suggestion.id]) return null;
+                const currentIdea = edited[suggestion.id] ?? suggestion.idea;
+                const impact = suggestion.impact in impactClass ? suggestion.impact : 'medio';
+                return (
+                    <div key={suggestion.id} className="rounded-2xl border-2 border-purple-500/20 bg-purple-500/[0.025] overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b border-purple-500/10 flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <h4 className="text-xs font-bold text-[var(--text-main)]">{suggestion.title}</h4>
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                    <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${impactClass[impact]}`}>
+                                        Impacto {impact}
+                                    </span>
+                                    {suggestion.documents.map(doc => (
+                                        <span key={doc} className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-[var(--border-main)]/40 text-[var(--text-muted)]">📁 {doc}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <textarea
+                                value={currentIdea}
+                                onChange={event => setEdited(prev => ({ ...prev, [suggestion.id]: event.target.value }))}
+                                rows={10}
+                                className="w-full min-h-48 resize-y rounded-xl border border-[var(--border-main)]/60 bg-[var(--bg-app)]/40 p-3 text-xs leading-relaxed text-[var(--text-main)] outline-none focus:border-purple-500/50"
+                                aria-label={`Editar propuesta ${suggestion.title}`}
+                            />
+                            {suggestion.consequences && (
+                                <div className="rounded-xl border border-[var(--border-main)]/40 bg-[var(--bg-app)]/30 p-3 text-[10px] leading-relaxed text-[var(--text-muted)]">
+                                    <span className="font-black uppercase tracking-wider text-[9px] text-purple-400">Consecuencias previstas</span>
+                                    <p className="mt-1 whitespace-pre-wrap">{suggestion.consequences}</p>
+                                </div>
+                            )}
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'develop')} className="rounded-lg bg-purple-500 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white hover:bg-purple-600">Desarrollar</button>
+                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'analyze')} className="rounded-lg border border-indigo-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-indigo-500 hover:bg-indigo-500/10">Analizar impacto</button>
+                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'prepare')} className="rounded-lg border border-emerald-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-emerald-500 hover:bg-emerald-500/10">Preparar cambios</button>
+                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'variant')} className="rounded-lg border border-amber-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-500 hover:bg-amber-500/10">Otra variante</button>
+                                <button onClick={() => setHidden(prev => ({ ...prev, [suggestion.id]: true }))} className="rounded-lg border border-[var(--border-main)] px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">Descartar</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
 
 /**
  * Renders an interactive view for inconsistency and plot-hole cards inside the chat message.
  */
-const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenInconsistency }) => {
+const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenInconsistency, chapters, worldItems, characters, isModal = false }) => {
     const inconsistencies = useMemo(() => {
         if (message.inconsistencies) return message.inconsistencies;
         return parseInconsistenciesFromResponse(message.rawResponse || message.content) || [];
@@ -25,6 +136,7 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
         });
         return initial;
     });
+    const [isOpen, setIsOpen] = useState(false);
 
     // Sincronizar estado si las inconsistencias cambian
     useEffect(() => {
@@ -137,6 +249,19 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
         }
     };
 
+    if (!isModal && inconsistencies.length > 0) {
+        const pendingCount = inconsistencies.filter(item => !item.resolved).length;
+        return (
+            <>
+                <button onClick={() => setIsOpen(true)} className="flex w-full items-center justify-between rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 text-left hover:bg-amber-500/[0.1]">
+                    <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-amber-500"><AlertTriangle size={15} /> Inconsistencias de lore</span>
+                    <span className="rounded-lg bg-amber-500 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Revisar {pendingCount}/{inconsistencies.length}</span>
+                </button>
+                {isOpen && <ReviewModal title="Revisión de inconsistencias" count={inconsistencies.length} accent="amber" icon={<AlertTriangle size={17} />} onClose={() => setIsOpen(false)}><InconsistencyCardsView message={message} onResolveInconsistency={onResolveInconsistency} onReopenInconsistency={onReopenInconsistency} chapters={chapters} worldItems={worldItems} characters={characters} isModal /></ReviewModal>}
+            </>
+        );
+    }
+
     if (inconsistencies.length === 0) {
         return (
             <div className="p-4 border border-[var(--border-main)] rounded-2xl bg-amber-500/5 text-amber-500 flex items-center gap-2 text-xs">
@@ -159,9 +284,7 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
                 const state = cardStates[inc.id] || { selectedOption: null, customText: '', showCustom: false, isResolving: false };
                 const isResolved = inc.resolved;
                 const wasResolved = inc.wasResolved;
-                const labelList = inc.files.map(fId => {
-                    return SYSTEM_WORLD_ITEM_LABELS[fId] || fId;
-                }).join(' y ');
+                const labelList = (inc.files || []).map(fId => getDocumentDisplayLabel(fId, chapters, worldItems, characters)).join(' y ');
 
                 return (
                     <div
@@ -191,9 +314,9 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
                                             Reabierta
                                         </span>
                                     )}
-                                    {inc.files.map((fId, idx) => (
+                                    {(inc.files || []).map((fId, idx) => (
                                         <span key={`${fId}-${idx}`} className="text-[8px] font-bold bg-[var(--border-main)]/40 text-[var(--text-muted)] px-1.5 py-0.5 rounded">
-                                            📁 {SYSTEM_WORLD_ITEM_LABELS[fId] || fId}
+                                            📁 {getDocumentDisplayLabel(fId, chapters, worldItems, characters)}
                                         </span>
                                     ))}
                                 </div>
@@ -353,7 +476,7 @@ const InconsistencyCardsView = ({ message, onResolveInconsistency, onReopenIncon
  * - 'error'      → plain text red message
  * - default      → whitespace-pre-wrap (streaming / unknown)
  */
-const MessageContent = ({ message, content, responseType: rawResponseType, isStreaming, onResolveInconsistency, onReopenInconsistency }) => {
+const MessageContent = ({ message, content, responseType: rawResponseType, isStreaming, onResolveInconsistency, onReopenInconsistency, onSuggestionAction, chapters, worldItems, characters }) => {
     const responseType = useMemo(() => {
         if (rawResponseType === 'analysis' && content && (content.includes('<inconsistencia') || content.includes('<inconsistencias') || content.includes('[[inconsistencia'))) {
             return 'inconsistencies';
@@ -384,7 +507,11 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
     // Skeleton while waiting for first chunk
     if (isStreaming && !content) {
         return (
-            <div className="space-y-2 py-1 min-w-[200px] sm:min-w-[300px]">
+            <div className="space-y-3 p-3.5 rounded-2xl border-2 border-indigo-500/20 bg-indigo-500/[0.03] min-w-[240px] sm:min-w-[320px] shadow-[0_0_14px_rgba(99,102,241,0.06)]">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                    <Loader2 size={14} className="animate-spin shrink-0" />
+                    <span>{message.processingStage || 'La IA está analizando tu solicitud…'}</span>
+                </div>
                 <div className="h-3 w-11/12 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" />
                 <div className="h-3 w-4/5 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.15s' }} />
                 <div className="h-3 w-2/3 rounded bg-gradient-to-r from-[var(--border-main)] via-[var(--accent-soft)] to-[var(--border-main)] bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.3s' }} />
@@ -420,6 +547,10 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
                             {isInconsistency && 'Analizando Lore y Conflictos...'}
                             {isFormat && 'Optimizando formato y espaciado...'}
                         </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[9px] text-[var(--text-muted)] -mt-1">
+                        <Loader2 size={11} className="animate-spin text-indigo-400 shrink-0" />
+                        <span>{message.processingStage || 'Procesando con la IA…'}</span>
                     </div>
 
                     <div className="space-y-2 pt-1">
@@ -560,8 +691,12 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
         );
     }
 
-    // Analysis or suggestion — render with plain text
-    if (responseType === 'analysis' || responseType === 'suggestion') {
+    if (responseType === 'suggestion' && !isStreaming) {
+        return <SuggestionCardsView message={message} onSuggestionAction={onSuggestionAction} />;
+    }
+
+    // Analysis — render with plain text
+    if (responseType === 'analysis') {
         return (
             <div className="whitespace-pre-wrap text-[var(--text-main)]">
                 {content}
@@ -603,6 +738,9 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
                     message={message}
                     onResolveInconsistency={onResolveInconsistency}
                     onReopenInconsistency={onReopenInconsistency}
+                    chapters={chapters}
+                    worldItems={worldItems}
+                    characters={characters}
                 />
             </div>
         );
@@ -620,7 +758,7 @@ const MessageContent = ({ message, content, responseType: rawResponseType, isStr
     return <div className="whitespace-pre-wrap">{content}</div>;
 };
 
-const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, onResolveInconsistency, onReopenInconsistency }) => {
+const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, onResolveInconsistency, onReopenInconsistency, onSuggestionAction, chapters, worldItems, characters }) => {
     const isUser = message.role === 'user';
     const isStreaming = message.isStreaming;
     const rawResponseType = message.responseType || 'analysis';
@@ -784,6 +922,10 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
                             isStreaming={isStreaming}
                             onResolveInconsistency={onResolveInconsistency}
                             onReopenInconsistency={onReopenInconsistency}
+                            onSuggestionAction={onSuggestionAction}
+                            chapters={chapters}
+                            worldItems={worldItems}
+                            characters={characters}
                         />
 
                         {/* Gradient Fade-out Mask */}

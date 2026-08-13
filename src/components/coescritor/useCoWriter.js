@@ -26,7 +26,6 @@ import {
     cleanHtmlToPlainText,
     resolveTargetDoc,
     parseToolCallResponse,
-    applyPatch,
 } from '../ia-studio/IAStudioUtils';
 import CoWriterLiveService from '../../services/coescritor/CoWriterLiveService';
 import {
@@ -37,10 +36,10 @@ import {
     resolveIntent,
     shouldSummarizeOutput,
     summarizeForSpeech,
-    countWords,
 } from '../../services/coescritor/CoWriterBridge';
-import { classifyAction } from '../ia-studio/utils/intentClassifier';
 import { COWRITER_CATALOG } from '../../services/coescritor/CoWriterCatalog';
+import { applyPatchesAtomically, classifyPatchRisk, buildOperationSummary } from '../../services/ai/OperationEngine';
+import { planRequest } from '../../services/ai/RequestPlanner';
 
 /**
  * Estados del Coescritor.
@@ -122,41 +121,17 @@ const ensureHtmlContent = (content = '') => {
  * @param {Array} patches Bloques de parche de parseToolCallResponse
  * @returns {{ requiresApproval: boolean, summary: string, reasons: string[] }}
  */
-const classifyPatches = (patches) => {
-    const reasons = [];
-    const isMultiDoc = patches.length > 1;
-    if (isMultiDoc) reasons.push('afecta varios documentos');
-
-    const hasDeletion = patches.some(p => !(p.content || '').trim());
-    if (hasDeletion) reasons.push('elimina texto');
-
-    const hasRewrite = patches.some(p => {
-        const origWords = countWords(p.original || '');
-        const newWords = countWords(p.content || '');
-        return origWords > 0 && newWords > origWords * 2;
-    });
-    if (hasRewrite) reasons.push('reescribe una sección extensa');
-
-    return {
-        requiresApproval: isMultiDoc || hasDeletion || hasRewrite,
-        summary: patches
-            .map(p => {
-                const docName = p.title || p.docId || 'Documento';
-                const action = !(p.content || '').trim()
-                    ? 'eliminar texto'
-                    : (countWords(p.content) > 0 ? 'modificar' : 'actualizar');
-                return `${action} en "${docName}"`;
-            })
-            .join('; '),
-        reasons,
-    };
-};
+const classifyPatches = (patches) => ({
+    ...classifyPatchRisk(patches),
+    summary: buildOperationSummary(patches),
+});
 
 export const useCoWriter = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, worldItems, characters, profile,
         openWorldDoc, openCharacterDoc, selectChapter, saveChapterContent, saveWorldDocContent,
         updateChapter, updateWorldItem, updateCharacter, createCharacter, createChapter, saveDocumentSnapshot,
+        flushAllSaves,
     } = useData();
     const {
         activeSession,
@@ -318,6 +293,7 @@ export const useCoWriter = () => {
     const applyPatchesDirect = useCallback(async (patches) => {
         let successCount = 0;
         const failures = [];
+        const editablePatches = [];
 
         for (const patch of patches) {
             // ── Creación de ficha individual de personaje ──
@@ -351,54 +327,33 @@ export const useCoWriter = () => {
                 continue;
             }
 
-            const resolved = resolveTargetDoc(patch.docId || patch.title || '', chapters, worldItems, characters);
-            if (!resolved) {
-                failures.push(`Documento "${patch.title || patch.docId}" no encontrado.`);
-                continue;
-            }
+            editablePatches.push(patch);
+        }
 
-            const currentContent = resolved.docType === 'character'
-                ? (characters.find(c => c.id === resolved.docId)?.description || '')
-                : (resolved.docType === 'worldItem'
-                    ? (worldItems.find(w => w.id === resolved.docId)?.content ||
-                        (activeWorldDoc && (activeWorldDoc.id === resolved.docId || activeWorldDoc.title === resolved.title)
-                            ? activeWorldDoc.content || '' : ''))
-                    : (chapters.find(c => c.id === resolved.docId)?.content || ''));
-
-            const { success, html } = applyPatch(currentContent, patch.original || '', patch.content || '');
-
-            if (!success) {
-                failures.push(`No se encontró el fragmento exacto en "${resolved.title}". Cambio no aplicado.`);
-                continue;
-            }
-
-            try {
-                if (resolved.docType === 'worldItem') {
-                    if (resolved.docId === activeWorldDoc?.id || resolved.title === activeWorldDoc?.title) {
-                        saveWorldDocContent(html, 'ia');
-                    } else {
-                        updateWorldItem(resolved.docId, { content: html });
+        if (editablePatches.length > 0) {
+            const result = await applyPatchesAtomically({
+                patches: editablePatches,
+                documents: { chapters, worldItems, characters },
+                saveDocument: async (target, html) => {
+                    if (target.docType === 'worldItem') {
+                        if (target.docId === activeWorldDoc?.id || target.title === activeWorldDoc?.title) saveWorldDocContent(html, 'ia');
+                        else updateWorldItem(target.docId, { content: html });
+                    } else if (target.docType === 'chapter') {
+                        if (target.docId === activeChapter?.id) saveChapterContent(html, 'ia');
+                        else updateChapter(target.docId, { content: html });
+                    } else if (target.docType === 'character') {
+                        updateCharacter(target.docId, { description: html });
                     }
-                    await saveDocumentSnapshot(resolved.docId, html, 'ia');
-                } else if (resolved.docType === 'chapter') {
-                    if (resolved.docId === activeChapter?.id) {
-                        saveChapterContent(html, 'ia');
-                    } else {
-                        updateChapter(resolved.docId, { content: html });
-                    }
-                    await saveDocumentSnapshot(resolved.docId, html, 'ia');
-                } else if (resolved.docType === 'character') {
-                    updateCharacter(resolved.docId, { description: html });
-                    await saveDocumentSnapshot(resolved.docId, html, 'ia');
-                }
-                successCount++;
-            } catch (saveErr) {
-                failures.push(`Error al guardar "${resolved.title}": ${saveErr?.message || 'desconocido'}`);
-            }
+                },
+                snapshot: (docId, html) => saveDocumentSnapshot(docId, html, 'ia'),
+                flushSaves: flushAllSaves,
+            });
+            successCount += result.successCount;
+            failures.push(...result.failures);
         }
 
         return { successCount, failedCount: failures.length, failures };
-    }, [chapters, worldItems, characters, activeWorldDoc, activeChapter, saveWorldDocContent, saveChapterContent, updateWorldItem, updateCharacter, createCharacter, createChapter, updateChapter, saveDocumentSnapshot]);
+    }, [chapters, worldItems, characters, activeWorldDoc, activeChapter, saveWorldDocContent, saveChapterContent, updateWorldItem, updateCharacter, createCharacter, createChapter, updateChapter, saveDocumentSnapshot, flushAllSaves]);
 
     const persistSharedMessage = useCallback((message) => {
         if (!activeSession?.id) return;
@@ -529,28 +484,34 @@ export const useCoWriter = () => {
             return;
         }
 
-        // ── Clasificación automática de intención ──
-        // Resolver localmente las intenciones claras; usar IA solo como fallback.
+        // ── Planificación estructurada de intención ──
         let catalogItem = null;
         let actionId = 'chat';
+        let requestPlan = null;
         try {
             const bookContext = activeBook
                 ? `Libro: ${activeBook.title || ''}${activeBook.description ? `\nSinopsis: ${activeBook.description}` : ''}`
                 : '';
-
-            const localIntent = resolveIntent(trimmed, null);
-            if (localIntent.actionId !== 'chat') {
-                actionId = localIntent.actionId;
-                catalogItem = localIntent.catalogItem;
-            } else {
-                const classifiedId = await classifyAction(trimmed, COWRITER_CATALOG || [], deepseekKey, model, bookContext);
-                actionId = classifiedId || 'chat';
-                catalogItem = COWRITER_CATALOG.find(item => item.id === actionId) || null;
-            }
+            const availableDocuments = [
+                ...(worldItems || []).filter(d => d.title).map(d => ({ id: d.id, title: d.title })),
+                ...(chapters || []).filter(d => !d.isVolume && d.title).map(d => ({ id: d.id, title: d.title })),
+                ...(characters || []).filter(d => !d.isCategory && d.name).map(d => ({ id: d.id, title: d.name })),
+            ];
+            requestPlan = await planRequest({
+                userText: trimmed,
+                apiKey: deepseekKey,
+                modelId: model,
+                actions: COWRITER_CATALOG || [],
+                bookContext,
+                availableDocuments,
+            });
+            actionId = requestPlan.actionId || 'chat';
+            catalogItem = COWRITER_CATALOG.find(item => item.id === actionId) || null;
             console.info('Acción resuelta:', {
                 actionId,
                 catalogItem: catalogItem?.id,
-                source: localIntent.actionId !== 'chat' ? 'local' : 'model',
+                source: 'planner',
+                requestPlan,
             });
         } catch {
             try {
@@ -561,6 +522,20 @@ export const useCoWriter = () => {
                 actionId = 'chat';
                 catalogItem = null;
             }
+        }
+
+        if (requestPlan?.requiresClarification && requestPlan.clarificationQuestion) {
+            const clarification = `Necesito una aclaración antes de modificar documentos: ${requestPlan.clarificationQuestion}`;
+            setResultText(clarification);
+            persistSharedMessage({
+                id: generateSharedMessageId(),
+                role: 'assistant',
+                content: clarification,
+                responseType: 'clarification',
+                operationPlan: requestPlan,
+            });
+            await narrateOutput(clarification, null);
+            return;
         }
 
         setResolvedAction({
@@ -618,11 +593,27 @@ Eres un agente ejecutivo que administra los documentos del escritor. Para cumpli
 
 6. Si el escritor pide crear o agregar un personaje, usa exclusivamente la herramienta \`crear_personaje\`. Cada personaje debe convertirse en una ficha individual con su nombre exacto; nunca escribas personajes en \`Personajes\` ni en \`system_personajes\`, porque esa sección ya no es un documento editable.
 
+7. Una herramienta solo genera una propuesta. Nunca afirmes que un cambio fue aplicado o guardado; el sistema validará y ejecutará la propuesta después. Si lees varios documentos, espera a tener toda la evidencia antes de generar los parches.
+
 Los documentos disponibles de esta obra están listados en la sección "Documentos y secciones disponibles" del prompt. Los títulos son los nombres EXACTOS que debes usar en documento_id.`;
+
+        const plannedSystemPrompt = `${systemPrompt}
+
+PLAN DE OPERACIÓN VALIDADO:
+${JSON.stringify({
+    intent: requestPlan?.intent || 'answer',
+    operation: requestPlan?.operation || 'answer',
+    scope: requestPlan?.scope || 'unknown',
+    risk: requestPlan?.risk || 'low',
+    requiresReading: requestPlan?.requiresReading ?? true,
+    targetHints: requestPlan?.targetHints || [],
+    affectedDocumentHints: requestPlan?.affectedDocumentHints || [],
+})}
+No afirmes que un cambio fue aplicado; solo genera una propuesta verificable.`;
 
         // ── Tool-loop: DeepSeek puede leer documentos antes de responder ──
         let workingMessages = [
-            { role: 'system', content: systemPrompt },
+            { role: 'system', content: plannedSystemPrompt },
             ...conversationHistoryRef.current.slice(-MAX_HISTORY_TURNS * 2),
             { role: 'user', content: trimmed },
         ];
@@ -669,6 +660,60 @@ Los documentos disponibles de esta obra están listados en la sección "Document
                 }
 
                 // Procesar herramientas llamadas por DeepSeek
+                const readCalls = completedToolCalls.filter(tc => tc.name === 'leer_documento');
+                if (readCalls.length > 0) {
+                    const toolMessages = [];
+                    const assistantToolCalls = [];
+                    const availableDocs = [
+                        ...(worldItems || []).filter(w => w.title).map(w => ({ ...w, _label: w.title })),
+                        ...(chapters || []).filter(c => !c.isVolume && c.title).map(c => ({ ...c, _label: c.title })),
+                        ...(characters || []).filter(c => !c.isCategory && c.name).map(c => ({ ...c, _label: c.name })),
+                    ];
+
+                    for (const tc of readCalls) {
+                        let args = {};
+                        try { args = JSON.parse(tc.argsText || '{}'); } catch { /* el siguiente turno recibirá el error */ }
+                        const requested = String(args?.documento_id || '').trim();
+                        const readKey = requested.toLowerCase();
+                        const toolId = tc.toolCallId || `tool_${iter}_${assistantToolCalls.length}`;
+                        assistantToolCalls.push({
+                            id: toolId,
+                            type: 'function',
+                            function: { name: tc.name, arguments: tc.argsText || '{}' },
+                        });
+
+                        if (readDocuments.has(readKey)) {
+                            toolMessages.push({ role: 'tool', tool_call_id: toolId, content: `La lectura de "${requested}" ya fue realizada en este turno. Usa la información anterior y ejecuta la operación.` });
+                            continue;
+                        }
+                        readDocuments.add(readKey);
+                        const resolved = resolveTargetDoc(requested, chapters, worldItems, characters);
+                        const content = getDocContent(resolved);
+                        if (resolved) {
+                            console.info('Documento leído correctamente:', { title: resolved.title, chars: content.length, empty: !content.trim() });
+                            toolMessages.push({
+                                role: 'tool',
+                                tool_call_id: toolId,
+                                content: `Contenido actual del documento "${resolved.title}":\n${content || '[DOCUMENTO EXISTENTE PERO VACÍO]'}\n\n` +
+                                    `Continúa la solicitud original. Copia literalmente texto_original y genera el parche correspondiente.`,
+                            });
+                        } else {
+                            toolMessages.push({
+                                role: 'tool',
+                                tool_call_id: toolId,
+                                content: `El documento "${requested}" no existe. Documentos disponibles: ${availableDocs.map(d => d._label).join(', ') || 'ninguno'}.`,
+                            });
+                        }
+                    }
+
+                    workingMessages = [
+                        ...workingMessages,
+                        { role: 'assistant', content: textAccum || null, tool_calls: assistantToolCalls },
+                        ...toolMessages,
+                    ];
+                    continue;
+                }
+
                 for (const tc of completedToolCalls) {
                     let args = {};
                     try { args = JSON.parse(tc.argsText || '{}'); } catch { /* args vacíos */ }
@@ -806,7 +851,7 @@ Los documentos disponibles de esta obra están listados en la sección "Document
                     role: 'assistant',
                     content: compactSummary,
                     responseType: 'cowriter',
-                    cowriterResult: { actionId, status: 'applied' },
+                    cowriterResult: { actionId, status: failedCount === 0 ? 'applied' : (successCount > 0 ? 'partial_failure' : 'failed') },
                 });
 
                 let confirmation = '';

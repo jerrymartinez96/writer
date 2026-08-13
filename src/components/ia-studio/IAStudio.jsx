@@ -130,7 +130,7 @@ const IAStudio = () => {
                                 activeResolution.messageId,
                                 activeResolution.inconsistencyId,
                                 activeResolution.option,
-                                activeResolution.customText || 'applied',
+                                activeResolution.solutionText || activeResolution.customText || '',
                                 true // isRetry
                             );
                         } else {

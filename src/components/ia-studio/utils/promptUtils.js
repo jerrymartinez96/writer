@@ -211,18 +211,18 @@ Según el lore, Nora tiene 18 años...`,
             negative: `❌ NO generes bloques [[DESTINO:]] ni [[ÁMBITO:]].`,
         },
     },
-    formatear: {
+        formatear: {
         id: 'formatear',
         responseType: 'patch',
         outputFormat: 'structured',
         defaultScope: 'partial',
         description: 'Optimiza el espaciado vertical y los saltos de línea de un documento sin alterar ninguna palabra',
         rules: ['no_markdown', 'no_html_in_prose', 'preserve_fidelity', 'no_triple_backtick'],
-        formatInstructions: `Optimizar la legibilidad con saltos de línea sin alterar el texto. Usa la herramienta nativa aplicar_parche.`,
+        formatInstructions: `Optimizar la legibilidad con saltos de línea sin alterar el texto. Usa exclusivamente la herramienta nativa aplicar_formateo_lectura.`,
         responseBody: 'Reorganización estética del espaciado del documento.',
         examples: {
             positive: `✅ RESPUESTA CORRECTA:
-Usa la herramienta aplicar_parche con texto_original exacto y texto_reemplazo con los saltos de línea formateados.`,
+Usa la herramienta aplicar_formateo_lectura con el documento completo y los saltos de línea formateados.`,
             negative: `❌ NO alteres ninguna palabra del texto original.`,
         },
     },
@@ -576,6 +576,16 @@ Basado en el contexto, propón ideas para mejorar la historia:
 4. Mejoras de tensión dramática
 5. Ampliación del mundo
 
+FORMATO DE SUGERENCIAS INTERACTIVAS:
+Devuelve cada propuesta dentro de este formato. No uses herramientas ni propongas parches.
+[[SUGERENCIA id="1" impacto="bajo|medio|alto" documentos="Capítulo X, Personaje Y"]]
+[[TITULO]]Título breve[[/TITULO]]
+[[IDEA]]Descripción concreta de la propuesta[[/IDEA]]
+[[CONSECUENCIAS]]Efectos narrativos, ventajas y posibles riesgos[[/CONSECUENCIAS]]
+[[/SUGERENCIA]]
+
+Si el escritor pide opinión sobre cambiar o eliminar algo, primero ofrece alternativas y consecuencias. No modifiques documentos hasta que confirme una propuesta.
+
 ${getActionTechnicalDescription('sugerir')}
 
 Contexto del libro:
@@ -583,21 +593,11 @@ ${context}`,
 
         constructor_personaje: () => `${BASE}
 
-🎯 ACCIÓN: CREADOR DE PERSONAJES (paso a paso).
-
-Estás guiando al escritor en la creación de un personaje nuevo en un proceso paso a paso y conversacional.
-
-Tu objetivo es:
-1. Haz preguntas estratégicas una a la vez (nunca más de 2-3 por turno) para ir construyendo el personaje de forma orgánica: nombre, rol/apariencia, personalidad/rasgos, historia/motivación, arco narrativo.
-2. Cuando tengas suficiente información, resume el perfil completo del personaje usando:
-[[TIPO: contenido]]
-[[ÁMBITO: completo]]
-[[DESTINO: Personajes]]
-El contenido debe ser una ficha de personaje en texto plano bien estructurada, con secciones separadas por \\n\\n.
-3. Sé creativo y sugerir ideas interesantes, pero respeta las decisiones del escritor.
-
-${getActionTechnicalDescription('escribir')}
-- No modifiques información existente a menos que el escritor lo solicite.
+🎯 ACCIÓN: CREAR PERSONAJE — Workflow guiado.
+Guía al escritor paso a paso para definir nombre, rol, rasgos, historia, motivaciones y arco narrativo.
+Haz como máximo 2 preguntas breves por turno. No guardes nada hasta que el escritor confirme que la ficha está completa.
+Cuando confirme, usa exclusivamente la herramienta nativa \`crear_personaje\` con nombre, rol y descripción HTML limpia.
+Nunca escribas personajes en el documento virtual "Personajes" ni uses \`crear_capitulo\` para una ficha.
 
 Contexto del libro:
 ${context}`,

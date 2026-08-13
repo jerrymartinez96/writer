@@ -18,6 +18,45 @@ export const SYSTEM_WORLD_ITEM_LABELS = {
 };
 
 /**
+ * Normaliza una referencia que viene de la IA y conserva tanto su etiqueta
+ * visible como el ID canónico que necesita el motor de parches.
+ */
+export const resolveDocumentReference = (reference, chapters = [], worldItems = [], characters = []) => {
+    const raw = String(reference || '').trim();
+    if (!raw) return { raw, id: null, title: 'Referencia vacía', docType: null, exists: false, virtual: false };
+
+    const normalized = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (normalized === 'personajes' || normalized === 'system_personajes') {
+        return { raw, id: 'system_personajes', title: 'Personajes', docType: 'virtual', exists: true, virtual: true };
+    }
+
+    const resolved = resolveTargetDoc(raw, chapters, worldItems, characters);
+    if (!resolved) {
+        return { raw, id: null, title: raw, docType: null, exists: false, virtual: false };
+    }
+
+    return {
+        raw,
+        id: resolved.docId,
+        title: resolved.title || raw,
+        docType: resolved.docType,
+        exists: true,
+        virtual: false,
+    };
+};
+
+export const getDocumentDisplayLabel = (reference, chapters = [], worldItems = [], characters = []) => {
+    const resolved = resolveDocumentReference(reference, chapters, worldItems, characters);
+    const typeLabel = {
+        chapter: 'Capítulo',
+        character: 'Personaje',
+        worldItem: 'Documento',
+        virtual: 'Grupo',
+    }[resolved.docType];
+    return typeLabel ? `${resolved.title} · ${typeLabel}` : `Documento no identificado · ${resolved.title}`;
+};
+
+/**
  * Resuelve un documento de destino a partir de un texto (ej. "Personajes" o el título de un capítulo)
  */
 export const resolveTargetDoc = (targetStr, chapters = [], worldItems = [], characters = []) => {

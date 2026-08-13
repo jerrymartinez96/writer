@@ -452,6 +452,22 @@ const IAStudioChat = ({
         setInputValue('');
     };
 
+    const handleSuggestionAction = (suggestion, action) => {
+        const idea = suggestion.idea?.trim();
+        if (!idea || !onSend) return;
+        const prompts = {
+            develop: `Desarrolla esta propuesta creativa sin modificar documentos todavía. Explica cómo podría funcionar en la historia y ofrece una versión más concreta:\n\n${idea}`,
+            analyze: `Analiza las consecuencias narrativas de esta propuesta. Identifica ventajas, riesgos, continuidad afectada y documentos que habría que revisar. No modifiques documentos:\n\n${idea}`,
+            prepare: `Quiero aplicar esta propuesta a la obra: ${idea}. Lee los documentos necesarios, identifica todos los capítulos o fichas afectados y prepara una vista de cambios con parches separados. No guardes nada todavía.`,
+            variant: `Propón tres variantes distintas de esta idea, explicando el impacto y los riesgos de cada una. No modifiques documentos:\n\n${idea}`,
+        };
+        // Se fuerza el planificador automático para que el modo manual
+        // "Sugerir" no bloquee una acción posterior como preparar parches.
+        void Promise.resolve(onSend(prompts[action] || prompts.develop, 'chat')).catch(error => {
+            console.error('[IAStudio][Chat] Error al procesar sugerencia:', error);
+        });
+    };
+
     const handleKeyDown = (e) => {
         if (shouldShowAutocomplete) {
             if (e.key === 'ArrowDown') {
@@ -711,6 +727,10 @@ const IAStudioChat = ({
                                 isLast={i === messages.length - 1}
                                 onResolveInconsistency={onResolveInconsistency}
                                 onReopenInconsistency={onReopenInconsistency}
+                                onSuggestionAction={handleSuggestionAction}
+                                chapters={chapters}
+                                worldItems={worldItems}
+                                characters={characters}
                             />
                         ))
                     )}

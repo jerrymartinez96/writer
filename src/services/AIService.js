@@ -2,6 +2,7 @@
  * Service to handle AI interactions exclusively via DeepSeek Direct API
  */
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
+const AI_SERVICE_VERBOSE_LOGS = false;
 
 /**
  * Helper: wait for a given number of milliseconds
@@ -108,13 +109,13 @@ export const DEEPSEEK_SCHEMAS = [
         type: "function",
         function: {
             name: "aplicar_parche",
-            description: "Reemplaza un fragmento de texto exacto de un capítulo o documento existente por un nuevo texto revisado o corregido.",
+            description: "Reemplaza un fragmento de texto exacto de un capítulo, documento de lore o ficha de personaje existente por un nuevo texto revisado. Úsala solo cuando el escritor pide una modificación puntual de un único documento; si la petición implica continuidad, varios documentos o una estructura completa, usa aplicar_parches_resolucion.",
             parameters: {
                 type: "object",
                 properties: {
                     documento_id: { type: "string", description: "El ID o título del documento/capítulo a modificar." },
                     texto_original: { type: "string", description: "El fragmento exacto que se desea cambiar de forma textual." },
-                    texto_reemplazo: { type: "string", description: "El nuevo texto corregido que sustituye al original." },
+                    texto_reemplazo: { type: "string", minLength: 1, description: "El nuevo texto corregido que sustituye al original. Nunca lo dejes vacío: una cadena vacía solo sería válida si el escritor pidió eliminar explícitamente ese fragmento." },
                     contexto_linea: { type: "string", description: "Opcional. Contexto o líneas alrededor para asegurar el match exacto." }
                 },
                 required: ["documento_id", "texto_original", "texto_reemplazo"]
@@ -166,7 +167,7 @@ export const DEEPSEEK_SCHEMAS = [
         type: "function",
         function: {
             name: "aplicar_parches_resolucion",
-            description: "Aplica de forma simultánea múltiples parches de texto para resolver inconsistencias o actualizar varios documentos a la vez de forma quirúrgica.",
+            description: "Aplica de forma simultánea múltiples parches de texto para resolver inconsistencias, cambios de continuidad o actualizaciones que afectan varios documentos. Cada parche debe modificar contenido real; nunca devuelvas texto_reemplazo vacío ni uses esta herramienta para borrar partes sin una instrucción explícita.",
             parameters: {
                 type: "object",
                 properties: {
@@ -177,7 +178,7 @@ export const DEEPSEEK_SCHEMAS = [
                             properties: {
                                 documento_id: { type: "string", description: "El ID o título del documento a modificar." },
                                 texto_original: { type: "string", description: "El fragmento exacto que se desea cambiar." },
-                                texto_reemplazo: { type: "string", description: "El nuevo texto corregido." }
+                                texto_reemplazo: { type: "string", minLength: 1, description: "El nuevo texto corregido y no vacío. Debe conservar la información original no afectada." }
                             },
                             required: ["documento_id", "texto_original", "texto_reemplazo"]
                         }
@@ -347,7 +348,7 @@ export const AIService = {
             // Enable schemas for tool calling if requested
             if (options.enableTools || (typeof model === 'string' && model.startsWith('deepseek') && options.enableTools !== false)) {
                 body.tools = DEEPSEEK_SCHEMAS;
-                body.tool_choice = "auto";
+                body.tool_choice = options.toolChoice || "auto";
             }
 
             // Enable JSON mode if requested (only if tools are not active)
@@ -474,8 +475,6 @@ export const AIService = {
             throw new Error(errorData?.error?.message || `Error DeepSeek (${response.status})`);
         }
 
-        console.info('[AIService] Stream conectado:', { model: modelId, status: response.status });
-
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -495,18 +494,17 @@ export const AIService = {
                     if (dataStr === '[DONE]' || !dataStr) continue;
                     try {
                         const data = JSON.parse(dataStr);
-                        console.debug('[AIService] SSE:', {
-                            finishReason: data.choices?.[0]?.finish_reason,
-                            hasContent: !!data.choices?.[0]?.delta?.content,
-                            toolCalls: data.choices?.[0]?.delta?.tool_calls?.length || 0,
-                        });
+                        if (AI_SERVICE_VERBOSE_LOGS && data.choices?.[0]?.finish_reason) {
+                            console.debug('[AIService] SSE final:', data.choices[0].finish_reason);
+                        }
                         const delta = data.choices?.[0]?.delta;
                         const text = delta?.content || '';
                         if (text) onChunk(text);
 
                         // Capture tool calls
                         if (delta?.tool_calls && Array.isArray(delta.tool_calls)) {
-                            console.debug('[AIService] Tool call fragment recibido');
+                            // Los argumentos llegan fragmentados; no se registra
+                            // cada fragmento para evitar llenar la consola.
                             delta.tool_calls.forEach(tc => {
                                 const idx = tc.index ?? 0;
                                 if (!activeToolCalls[idx]) {
@@ -545,7 +543,7 @@ export const AIService = {
                             });
                         }
                     } catch (e) {
-                        console.warn("[AIService] DeepSeek SSE parse error:", { error: e, line });
+                        console.warn("[AIService] Error al interpretar respuesta SSE:", e?.message || e);
                     }
                 }
             }
@@ -553,7 +551,6 @@ export const AIService = {
 
         // Trigger completed callbacks for tool calls if any
         if (activeToolCalls.length > 0 && settings?.onToolCall) {
-            console.info('[AIService] Tool calls completos:', activeToolCalls.map(tc => ({ name: tc.name, id: tc.id })));
             activeToolCalls.forEach(tc => {
                 if (tc && tc.name) {
                     settings.onToolCall(tc.name, tc.arguments, true, tc.id, tc.reasoningContent || '');

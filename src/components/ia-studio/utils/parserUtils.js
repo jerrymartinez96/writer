@@ -215,6 +215,50 @@ export const parseInconsistenciesFromResponse = (text) => {
 };
 
 /**
+ * Convierte una respuesta de sugerencias en tarjetas accionables. El formato
+ * estructurado es opcional: si la IA responde texto libre se crea una tarjeta
+ * única para no perder compatibilidad con sesiones anteriores.
+ */
+export const parseSuggestionsFromResponse = (text) => {
+    if (!text) return [];
+    const source = String(text);
+    const cleanSuggestionText = (value) => String(value || '')
+        .replace(/\[\[TIPO\s*:\s*(?:sugerencia|sugerir)\s*\]\]/gi, '')
+        .replace(/\[\[\/?TIPO(?:\s*:[^\]]*)?\]\]/gi, '')
+        .replace(/<response[_-]?type>\s*suggestion\s*<\/response[_-]?type>/gi, '')
+        .trim();
+    const suggestions = [];
+    const regex = /\[\[SUGERENCIA(?:\s+id="([^"]+)")?(?:\s+impacto="([^"]+)")?(?:\s+documentos="([^"]*)")?\]\]([\s\S]*?)\[\[\/SUGERENCIA\]\]/gi;
+    let match;
+
+    while ((match = regex.exec(source)) !== null) {
+        const body = match[4] || '';
+        const read = (tag) => {
+            const found = new RegExp(`\\[\\[${tag}\\]\\]([\\s\\S]*?)\\[\\[\\/${tag}\\]\\]`, 'i').exec(body);
+            return found ? found[1].trim() : '';
+        };
+        suggestions.push({
+            id: match[1] || `suggestion_${suggestions.length + 1}`,
+            impact: (match[2] || 'medio').toLowerCase(),
+            documents: (match[3] || '').split(',').map(item => item.trim()).filter(Boolean),
+            title: read('TITULO') || `Sugerencia ${suggestions.length + 1}`,
+            idea: cleanSuggestionText(read('IDEA') || body.replace(/\[\[[^\]]+\][\s\S]*?\[\[\/[^\]]+\]\]/g, '').trim()),
+            consequences: cleanSuggestionText(read('CONSECUENCIAS')),
+        });
+    }
+
+    if (suggestions.length > 0) return suggestions;
+    return [{
+        id: 'suggestion_1',
+        impact: 'medio',
+        documents: [],
+        title: 'Propuesta creativa',
+        idea: cleanSuggestionText(source),
+        consequences: '',
+    }];
+};
+
+/**
  * Intenta parsear una respuesta XML semántica o pseudo-etiquetas estructuradas
  */
 export const tryParseAIXml = (text) => {

@@ -13,10 +13,12 @@ import {
     SYSTEM_WORLD_ITEM_IDS,
     parseInconsistenciesFromResponse,
     SYSTEM_WORLD_ITEM_LABELS,
+    resolveDocumentReference,
     parseToolCallResponse,
     QUICK_ACTIONS,
 } from '../IAStudioUtils';
-import { classifyAction } from '../utils/intentClassifier';
+import { applyPatchesAtomically } from '../../../services/ai/OperationEngine';
+import { planRequest } from '../../../services/ai/RequestPlanner';
 
 import { AIService } from '../../../services/AIService';
 import { useData } from '../../../context/DataContext';
@@ -53,8 +55,8 @@ const sanitizeMessageForHistory = (content) => {
 export const useIAStudioState = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, characters, worldItems,
-        saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter,
-        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot,
+        saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, updateCharacter, createChapter,
+        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot, flushAllSaves,
         editor
     } = useData();
 
@@ -78,6 +80,7 @@ export const useIAStudioState = () => {
     } = useIAStudioContext();
 
     const [isLoading, setIsLoading] = useState(false);
+    const [processingStage, setProcessingStage] = useState('');
     const [isLoadingAutoCorrect, setIsLoadingAutoCorrect] = useState(false);
     const [diffBlocks, setDiffBlocks] = useState(null);
     const [showContextModal, setShowContextModal] = useState(false);
@@ -375,8 +378,11 @@ export const useIAStudioState = () => {
                     temperature: 0.2,
                     signal: abortControllerRef.current.signal,
                     enableTools,
+                    // La auditoría ya recibe el contexto completo y debe terminar
+                    // registrando inconsistencias; no debe quedarse en lecturas.
+                    ...(enableTools ? { toolChoice: { type: 'function', function: { name: 'registrar_inconsistencia' } } } : {}),
             onToolCall: (name, argsText, isComplete) => {
-                        console.info('[IAStudio][Chat] Tool call:', { name, isComplete, argsText });
+                        if (isComplete) console.info('[IAStudio][Chat] Herramienta completada:', { name });
                         if (isComplete) lastToolCall = { name, args: argsText };
                         const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
                         let displayContent = '⚠️ Analizando coherencia de lore...';
@@ -535,7 +541,7 @@ export const useIAStudioState = () => {
         const userMsgId = generateMsgId();
         const aiMsgId = generateMsgId();
         const userMsg = { id: userMsgId, role: 'user', content: displayUserMessage, isFormatCommand: true, formatDocTitle: docTitle, formatWordCount: wordCount, timestamp: Date.now() };
-        const aiMsg = { id: aiMsgId, role: 'assistant', content: '', isStreaming: true, timestamp: Date.now() };
+        const aiMsg = { id: aiMsgId, role: 'assistant', content: '', isStreaming: true, processingStage: 'Iniciando análisis…', timestamp: Date.now() };
         setMessages(prev => [...prev, userMsg, aiMsg]);
         if (activeSession) {
             SessionManager.addMessage(activeSession.id, userMsg);
@@ -543,6 +549,7 @@ export const useIAStudioState = () => {
             setSessions(SessionManager.getSessions());
         }
         setIsLoading(true);
+
         if (abortControllerRef.current) abortControllerRef.current.abort();
         abortControllerRef.current = new AbortController();
 
@@ -807,6 +814,8 @@ export const useIAStudioState = () => {
 
     const handleSend = useCallback(async (userMessage, overrideAction = null) => {
         let effectiveAction = overrideAction || selectedAction;
+        let requestPlan = null;
+        setProcessingStage('Interpretando la solicitud y determinando la operación…');
 
         if (effectiveAction === 'escribir' && sectionMode) {
             effectiveAction = 'seccion';
@@ -835,18 +844,95 @@ export const useIAStudioState = () => {
             const bookContext = activeBook
                 ? `Libro: ${activeBook.title || ''}${activeBook.description ? `\nSinopsis: ${activeBook.description}` : ''}`
                 : '';
-
-            const classifiedId = await classifyAction(
-                userMessage,
-                QUICK_ACTIONS || [],
+            const availableDocuments = [
+                ...(worldItems || []).filter(d => d.title).map(d => ({ id: d.id, title: d.title, type: 'worldItem' })),
+                ...(chapters || []).filter(d => !d.isVolume && d.title).map(d => ({ id: d.id, title: d.title, type: 'chapter' })),
+                ...(characters || []).filter(d => !d.isCategory && d.name).map(d => ({ id: d.id, title: d.name, type: 'character' })),
+            ];
+            requestPlan = await planRequest({
+                userText: userMessage,
                 apiKey,
                 modelId,
-                bookContext
-            );
+                actions: QUICK_ACTIONS || [],
+                bookContext,
+                availableDocuments,
+            });
+            effectiveAction = requestPlan.actionId || 'chat';
+            console.info('[IAStudio][Chat] Plan:', {
+                action: requestPlan.actionId,
+                scope: requestPlan.scope,
+                operation: requestPlan.operation,
+                risk: requestPlan.risk,
+            });
+        }
 
-            if (classifiedId && classifiedId !== 'chat') {
-                effectiveAction = classifiedId;
+        // Una instrucción dirigida a un grupo (“las elfas”, “todos los
+        // personajes”, “la menor”) no es un fragmento previamente seleccionado.
+        // Evita que el clasificador la reduzca a un parche singular sin contexto.
+        const normalizedRequest = userMessage.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const isCreativeConsultation = /\b(que te parece|podemos|quiza|quizas|tal vez|no se|considero que deberia|podriamos)\b/.test(normalizedRequest);
+        if (isCreativeConsultation && !overrideAction && ['fragmento', 'escribir', 'chat'].includes(effectiveAction)) {
+            effectiveAction = 'sugerir';
+            requestPlan = {
+                ...(requestPlan || {}),
+                actionId: 'sugerir',
+                intent: 'suggest',
+                operation: 'suggest',
+                scope: 'unknown',
+                requiresReading: true,
+                requiresClarification: false,
+                reason: 'consulta creativa; no se debe editar sin confirmación explícita',
+            };
+        }
+        const isBroadEditIntent = /\b(las|los|todos|todas|cada|varios|varias|grupo|elenco|familia|hermanas|elfas|personajes)\b/.test(normalizedRequest)
+            && /\b(modifica|modificar|cambia|cambiar|actualiza|actualizar|corrige|corregir|ajusta|ajustar|tendra|tendran|pasa|pasen)\b/.test(normalizedRequest);
+        if (isBroadEditIntent && !overrideAction && effectiveAction === 'fragmento') {
+            effectiveAction = 'chat';
+            requestPlan = requestPlan ? {
+                ...requestPlan,
+                actionId: 'chat',
+                intent: 'modify',
+                operation: 'continuity_update',
+                scope: 'entity_group',
+                risk: 'high',
+                requiresReading: true,
+            } : requestPlan;
+        }
+
+        if (!requestPlan && apiKey) {
+            requestPlan = {
+                intent: effectiveAction === 'chat' ? 'answer' : 'modify',
+                operation: effectiveAction === 'formatear' ? 'format_with_ai' : effectiveAction === 'sugerir' ? 'suggest' : effectiveAction === 'analizar' ? 'analyze' : 'propose_patch',
+                actionId: effectiveAction,
+                scope: activeFragment && effectiveAction === 'fragmento' ? 'single_fragment' : 'single_document',
+                risk: effectiveAction === 'formatear' ? 'medium' : 'low',
+                requiresReading: effectiveAction !== 'chat',
+                requiresClarification: false,
+                clarificationQuestion: '',
+                targetHints: [],
+                affectedDocumentHints: [],
+                confidence: 1,
+                reason: 'acción seleccionada manualmente',
+            };
+        }
+
+        if (requestPlan?.requiresClarification && requestPlan.clarificationQuestion) {
+            const userMsg = { id: generateMsgId(), role: 'user', content: userMessage, timestamp: Date.now() };
+            const assistantMsg = {
+                id: generateMsgId(),
+                role: 'assistant',
+                content: `Necesito una aclaración antes de modificar documentos: ${requestPlan.clarificationQuestion}`,
+                timestamp: Date.now(),
+                responseType: 'clarification',
+                operationPlan: requestPlan,
+            };
+            setMessages(prev => [...prev, userMsg, assistantMsg]);
+            if (activeSession) {
+                SessionManager.addMessage(activeSession.id, userMsg);
+                SessionManager.addMessage(activeSession.id, assistantMsg);
+                setSessions(SessionManager.getSessions());
             }
+            return;
         }
 
         if (!apiKey) {
@@ -881,9 +967,12 @@ export const useIAStudioState = () => {
         const extraOptions = {};
         extraOptions.chapters = chapters;
         extraOptions.worldItems = worldItems;
+        extraOptions.characters = characters;
+        extraOptions.requestPlan = requestPlan;
 
         const modelId = chatModel || defaultModel;
-        const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek');
+        const enableTools = typeof modelId === 'string' && modelId.startsWith('deepseek')
+            && !['sugerir', 'analizar'].includes(effectiveAction);
         extraOptions.useNativeTools = enableTools;
 
         if (effectiveAction === 'seccion' && sectionConfig) {
@@ -911,8 +1000,10 @@ export const useIAStudioState = () => {
             'modifica a todos', 'cambia a todos', 'aplica a todos', 'hazlo en todos'
         ];
         const msgLower = userMessage.toLowerCase();
-        const isMultiDocIntent = effectiveAction === 'chat' &&
-            MULTI_DOC_KEYWORDS.some(kw => kw.split(' ').length >= 2 && msgLower.includes(kw));
+        const isMultiDocIntent = effectiveAction === 'chat' && (
+            requestPlan?.scope === 'multiple_documents' || requestPlan?.scope === 'entity_group' || requestPlan?.scope === 'global_continuity' ||
+            isBroadEditIntent || MULTI_DOC_KEYWORDS.some(kw => kw.split(' ').length >= 2 && msgLower.includes(kw))
+        );
 
         let fullUserMessage = userMessage;
         if (effectiveAction === 'fragmento' && activeFragment) {
@@ -921,6 +1012,18 @@ export const useIAStudioState = () => {
 
         if (isMultiDocIntent) {
             fullUserMessage = `${fullUserMessage}\n\n[NOTA TÉCNICA: Esta instrucción afecta a MÚLTIPLES documentos. Usa obligatoriamente la herramienta \`aplicar_parches_resolucion\` con un parche separado por cada documento/personaje afectado. NO uses \`aplicar_parche\` (singular).]`;
+        }
+
+        if (requestPlan) {
+            fullUserMessage = `${fullUserMessage}\n\n[PLAN VALIDADO POR EL ORQUESTADOR]\n${JSON.stringify({
+                intent: requestPlan.intent,
+                operation: requestPlan.operation,
+                scope: requestPlan.scope,
+                risk: requestPlan.risk,
+                requiresReading: requestPlan.requiresReading,
+                targetHints: requestPlan.targetHints,
+                affectedDocumentHints: requestPlan.affectedDocumentHints,
+            })}\nNo ejecutes una modificación hasta tener la evidencia documental necesaria. No inventes texto_original.`;
         }
 
         const systemPrompt = buildSystemPrompt(
@@ -958,17 +1061,25 @@ export const useIAStudioState = () => {
 
         setIsLoading(true);
 
+        const updateProcessingStage = (stage) => {
+            setProcessingStage(stage);
+            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, processingStage: stage } : m));
+        };
+
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
         abortControllerRef.current = new AbortController();
 
         try {
+            updateProcessingStage(requestPlan?.requiresReading || effectiveAction !== 'chat'
+                ? 'Preparando la lectura de los documentos relevantes…'
+                : 'Consultando a la IA…');
             const startTime = Date.now();
             let fullResponse = '';
             let finalUsage = null;
             let lastToolCall = { name: '', args: '' };
-            let lastToolReasoningContent = '';
+            const completedToolCalls = [];
 
             await AIService.generateStream(aiMessages, {
                 selectedAiModel: modelId,
@@ -980,10 +1091,10 @@ export const useIAStudioState = () => {
                 signal: abortControllerRef.current.signal,
                 enableTools: enableTools,
                 onToolCall: (name, argsText, isComplete, toolCallId, reasoningContent) => {
-                    console.info('[IAStudio][Chat] Tool call:', { name, isComplete, argsText });
+                    if (isComplete) console.info('[IAStudio][Chat] Herramienta completada:', { name });
                     if (isComplete) {
                         lastToolCall = { name, args: argsText };
-                        lastToolReasoningContent = reasoningContent || '';
+                        completedToolCalls.push({ name, args: argsText, reasoningContent: reasoningContent || '' });
                     }
                     
                     const parsedBlocks = parseToolCallResponse(name, argsText, destinationDoc, chapters, worldItems, characters);
@@ -992,20 +1103,24 @@ export const useIAStudioState = () => {
                     let inconsistencies = undefined;
 
                     if (name === 'crear_capitulo') {
+                        updateProcessingStage('La IA está preparando el nuevo documento…');
                         streamResponseType = 'content';
                         const block = parsedBlocks[0];
                         displayContent = `🆕 **Nuevo Capítulo (Streaming)**: ${block?.title || 'Creando...'}\n\n`;
                     } else if (name === 'aplicar_parche' || name === 'localizar_parche_exacto') {
+                        updateProcessingStage('La IA está localizando el fragmento exacto…');
                         streamResponseType = 'patch';
                         const patch = parsedBlocks[0];
                         displayContent = `✂️ **Fragmento editado (Streaming)** en *${patch?.title || 'Buscando documento...'}*\n\n**Original:**\n> ${patch?.original || '...'}\n\n**Reemplazo:**\n> ${patch?.content || '...'}`;
                     } else if (name === 'aplicar_parches_resolucion') {
+                        updateProcessingStage(isComplete ? 'Parches preparados; validando documentos y coincidencias…' : 'La IA está construyendo parches por documento…');
                         streamResponseType = 'patch';
                         const numParches = parsedBlocks.length;
                         displayContent = isComplete
                             ? `🔧 **${numParches} parche(s) de resolución listos** — aplicando cambios en ${numParches} documento(s)...`
                             : `🔧 **Construyendo parches de resolución...** (${numParches} detectado(s) hasta ahora)`;
                     } else if (name === 'registrar_inconsistencia') {
+                        updateProcessingStage('La IA está comparando documentos y registrando inconsistencias…');
                         streamResponseType = 'inconsistencies';
                         const block = parsedBlocks[0];
                         inconsistencies = block?.inconsistencies || [];
@@ -1078,41 +1193,72 @@ export const useIAStudioState = () => {
 
             // Si el modelo primero pidió leer un documento, continuar el ciclo
             // con el contenido real en lugar de finalizar con una respuesta vacía.
-            if (lastToolCall.name === 'leer_documento') {
-                let readArgs = {};
-                try { readArgs = JSON.parse(lastToolCall.args || '{}'); } catch (error) {
-                    console.warn('[IAStudio][Chat] Argumentos inválidos de leer_documento:', error);
-                }
-                const requestedId = readArgs.documento_id || '';
-                const readDoc = [
+            const completedReads = completedToolCalls.filter(tc => tc.name === 'leer_documento');
+            if (completedReads.length > 0) {
+                const availableDocs = [
                     ...(worldItems || []).filter(item => item.title),
                     ...(chapters || []).filter(item => item.title),
                     ...(characters || []).filter(item => item.name).map(item => ({ ...item, title: item.name })),
-                ].find(item => item.id === requestedId || item.title === requestedId);
+                ];
+                const readResults = completedReads.map((readCall, index) => {
+                    let readArgs = {};
+                    try { readArgs = JSON.parse(readCall.args || '{}'); } catch (error) {
+                        console.warn('[IAStudio][Chat] Argumentos inválidos de leer_documento:', error);
+                    }
+                    const requestedId = readArgs.documento_id || '';
+                    const readDoc = availableDocs.find(item => item.id === requestedId || item.title === requestedId);
+                    if (!readDoc) return null;
+                    return {
+                        readArgs,
+                        readDoc,
+                        toolId: `chat_read_${Date.now().toString(36)}_${index}`,
+                        reasoningContent: readCall.reasoningContent || '',
+                    };
+                }).filter(Boolean);
 
-                if (readDoc) {
-                    console.info('[IAStudio][Chat] Continuando después de leer_documento:', readDoc.title);
-                    const toolId = `chat_read_${Date.now().toString(36)}`;
+                if (readResults.length > 0) {
+                    updateProcessingStage(`Documentos leídos: ${readResults.map(r => r.readDoc.title).join(', ')}. La IA está preparando los cambios…`);
+                    console.info('[IAStudio][Chat] Continuando después de leer_documento:', readResults.map(r => r.readDoc.title));
+                    const normalizedUserRequest = msgLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const mentionedDocs = availableDocs.filter(doc => {
+                        const title = String(doc.title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        if (title && normalizedUserRequest.includes(title)) return true;
+                        const chapterMatch = title.match(/(?:capitulo|capítulo)\s*(\d+)/i);
+                        return Boolean(chapterMatch && new RegExp(`\\b(?:capitulo|capítulo)\\s*${chapterMatch[1]}\\b`, 'i').test(userMessage));
+                    });
+                    const supplementaryDocs = (isMultiDocIntent || requestPlan?.scope === 'multiple_documents' || requestPlan?.scope === 'global_continuity')
+                        ? mentionedDocs.filter(doc => !readResults.some(result => result.readDoc.id === doc.id)).slice(0, 20)
+                        : [];
+                    if (supplementaryDocs.length > 0) {
+                        updateProcessingStage(`Ampliando la revisión a: ${supplementaryDocs.map(doc => doc.title).join(', ')}…`);
+                    }
+                    const resolutionTool = activeResolutionRef.current || isMultiDocIntent || requestPlan?.scope === 'entity_group' || requestPlan?.scope === 'global_continuity'
+                        ? 'aplicar_parches_resolucion'
+                        : 'aplicar_parche';
                     const continuationMessages = [
                         ...aiMessages,
-                            {
-                                role: 'assistant',
-                                content: null,
-                                ...(lastToolReasoningContent ? { reasoning_content: lastToolReasoningContent } : {}),
-                                tool_calls: [{
-                                id: toolId,
-                                type: 'function',
-                                function: { name: 'leer_documento', arguments: JSON.stringify(readArgs) },
-                            }],
-                        },
                         {
-                            role: 'tool',
-                            tool_call_id: toolId,
-                            content: `Contenido actual de "${readDoc.title}":\n${readDoc.content || '<p></p>'}\n\n` +
-                                `Debes ejecutar ahora una modificación. No respondas con explicaciones ni texto conversacional. ` +
-                                `Llama obligatoriamente a aplicar_parche usando documento_id "${readDoc.title}". ` +
-                                `Si el documento está vacío, usa texto_original como cadena vacía y texto_reemplazo como el contenido solicitado por el escritor, en HTML limpio.`,
+                            role: 'assistant',
+                            content: null,
+                            ...(readResults[0].reasoningContent ? { reasoning_content: readResults[0].reasoningContent } : {}),
+                            tool_calls: readResults.map(result => ({
+                                id: result.toolId,
+                                type: 'function',
+                                function: { name: 'leer_documento', arguments: JSON.stringify(result.readArgs) },
+                            })),
                         },
+                        ...readResults.map(result => ({
+                            role: 'tool',
+                            tool_call_id: result.toolId,
+                            content: `Contenido actual de "${result.readDoc.title}":\n${result.readDoc.description || result.readDoc.content || '<p></p>'}\n\n` +
+                                `Debes ejecutar ahora una modificación. No respondas con explicaciones ni texto conversacional. ` +
+                                `Llama obligatoriamente a ${resolutionTool}. Copia texto_original literalmente del contenido actual. ` +
+                                `Si el documento está vacío, usa texto_original como cadena vacía y el contenido solicitado como texto_reemplazo.`,
+                        })),
+                        ...(supplementaryDocs.length > 0 ? [{
+                            role: 'user',
+                            content: `DOCUMENTOS ADICIONALES QUE DEBES REVISAR ANTES DE CREAR LOS PARCHES:\n${supplementaryDocs.map(doc => `--- ${doc.title} (ID: ${doc.id}) ---\n${doc.description || doc.content || '<p></p>'}`).join('\n\n')}\n\nLa petición afecta a todos los documentos mencionados. Devuelve un parche separado por cada documento donde exista contenido que deba cambiar. No omitas capítulos mencionados y no uses un reemplazo vacío.`,
+                        }] : []),
                     ];
                     fullResponse = '';
                     lastToolCall = { name: '', args: '' };
@@ -1126,12 +1272,39 @@ export const useIAStudioState = () => {
                         temperature: effectiveAction === 'formatear' ? 0.0 : temperature,
                         signal: abortControllerRef.current.signal,
                         enableTools,
-                        toolChoice: { type: 'function', function: { name: 'aplicar_parche' } },
+                        // En resoluciones o ediciones amplias fijamos la herramienta
+                        // multi-parche. En una edición normal dejamos que el modelo
+                        // pueda pedir otra lectura si todavía no tiene evidencia.
+                        toolChoice: (activeResolutionRef.current || isMultiDocIntent || requestPlan?.scope === 'entity_group' || requestPlan?.scope === 'global_continuity')
+                            ? { type: 'function', function: { name: resolutionTool } }
+                            : 'auto',
                         onToolCall: (name, argsText, isComplete) => {
-                            console.info('[IAStudio][Chat] Tool call continuación:', { name, isComplete, argsText });
+                            if (isComplete) console.info('[IAStudio][Chat] Herramienta final:', { name });
                             if (isComplete) lastToolCall = { name, args: argsText };
                         },
                     }, (chunk) => { fullResponse += chunk; }, (usage) => { finalUsage = usage; });
+
+                    // Una llamada vacía no es una operación válida. No se debe abrir
+                    // un diff ni confirmar éxito; mostramos un diagnóstico útil.
+                    if (lastToolCall.name === 'aplicar_parche' || lastToolCall.name === 'aplicar_parches_resolucion') {
+                        try {
+                            const args = JSON.parse(lastToolCall.args || '{}');
+                            const patches = lastToolCall.name === 'aplicar_parches_resolucion'
+                                ? (Array.isArray(args.parches) ? args.parches : [])
+                                : [args];
+                            const invalidPatchIndex = patches.findIndex(p => !(p.texto_original || '').trim() || !(p.texto_reemplazo || '').trim());
+                            if (patches.length === 0 || invalidPatchIndex >= 0) {
+                                lastToolCall = { name: '', args: '' };
+                                fullResponse = patches.length === 0
+                                    ? '⚠️ La IA no devolvió parches. No se aplicó ningún cambio.'
+                                    : `⚠️ El parche ${invalidPatchIndex + 1} llegó incompleto (texto original o reemplazo vacío). No se aplicó ningún cambio para evitar eliminar contenido accidentalmente.`;
+                            }
+                        } catch (error) {
+                            console.warn('[IAStudio][Chat] Parche devuelto con argumentos inválidos:', error);
+                            lastToolCall = { name: '', args: '' };
+                            fullResponse = '⚠️ La IA devolvió un parche inválido. No se aplicó ningún cambio.';
+                        }
+                    }
                 }
             }
 
@@ -1147,6 +1320,7 @@ export const useIAStudioState = () => {
                     m.id === aiMsgId ? { ...m, content: errorMsg, isStreaming: false, responseType: 'error' } : m
                 ));
             } else {
+                updateProcessingStage('Validando la respuesta de la IA y preparando la vista de cambios…');
                 let parsedBlocks = [];
                 let displayContent = '';
                 let responseType = 'analysis';
@@ -1171,7 +1345,7 @@ export const useIAStudioState = () => {
                         responseType = 'patch';
                         const numParches = parsedBlocks.length;
                         const docs = [...new Set(parsedBlocks.map(b => b.title).filter(Boolean))];
-                        displayContent = `🔧 **${numParches} parche(s) aplicados** en ${numParches} documento(s): ${docs.join(', ')}`;
+                        displayContent = `🔧 **${numParches} parche(s) preparados** en ${docs.length} documento(s): ${docs.join(', ')}. Revisa la vista de cambios antes de aplicar.`;
                     } else if (lastToolCall.name === 'registrar_inconsistencia') {
                         responseType = 'inconsistencies';
                         inconsistencies = block?.inconsistencies || [];
@@ -1336,6 +1510,7 @@ export const useIAStudioState = () => {
             }
         } finally {
             setIsLoading(false);
+            setProcessingStage('');
             abortControllerRef.current = null;
         }
     }, [activeBook, chapters, characters, worldItems, contextSelections, destinationDoc, selectedAction,
@@ -1397,27 +1572,52 @@ export const useIAStudioState = () => {
         const msg = messagesRef.current.find(m => m.id === messageId);
         if (!msg) return;
 
+        setProcessingStage(isRetry
+            ? 'Revisando nuevamente la solución y localizando los fragmentos exactos…'
+            : 'Analizando la solución elegida y sus documentos relacionados…');
+
         const inconsistencies = msg.inconsistencies || parseInconsistenciesFromResponse(msg.rawResponse || msg.content) || [];
         const inc = inconsistencies.find(i => i.id === inconsistencyId);
         if (!inc) return;
 
         const affectedContents = [];
-        inc.files.forEach(fId => {
-            let docContent = '';
-            let docTitle = fId;
-            if (fId.startsWith('system_')) {
-                const doc = worldItems?.find(w => w.id === fId);
-                docContent = doc?.content || '';
-                docTitle = SYSTEM_WORLD_ITEM_LABELS[fId] || fId;
-            } else {
-                const doc = chapters?.find(c => c.title?.toLowerCase() === fId.toLowerCase() || c.id === fId);
-                docContent = doc?.content || '';
-                docTitle = doc?.title || fId;
+        const affectedReferences = [];
+        (inc.files || []).forEach(fId => {
+            const resolved = resolveDocumentReference(fId, chapters, worldItems, characters);
+
+            // "Personajes" es un grupo virtual. Expandirlo evita que la IA
+            // intente aplicar un parche contra un ID que no representa un
+            // documento editable.
+            if (resolved.virtual) {
+                (characters || []).forEach(character => {
+                    affectedReferences.push({ id: character.id, title: character.name, docType: 'character' });
+                    affectedContents.push(`--- PERSONAJE: "${character.name}" (ID: ${character.id}) ---\n${character.description || character.content || ''}`);
+                });
+                return;
             }
-            affectedContents.push(`--- DOCUMENTO: "${docTitle}" (ID: ${fId}) ---\n${docContent}`);
+
+            affectedReferences.push(resolved);
+            let docContent = '';
+            if (resolved.docType === 'character') {
+                const doc = characters?.find(c => c.id === resolved.id);
+                docContent = doc?.description || doc?.content || '';
+            } else if (resolved.docType === 'chapter') {
+                const doc = chapters?.find(c => c.id === resolved.id);
+                docContent = doc?.content || '';
+            } else if (resolved.docType === 'worldItem') {
+                const doc = worldItems?.find(w => w.id === resolved.id);
+                docContent = doc?.content || '';
+            }
+            const title = resolved.exists ? resolved.title : `NO ENCONTRADO: ${resolved.raw}`;
+            affectedContents.push(`--- DOCUMENTO: "${title}" (ID: ${resolved.id || resolved.raw}, tipo: ${resolved.docType || 'desconocido'}) ---\n${docContent || '[Sin contenido cargado; no inventes el texto original.]'}`);
         });
 
         const filesContextText = affectedContents.join('\n\n');
+        const documentCatalog = [
+            ...(chapters || []).filter(doc => !doc.isVolume).map(doc => ({ id: doc.id, title: doc.title, tipo: 'capítulo' })),
+            ...(worldItems || []).map(doc => ({ id: doc.id, title: doc.title, tipo: 'documento' })),
+            ...(characters || []).map(doc => ({ id: doc.id, title: doc.name, tipo: 'personaje' })),
+        ];
 
         setIsLoading(true);
         setActiveResolution({
@@ -1425,6 +1625,10 @@ export const useIAStudioState = () => {
             inconsistencyId,
             title: inc.title,
             option,
+            // Guardamos el texto real también para opciones A/B/C. El botón
+            // de regenerar usa este valor; no debe sustituirlo por "applied"
+            // ni volver a enviar solo la letra de la opción.
+            solutionText,
             customText: option === 'CUSTOM' ? solutionText : '',
             retryCount: isRetry ? ((activeResolution?.retryCount || 0) + 1) : 0
         });
@@ -1446,7 +1650,24 @@ export const useIAStudioState = () => {
             
             const systemPrompt = buildSystemPrompt('inconsistencia', contextText, destinationDoc, activeChapter || activeWorldDoc, { useNativeTools: enableTools });
 
-            const userMessage = `Resuelve la inconsistencia: "${inc.title}".\nDetalle: ${inc.problem}\nOpción elegida por el escritor: ${option === 'CUSTOM' ? solutionText : option}\n\nContenido de los documentos afectados:\n${filesContextText}\n\nUsa obligatoriamente la herramienta \`aplicar_parches_resolucion\` para aplicar los cambios a los documentos correspondientes de forma limpia.`;
+            const selectedSolution = option === 'CUSTOM'
+                ? `Personalizada: ${solutionText}`
+                : `Opción ${option}: ${solutionText || inc.options?.find(item => item.letter === option)?.text || '[texto de opción no disponible]'}`;
+            const affectedIds = affectedReferences.filter(ref => ref.id).map(ref => `${ref.id} (${ref.title})`).join(', ');
+            const userMessage = `Resuelve la inconsistencia: "${inc.title}".
+Detalle: ${inc.problem}
+SOLUCIÓN ELEGIDA POR EL ESCRITOR (debes respetarla exactamente): ${selectedSolution}
+Referencias afectadas detectadas: ${affectedIds || '[ninguna resoluble]'}
+
+Catálogo de documentos disponibles (usa siempre el ID exacto al crear cada parche):
+${JSON.stringify(documentCatalog)}
+
+Contenido de los documentos afectados:
+${filesContextText}
+
+Revisa todos los documentos del catálogo y todos los contenidos proporcionados. Si la misma regla o dato aparece en más de un documento, devuelve un parche separado para CADA documento que realmente contenga el texto que debe cambiar. No te limites al primer documento ni inventes parches para documentos sin el dato. Cada parche debe llevar documento_id, texto_original copiado literalmente del contenido y texto_reemplazo no vacío. Si no puedes localizar el texto exacto, no marques la solución como aplicada: informa el problema.
+
+Usa obligatoriamente la herramienta \`aplicar_parches_resolucion\` y agrupa todos los parches en una sola llamada.`;
 
             const aiMessages = [
                 { role: 'system', content: systemPrompt },
@@ -1457,51 +1678,23 @@ export const useIAStudioState = () => {
                 model: modelId,
                 temperature: 0.2,
                 enableTools: true,
+                toolChoice: { type: 'function', function: { name: 'aplicar_parches_resolucion' } },
                 deepseekApiKey: apiKey
             });
 
-            setMessages(prev => prev.map(m => {
-                if (m.id === messageId) {
-                    const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
-                    const updated = currentInconsistencies.map(item => {
-                        if (item.id === inconsistencyId) {
-                            return { ...item, resolved: true, selectedOption: option, customText: option === 'CUSTOM' ? solutionText : undefined };
-                        }
-                        return item;
-                    });
-                    return { ...m, inconsistencies: updated };
-                }
-                return m;
-            }));
-
-            if (activeSession) {
-                setTimeout(() => {
-                    const currentSession = SessionManager.getSession(activeSession.id);
-                    if (currentSession) {
-                        const updatedMessages = currentSession.messages.map(m => {
-                            if (m.id === messageId) {
-                                const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
-                                const updated = currentInconsistencies.map(item => {
-                                    if (item.id === inconsistencyId) {
-                                        return { ...item, resolved: true, selectedOption: option, customText: option === 'CUSTOM' ? solutionText : undefined };
-                                    }
-                                    return item;
-                                });
-                                return { ...m, inconsistencies: updated };
-                            }
-                            return m;
-                        });
-                        SessionManager.saveSessionMessages(activeSession.id, updatedMessages);
-                        setActiveSession(SessionManager.getSession(activeSession.id));
-                        setSessions(SessionManager.getSessions());
-                    }
-                }, 100);
-            }
+            setProcessingStage('Validando todos los parches propuestos antes de mostrar cambios…');
 
             const parsedBlocks = parseDestinationsFromResponse(response, destinationDoc, chapters, worldItems, characters);
-            if (parsedBlocks && parsedBlocks.length > 0) {
+            const invalidBlocks = (parsedBlocks || []).filter(block => block.isPatch && (!(block.original || '').trim() || !(block.content || '').trim()));
+            if (invalidBlocks.length > 0) {
+                setActiveResolution(null);
+                window.dispatchEvent(new CustomEvent('ia-toast', {
+                    detail: { message: '⚠️ La IA devolvió uno o más parches vacíos. No se abrió la propuesta para evitar borrar contenido.', type: 'warning' }
+                }));
+            } else if (parsedBlocks && parsedBlocks.length > 0) {
                 handleShowDiff(parsedBlocks);
             } else {
+                setActiveResolution(null);
                 window.dispatchEvent(new CustomEvent('ia-toast', {
                     detail: { message: '⚠️ La IA no devolvió cambios válidos. Inténtalo de nuevo.', type: 'warning' }
                 }));
@@ -1513,9 +1706,10 @@ export const useIAStudioState = () => {
             }));
         } finally {
             setIsLoading(false);
+            setProcessingStage('');
         }
     }, [chapters, worldItems, characters, activeBook, contextSelections, compressContext,
-        getApiKey, chatModel, defaultModel, destinationDoc, activeChapter, handleShowDiff, activeResolution, setMessages, activeSession, setSessions]);
+        getApiKey, chatModel, defaultModel, destinationDoc, activeChapter, handleShowDiff, activeResolution, setMessages, activeSession, setSessions, setProcessingStage]);
 
     const handleReopenInconsistency = useCallback((messageId, inconsistencyId) => {
         setMessages(prev => prev.map(m => {
@@ -1523,7 +1717,7 @@ export const useIAStudioState = () => {
                 const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
                 const updated = currentInconsistencies.map(inc => {
                     if (inc.id === inconsistencyId) {
-                        return { ...inc, resolved: false, wasResolved: true, selectedOption: null };
+                        return { ...inc, resolved: false, wasResolved: true, selectedOption: null, resolutionStatus: 'pending', resolutionError: null };
                     }
                     return inc;
                 });
@@ -1541,7 +1735,7 @@ export const useIAStudioState = () => {
                             const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
                             const updated = currentInconsistencies.map(inc => {
                                     if (inc.id === inconsistencyId) {
-                                        return { ...inc, resolved: false, wasResolved: true, selectedOption: null };
+                                        return { ...inc, resolved: false, wasResolved: true, selectedOption: null, resolutionStatus: 'pending', resolutionError: null };
                                     }
                                     return inc;
                                 });
@@ -1768,7 +1962,65 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             return;
         }
 
+        // Todas las operaciones de parches pasan por el mismo validador que usa
+        // Coescritor. Esto evita guardar cambios parciales o confirmar un éxito
+        // cuando algún fragmento no se localizó.
+        const patchBlocksOnly = blocks.filter(block => block.isPatch);
+        if (patchBlocksOnly.length === blocks.length && patchBlocksOnly.length > 0) {
+            const result = await applyPatchesAtomically({
+                patches: patchBlocksOnly,
+                documents: { chapters, worldItems, characters },
+                saveDocument: async (target, html) => {
+                    if (target.docType === 'chapter') {
+                        if (target.docId === activeChapter?.id) saveChapterContent(html, 'ia');
+                        else updateChapter(target.docId, { content: html });
+                    } else if (target.docType === 'worldItem') {
+                        if (target.docId === activeWorldDoc?.id) saveWorldDocContent(html, 'ia');
+                        else updateWorldItem(target.docId, { content: html });
+                    } else if (target.docType === 'character') {
+                        updateCharacter(target.docId, { description: html });
+                    }
+                },
+                flushSaves: flushAllSaves,
+                snapshot: (docId, html) => saveDocumentSnapshot(docId, html, 'ia'),
+            });
+
+            if (activeResolution) {
+                const { messageId, inconsistencyId, option, customText } = activeResolution;
+                const succeeded = result.status === 'applied';
+                const updateInconsistency = (m) => {
+                    if (m.id !== messageId) return m;
+                    const current = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
+                    return {
+                        ...m,
+                        inconsistencies: current.map(inc => inc.id === inconsistencyId
+                            ? (succeeded
+                                ? { ...inc, resolved: true, selectedOption: option, customText, resolutionStatus: 'applied' }
+                                : { ...inc, resolved: false, selectedOption: option, customText, resolutionStatus: 'failed', resolutionError: result.failures.join(' ') })
+                            : inc),
+                    };
+                };
+                setMessages(prev => prev.map(updateInconsistency));
+                if (activeSession) {
+                    const currentSession = SessionManager.getSession(activeSession.id);
+                    if (currentSession) {
+                        SessionManager.saveSessionMessages(activeSession.id, currentSession.messages.map(updateInconsistency));
+                        setActiveSession(SessionManager.getSession(activeSession.id));
+                        setSessions(SessionManager.getSessions());
+                    }
+                }
+                window.dispatchEvent(new CustomEvent('ia-toast', { detail: succeeded
+                    ? { message: '✅ Cambios verificados e inconsistencia resuelta.', type: 'success' }
+                    : { message: `⚠️ No se aplicó la resolución: ${result.failures.join(' ')}`, type: 'warning' } }));
+                setActiveResolution(null);
+            }
+            setDiffBlocks(null);
+            return;
+        }
+
         const modifiedDocs = {};
+        const patchFailures = [];
+        let appliedPatchCount = 0;
 
         for (const block of blocks) {
             if (block.mode === 'text') {
@@ -1784,11 +2036,15 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                     return dTitle.toLowerCase().trim() === block.title.toLowerCase().trim();
                 }) || null;
             }
-            if (!targetDoc) {
+            if (!targetDoc && !block.isPatch) {
                 targetDoc = activeChapter || activeWorldDoc || null;
             }
 
             if (block.isPatch) {
+                if (!targetDoc) {
+                    patchFailures.push(`Documento "${block.title || block.docId || 'desconocido'}" no encontrado.`);
+                    continue;
+                }
                 let targetHtml = '';
                 if (targetDoc?.id && modifiedDocs[targetDoc.id]) {
                     targetHtml = modifiedDocs[targetDoc.id].finalHtml;
@@ -1799,6 +2055,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                 const { success, html: patchedHtml, method } = applyPatch(targetHtml, block.original, block.proposedContent);
 
                 if (!success) {
+                    patchFailures.push(`No se encontró el texto original en "${block.title || 'el documento'}".`);
                     console.warn(`[IAStudio] Patch not applied (method: ${method}). Fragment not found in document.`);
                     window.dispatchEvent(new CustomEvent('ia-toast', {
                         detail: { message: `⚠️ No se encontró el fragmento en "${block.title || 'el documento'}". Aplica el cambio manualmente.`, type: 'warning' }
@@ -1806,15 +2063,23 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                     continue;
                 }
 
+                if (patchedHtml === targetHtml) {
+                    patchFailures.push(`El parche de "${block.title || 'el documento'}" no produjo cambios.`);
+                    continue;
+                }
+                appliedPatchCount += 1;
+
                 if (targetDoc?.id) {
                     const isChapter = chapters?.some(c => c.id === targetDoc.id);
                     const isWorldItem = worldItems?.some(w => w.id === targetDoc.id);
+                    const isCharacter = characters?.some(c => c.id === targetDoc.id);
                     
                     modifiedDocs[targetDoc.id] = {
                         finalHtml: patchedHtml,
                         targetDoc,
                         isChapter,
-                        isWorldItem
+                        isWorldItem,
+                        isCharacter
                     };
                 } else {
                     const activeDoc = activeChapter || activeWorldDoc;
@@ -1938,8 +2203,14 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             }
         }
 
+        // Las resoluciones de inconsistencias son atómicas: si un parche falla,
+        // no guardamos los demás para evitar dejar el lore parcialmente actualizado.
+        if (activeResolution && patchFailures.length > 0) {
+            Object.keys(modifiedDocs).forEach(docId => delete modifiedDocs[docId]);
+        }
+
         for (const docId of Object.keys(modifiedDocs)) {
-            const { finalHtml, isChapter, isWorldItem } = modifiedDocs[docId];
+            const { finalHtml, isChapter, isWorldItem, isCharacter } = modifiedDocs[docId];
 
             if (isChapter) {
                 if (docId === activeChapter?.id) {
@@ -1957,17 +2228,29 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                     updateWorldItem(docId, { content: finalHtml });
                     await saveDocumentSnapshot(docId, finalHtml, 'ia');
                 }
+            } else if (isCharacter) {
+                updateCharacter(docId, { description: finalHtml });
+                await saveDocumentSnapshot(docId, finalHtml, 'ia');
             }
+        }
+
+        // updateChapter/updateWorldItem/updateCharacter usan guardado diferido;
+        // esperamos a que termine antes de confirmar la resolución al escritor.
+        if (Object.keys(modifiedDocs).length > 0 && flushAllSaves) {
+            await flushAllSaves();
         }
 
         if (activeResolution) {
             const { messageId, inconsistencyId, option, customText } = activeResolution;
+            const resolutionSucceeded = appliedPatchCount > 0 && patchFailures.length === 0;
             setMessages(prev => prev.map(m => {
                 if (m.id === messageId) {
                     const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
                     const updated = currentInconsistencies.map(inc => {
                         if (inc.id === inconsistencyId) {
-                            return { ...inc, resolved: true, selectedOption: option, customText };
+                            return resolutionSucceeded
+                                ? { ...inc, resolved: true, selectedOption: option, customText, resolutionStatus: 'applied' }
+                                : { ...inc, resolved: false, selectedOption: option, customText, resolutionStatus: 'failed', resolutionError: patchFailures.join(' ') };
                         }
                         return inc;
                     });
@@ -1985,7 +2268,9 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
                                 const currentInconsistencies = m.inconsistencies || parseInconsistenciesFromResponse(m.rawResponse || m.content) || [];
                                 const updated = currentInconsistencies.map(inc => {
                                     if (inc.id === inconsistencyId) {
-                                        return { ...inc, resolved: true, selectedOption: option, customText };
+                                        return resolutionSucceeded
+                                            ? { ...inc, resolved: true, selectedOption: option, customText, resolutionStatus: 'applied' }
+                                            : { ...inc, resolved: false, selectedOption: option, customText, resolutionStatus: 'failed', resolutionError: patchFailures.join(' ') };
                                     }
                                     return inc;
                                 });
@@ -2001,14 +2286,16 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
             }
 
             window.dispatchEvent(new CustomEvent('ia-toast', {
-                detail: { message: '✅ Cambios guardados e Inconsistencia resuelta con éxito.', type: 'success' }
+                detail: resolutionSucceeded
+                    ? { message: '✅ Cambios guardados e inconsistencia resuelta con éxito.', type: 'success' }
+                    : { message: `⚠️ La inconsistencia sigue pendiente: ${patchFailures.join(' ') || 'no se aplicaron cambios.'}`, type: 'warning' }
             }));
 
             setActiveResolution(null);
         }
 
         setDiffBlocks(null);
-    }, [saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, createChapter, activeChapter, activeWorldDoc, chapters, worldItems, accumulatedSections, activeResolution, setMessages, activeSession, setSessions]);
+    }, [saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, updateCharacter, createChapter, activeChapter, activeWorldDoc, chapters, worldItems, characters, accumulatedSections, activeResolution, flushAllSaves, setMessages, activeSession, setSessions]);
 
     const handleExport = useCallback(() => {
         if (messages.length === 0) return;
@@ -2051,6 +2338,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
     return {
         // States
         isLoading,
+        processingStage,
         isLoadingAutoCorrect,
         diffBlocks,
         showContextModal,
