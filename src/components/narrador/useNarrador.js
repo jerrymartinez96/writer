@@ -67,6 +67,8 @@ export const useNarrador = ({
     const [segmentProgress, setSegmentProgress] = useState(0);
     const [isSegmentSyncReady, setIsSegmentSyncReady] = useState(false);
     const [cachedSegmentIndexes, setCachedSegmentIndexes] = useState(() => new Set());
+    const [isPreparing, setIsPreparing] = useState(false);
+    const [preparationProgress, setPreparationProgress] = useState({ completed: 0, total: 0, etaSeconds: null });
 
     const segmentsRef = useRef([]);
     const currentIndexRef = useRef(0);
@@ -94,6 +96,9 @@ export const useNarrador = ({
     const estimatedSpeechDurationRef = useRef(0);
     const displayedProgressRef = useRef(0);
     const syncWarmupUntilRef = useRef(0);
+    const preparationRunRef = useRef(0);
+    const isPreparingRef = useRef(false);
+    const wakeLockRef = useRef(null);
 
     useEffect(() => { statusRef.current = status; }, [status]);
     useEffect(() => {
@@ -256,9 +261,32 @@ export const useNarrador = ({
         markSegmentCached(segmentIndex);
     }, [buildAudioVariant, markSegmentCached]);
 
-    useEffect(() => {
-        refreshSegmentCacheStatus();
-    }, [activeChapter?.id, profileData?.aiConfig?.geminiLiveModel, profileData?.aiConfig?.narradorTone, profileData?.aiConfig?.narradorVoice, refreshSegmentCacheStatus, segments.length]);
+    const stopWebSpeech = useCallback(() => {
+        try {
+            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        } catch { /* ignore */ }
+    }, []);
+
+    const stopAllAudio = useCallback(() => {
+        try {
+            if (motorRef.current === 'web-speech') {
+                stopWebSpeech();
+            } else if (motorRef.current === 'gemini') {
+                GeminiLiveService.stop();
+            }
+
+            if (cacheSourceRef.current) {
+                try { cacheSourceRef.current.stop(); } catch { /* ignore */ }
+                cacheSourceRef.current = null;
+            }
+            if (cacheAudioCtxRef.current) {
+                try { cacheAudioCtxRef.current.close(); } catch { /* ignore */ }
+                cacheAudioCtxRef.current = null;
+            }
+            cachePlaybackStartRef.current = 0;
+            cachePlaybackDurationRef.current = 0;
+        } catch { /* ignore */ }
+    }, [stopWebSpeech]);
 
     const prepareChapterSegments = useCallback(() => {
         if (!activeChapterRef.current) return [];
@@ -268,6 +296,120 @@ export const useNarrador = ({
         setSegments(prepared);
         return prepared;
     }, []);
+
+    const prepareAudio = useCallback(async (mode = 'chapter', amount = 1) => {
+        if (isPreparing || !activeChapterRef.current) return;
+
+        const cfg = profileRef.current?.aiConfig || {};
+        if (!cfg.geminiApiKey) {
+            toastRef.current?.warning('La preparación de audio requiere una API key de Gemini.');
+            return;
+        }
+
+        const prepared = segmentsRef.current.length > 0 ? segmentsRef.current : prepareChapterSegments();
+        if (prepared.length === 0) {
+            toastRef.current?.warning('Este capítulo no tiene contenido para preparar.');
+            return;
+        }
+
+        const cached = await Promise.all(prepared.map((segment, index) =>
+            getCachedSegment(activeBookRef.current?.id, activeChapterRef.current?.id, index, segment.hash, buildAudioVariant())
+        ));
+        const pending = prepared.map((_, index) => index).filter(index => !cached[index]);
+        const currentIndex = Math.max(0, Math.min(currentIndexRef.current, prepared.length - 1));
+        let targetIndexes;
+        if (mode === 'fromHere') {
+            targetIndexes = pending.filter(index => index >= currentIndex);
+        } else if (mode === 'half') {
+            targetIndexes = pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
+        } else if (mode === 'count') {
+            targetIndexes = pending.slice(0, Math.max(1, Math.min(Number(amount) || 1, pending.length)));
+        } else {
+            targetIndexes = pending;
+        }
+
+        if (targetIndexes.length === 0) {
+            setCachedSegmentIndexes(new Set(prepared.map((_, index) => index)));
+            toastRef.current?.info('Los fragmentos seleccionados ya están preparados.');
+            return;
+        }
+
+        const runId = ++preparationRunRef.current;
+        const startedAt = Date.now();
+        setIsPreparing(true);
+        isPreparingRef.current = true;
+        setPreparationProgress({ completed: 0, total: targetIndexes.length, etaSeconds: null });
+        stopAllAudio();
+
+        try {
+            const ctx = buildGeminiContext();
+            await GeminiLiveService.connect(ctx.apiKey, {
+                model: ctx.model,
+                voice: ctx.voice,
+                systemInstruction: ctx.systemInstruction
+            });
+            GeminiLiveService.setOutputMuted(true);
+
+            for (let position = 0; position < targetIndexes.length; position += 1) {
+                if (runId !== preparationRunRef.current) break;
+                const index = targetIndexes[position];
+                const segment = prepared[index];
+                await new Promise((resolve, reject) => {
+                    const timeout = window.setTimeout(() => reject(new Error('Tiempo de espera agotado al preparar un fragmento.')), 120000);
+                    try {
+                        GeminiLiveService.sendText(segment.text, index, async (pcmData) => {
+                            try {
+                                await persistGeneratedAudio(index, segment, pcmData);
+                                window.clearTimeout(timeout);
+                                resolve();
+                            } catch (error) {
+                                window.clearTimeout(timeout);
+                                reject(error);
+                            }
+                        });
+                    } catch (error) {
+                        window.clearTimeout(timeout);
+                        reject(error);
+                    }
+                });
+
+                const elapsed = Date.now() - startedAt;
+                const average = elapsed / (position + 1);
+                const remaining = Math.max(0, targetIndexes.length - position - 1);
+                setPreparationProgress({
+                    completed: position + 1,
+                    total: targetIndexes.length,
+                    etaSeconds: Math.ceil((remaining * average) / 1000)
+                });
+            }
+
+            if (runId === preparationRunRef.current) {
+                await refreshSegmentCacheStatus();
+                toastRef.current?.success(`Preparación terminada: ${targetIndexes.length} fragmento(s) listo(s).`);
+            }
+        } catch (error) {
+            if (runId === preparationRunRef.current) toastRef.current?.error(error.message || 'No se pudo preparar el audio.');
+        } finally {
+            GeminiLiveService.setOutputMuted(false);
+            GeminiLiveService.stop();
+            if (runId === preparationRunRef.current) {
+                isPreparingRef.current = false;
+                setIsPreparing(false);
+            }
+        }
+    }, [buildGeminiContext, buildAudioVariant, isPreparing, persistGeneratedAudio, prepareChapterSegments, refreshSegmentCacheStatus, stopAllAudio]);
+
+    const cancelPreparation = useCallback(() => {
+        preparationRunRef.current += 1;
+        isPreparingRef.current = false;
+        GeminiLiveService.setOutputMuted(false);
+        GeminiLiveService.stop();
+        setIsPreparing(false);
+    }, []);
+
+    useEffect(() => {
+        refreshSegmentCacheStatus();
+    }, [activeChapter?.id, profileData?.aiConfig?.geminiLiveModel, profileData?.aiConfig?.narradorTone, profileData?.aiConfig?.narradorVoice, refreshSegmentCacheStatus, segments.length]);
 
     const getWebVoices = useCallback(() => {
         if (!('speechSynthesis' in window)) return [];
@@ -304,33 +446,6 @@ export const useNarrador = ({
         utteranceRef.current = utterance;
         window.speechSynthesis.speak(utterance);
     }, [getSpanishVoice]);
-
-    const stopWebSpeech = useCallback(() => {
-        try {
-            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        } catch { /* ignore */ }
-    }, []);
-
-    const stopAllAudio = useCallback(() => {
-        try {
-            if (motorRef.current === 'web-speech') {
-                stopWebSpeech();
-            } else if (motorRef.current === 'gemini') {
-                GeminiLiveService.stop();
-            }
-
-            if (cacheSourceRef.current) {
-                try { cacheSourceRef.current.stop(); } catch { /* ignore */ }
-                cacheSourceRef.current = null;
-            }
-            if (cacheAudioCtxRef.current) {
-                try { cacheAudioCtxRef.current.close(); } catch { /* ignore */ }
-                cacheAudioCtxRef.current = null;
-            }
-            cachePlaybackStartRef.current = 0;
-            cachePlaybackDurationRef.current = 0;
-        } catch { /* ignore */ }
-    }, [stopWebSpeech]);
 
     const playCachedSegment = useCallback(async (segmentIndex, runId = playbackRunRef.current) => {
         const segment = segmentsRef.current[segmentIndex];
@@ -479,12 +594,14 @@ export const useNarrador = ({
 
     useEffect(() => {
         const handleSegmentStarted = () => {
+            if (isPreparingRef.current) return;
             if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
             if (motorRef.current !== 'gemini') return;
             setCurrentTranscriptForSegment(currentIndexRef.current);
         };
 
         const handleSegmentEnded = () => {
+            if (isPreparingRef.current) return;
             if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
             if (motorRef.current !== 'gemini') return;
             handleSegmentComplete(currentIndexRef.current);
@@ -770,6 +887,50 @@ export const useNarrador = ({
         };
     }, [stopAllAudio]);
 
+    useEffect(() => {
+        const mediaSession = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
+        const active = status === 'speaking' || status === 'connecting' || status === 'paused';
+        const releaseWakeLock = async () => {
+            if (!wakeLockRef.current) return;
+            try { await wakeLockRef.current.release(); } catch { /* ignore */ }
+            wakeLockRef.current = null;
+        };
+        const requestWakeLock = async () => {
+            if (!active || !('wakeLock' in navigator) || wakeLockRef.current) return;
+            try {
+                wakeLockRef.current = await navigator.wakeLock.request('screen');
+                wakeLockRef.current.addEventListener('release', () => { wakeLockRef.current = null; });
+            } catch { /* navegador no compatible o permiso denegado */ }
+        };
+
+        if (active) requestWakeLock();
+        else releaseWakeLock();
+        if (!mediaSession) return () => { releaseWakeLock(); };
+
+        try {
+            mediaSession.metadata = active ? new MediaMetadata({
+                title: activeChapterRef.current?.title || 'Narrador',
+                artist: activeBookRef.current?.title || 'Verne Studio',
+                album: 'Narración'
+            }) : null;
+            mediaSession.playbackState = status === 'speaking' ? 'playing' : status === 'paused' ? 'paused' : 'none';
+            mediaSession.setActionHandler('play', () => {
+                if (statusRef.current === 'paused') resumeNarration();
+                else if (statusRef.current === 'idle' || statusRef.current === 'stopped') startNarration(currentIndexRef.current);
+            });
+            mediaSession.setActionHandler('pause', pauseNarration);
+            mediaSession.setActionHandler('stop', stopNarration);
+            mediaSession.setActionHandler('nexttrack', () => {
+                if (currentIndexRef.current < segmentsRef.current.length - 1) skipToSegment(currentIndexRef.current + 1);
+            });
+            mediaSession.setActionHandler('previoustrack', () => {
+                if (currentIndexRef.current > 0) skipToSegment(currentIndexRef.current - 1);
+            });
+        } catch { /* algunas acciones no existen en todos los navegadores */ }
+
+        return () => { releaseWakeLock(); };
+    }, [activeChapter?.id, pauseNarration, resumeNarration, skipToSegment, startNarration, status, stopNarration]);
+
     const [webVoicesAvailable, setWebVoicesAvailable] = useState(false);
     useEffect(() => {
         if ('speechSynthesis' in window) {
@@ -801,6 +962,8 @@ export const useNarrador = ({
         segmentProgress,
         isSegmentSyncReady,
         cachedSegmentIndexes,
+        isPreparing,
+        preparationProgress,
         refreshSegmentCacheStatus,
 
         setSpeed,
@@ -818,6 +981,8 @@ export const useNarrador = ({
         checkSavedProgress,
         refreshCacheStats,
         prepareChapterSegments,
+        prepareAudio,
+        cancelPreparation,
         saveProgress,
         hasGeminiKey: !!profileData?.aiConfig?.geminiApiKey,
         hasWebSpeech: webVoicesAvailable

@@ -39,6 +39,7 @@ class GeminiLiveService {
         this.isPlaying = false;
         this.isPaused = false;
         this._actualPlaybackRate = 1.0;
+        this.outputMuted = false;
 
         this._activeSources = new Set();
         this._pastSources = new Set();
@@ -234,7 +235,10 @@ class GeminiLiveService {
             if (pcmBuffer.byteLength < 2 || pcmBuffer.byteLength % 2 !== 0) return;
 
             if (!this._segmentPcmChunks) this._segmentPcmChunks = [];
-            this._segmentPcmChunks.push(new Uint8Array(pcmBuffer.slice(0)));
+        this._segmentPcmChunks.push(new Uint8Array(pcmBuffer.slice(0)));
+
+        // Durante la preparación guardamos el PCM, pero no lo reproducimos.
+        if (this.outputMuted) return;
 
             this._schedulePcm(pcmBuffer);
         } catch (err) {
@@ -520,6 +524,10 @@ class GeminiLiveService {
 
     setPlaybackRate(rate) {
         this._actualPlaybackRate = rate;
+    }
+
+    setOutputMuted(muted) {
+        this.outputMuted = !!muted;
     }
 
     on(event, callback) {

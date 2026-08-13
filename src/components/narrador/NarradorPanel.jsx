@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import {
     Play, Pause, Square, SkipBack, SkipForward,
-    Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2, RefreshCw, CheckCircle2, CircleDashed, Loader2
+    Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2, RefreshCw, CheckCircle2, CircleDashed, Loader2, Download, StopCircle
 } from 'lucide-react';
 import NarradorSettingsModal from './NarradorSettingsModal';
 
@@ -98,6 +98,8 @@ const NarradorPanel = ({
 }) => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
+    const [isPrepareMenuOpen, setIsPrepareMenuOpen] = useState(false);
+    const [prepareCount, setPrepareCount] = useState(5);
 
     const {
         status,
@@ -120,13 +122,62 @@ const NarradorPanel = ({
         currentTranscript,
         segmentProgress,
         isSegmentSyncReady,
-        cachedSegmentIndexes
+        cachedSegmentIndexes,
+        isPreparing,
+        preparationProgress,
+        prepareAudio,
+        cancelPreparation
     } = narrador;
 
     const isPlaying = status === 'speaking' || status === 'connecting';
     const isPaused = status === 'paused';
 
     const chapterTitle = activeChapter?.title || 'Capítulo';
+    const preparationLabel = preparationProgress.total > 0
+        ? `${preparationProgress.completed}/${preparationProgress.total}${preparationProgress.etaSeconds ? ` · ~${preparationProgress.etaSeconds}s` : ''}`
+        : 'Preparar';
+
+    const renderPreparationControls = () => (
+        <div className="relative w-full">
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={() => { if (!isPreparing) setIsPrepareMenuOpen(previous => !previous); }}
+                    disabled={!hasGeminiKey}
+                    className={`min-w-0 flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-app)] border text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer ${isPreparing ? 'border-emerald-500/40 text-[var(--text-main)]' : 'border-[var(--border-main)] text-[var(--text-muted)] hover:border-emerald-500/50'}`}
+                    title={hasGeminiKey ? 'Preparar audio en caché' : 'Requiere una API key de Gemini'}
+                >
+                    {isPreparing ? <Loader2 size={12} className="shrink-0 animate-spin text-emerald-500" /> : <Download size={12} />}
+                    <span className="truncate">{isPreparing ? preparationLabel : 'Preparar'}</span>
+                    {!isPreparing && <ChevronDown size={12} />}
+                </button>
+                {isPreparing && (
+                    <button onClick={cancelPreparation} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/50 text-red-500 hover:bg-red-500/10" title="Cancelar preparación">
+                        <StopCircle size={13} />
+                    </button>
+                )}
+            </div>
+            {!isPreparing && isPrepareMenuOpen && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsPrepareMenuOpen(false)}></div>
+                    <div className="absolute bottom-full left-0 mb-1 w-52 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-2xl z-50 overflow-hidden p-1">
+                        {[
+                            ['chapter', 'Preparar capítulo'],
+                            ['fromHere', 'Preparar desde aquí'],
+                            ['half', 'Preparar la mitad']
+                        ].map(([mode, label]) => (
+                            <button key={mode} onClick={() => { setIsPrepareMenuOpen(false); prepareAudio(mode); }} className="w-full text-left px-3 py-2 rounded-lg text-[10px] font-black text-[var(--text-main)] hover:bg-emerald-500/10 hover:text-emerald-500 cursor-pointer">
+                                {label}
+                            </button>
+                        ))}
+                        <div className="flex items-center gap-2 px-2 py-2 border-t border-[var(--border-main)] mt-1">
+                            <input type="number" min="1" max={totalSegments || 1} value={prepareCount} onChange={event => setPrepareCount(event.target.value)} className="w-14 px-2 py-1.5 rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-xs text-center text-[var(--text-main)]" />
+                            <button onClick={() => { setIsPrepareMenuOpen(false); prepareAudio('count', prepareCount); }} className="flex-1 text-left text-[10px] font-black text-[var(--text-main)] hover:text-emerald-500 cursor-pointer">Preparar N fragmentos</button>
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
 
     const getStatusLabel = () => {
         switch (status) {
@@ -495,7 +546,8 @@ const NarradorPanel = ({
                     </div>
 
                     {/* Quick settings */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-[var(--border-main)]">
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--border-main)]">
+                        {renderPreparationControls()}
                         {/* Speed selector */}
                         <div className="relative flex-1">
                             <button
