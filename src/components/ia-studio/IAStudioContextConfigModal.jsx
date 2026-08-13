@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import Modal from '../Modal';
 import { SYSTEM_WORLD_ITEM_IDS, SYSTEM_WORLD_ITEM_LABELS } from './IAStudioUtils';
 import { useIAStudioContext } from '../../context/IAStudioContext';
@@ -17,21 +17,8 @@ const IAStudioContextConfigModal = ({
     const { contextSelections, destinationDoc, onContextChange, onDestinationChange } = useIAStudioContext();
     const [activeTab, setActiveTab] = useState(mode === 'destination' ? 'destination' : 'masterdoc');
     
-    useEffect(() => {
-        if (isOpen) {
-            if (mode === 'destination') {
-                setActiveTab('destination');
-            } else {
-                setActiveTab(prev => prev === 'destination' ? 'masterdoc' : prev);
-            }
-        }
-    }, [isOpen, mode]);
-
     const [expandedVolumes, setExpandedVolumes] = useState({});
-    const [chapterSearch, setChapterSearch] = useState('');
-    const [worldItemSearch, setWorldItemSearch] = useState('');
-    const [characterSearch, setCharacterSearch] = useState('');
-    const [destSearch, setDestSearch] = useState('');
+    const [destSearch] = useState('');
     const [destInnerTab, setDestInnerTab] = useState('chapters'); // 'chapters' | 'masterdoc' | 'characters'
 
     const selectedChapterIds = contextSelections?.chapterIds || [];
@@ -113,30 +100,6 @@ const IAStudioContextConfigModal = ({
         onContextChange({ ...contextSelections, characterIds: [] });
     };
 
-    // Search and Filter logic for reference lists
-    const filteredChapters = useMemo(() => {
-        const query = chapterSearch.trim().toLowerCase();
-        if (!query) return null;
-        return chapters.filter(c => !c.isVolume && (c.title || '').toLowerCase().includes(query));
-    }, [chapters, chapterSearch]);
-
-    const filteredWorldItemsList = useMemo(() => {
-        const query = worldItemSearch.trim().toLowerCase();
-        if (!query) return null;
-        const allItems = [
-            ...SYSTEM_WORLD_ITEM_IDS.filter(wid => wid !== 'system_personajes').map(wid => ({ id: wid, title: SYSTEM_WORLD_ITEM_LABELS[wid] || wid, isSystem: true })),
-            ...customWorldItems.map(w => ({ id: w.id, title: w.title || 'Sin título', isSystem: false }))
-        ];
-        return allItems.filter(item => item.title.toLowerCase().includes(query));
-    }, [worldItems, worldItemSearch, customWorldItems]);
-
-    const filteredCharactersList = useMemo(() => {
-        const query = characterSearch.trim().toLowerCase();
-        const list = characters.filter(c => !c.isCategory && c.name);
-        if (!query) return null;
-        return list.filter(c => (c.name || '').toLowerCase().includes(query));
-    }, [characters, characterSearch]);
-
     // Search logic for destination list
     const filteredDestChapters = useMemo(() => {
         const query = destSearch.trim().toLowerCase();
@@ -153,7 +116,7 @@ const IAStudioContextConfigModal = ({
         ];
         if (!query) return list;
         return list.filter(item => item.title.toLowerCase().includes(query));
-    }, [worldItems, customWorldItems, destSearch]);
+    }, [customWorldItems, destSearch]);
 
     const filteredDestCharacters = useMemo(() => {
         const query = destSearch.trim().toLowerCase();

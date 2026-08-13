@@ -953,9 +953,7 @@ const SettingsView = () => {
                         <div className="p-6 bg-[var(--bg-editor)] border-t border-[var(--border-main)] flex justify-between items-center">
                             <button
                                 onClick={() => {
-                                    if (window.confirm("¿Seguro que quieres eliminar la obra definitivamente?")) {
-                                        deleteBook(activeBook.id);
-                                    }
+                                    setIsConfirmOpen(true);
                                 }}
                                 className="px-6 py-3 text-red-500 hover:bg-red-500/10 rounded-xl font-black text-xs transition-all flex items-center gap-2"
                             >

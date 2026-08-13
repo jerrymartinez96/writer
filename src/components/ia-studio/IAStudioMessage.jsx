@@ -809,16 +809,14 @@ const IAStudioMessage = ({ message, onShowDiff, onRegenerate, onDelete, isLast, 
 
     // Measure element scrollHeight to see if it exceeds ~10 lines (240px)
     useEffect(() => {
-        if (!isStreaming && contentRef.current && responseType !== 'inconsistencies') {
-            const height = contentRef.current.scrollHeight;
-            if (height > 240) {
-                setIsExpandable(true);
+        const frame = requestAnimationFrame(() => {
+            if (!isStreaming && contentRef.current && responseType !== 'inconsistencies') {
+                setIsExpandable(contentRef.current.scrollHeight > 240);
             } else {
                 setIsExpandable(false);
             }
-        } else {
-            setIsExpandable(false);
-        }
+        });
+        return () => cancelAnimationFrame(frame);
     }, [message.content, isStreaming, responseType]);
 
     const handleCopy = () => {

@@ -32,7 +32,7 @@ const CharacterDesignerWizard = ({
     const [separatingDocId, setSeparatingDocId] = useState(null);
     const [nameSuggestionLoading, setNameSuggestionLoading] = useState(false);
     const [nameProposals, setNameProposals] = useState([]);
-    const [questionsLoading, setQuestionsLoading] = useState(false);
+    const [, setQuestionsLoading] = useState(false);
     const [suggestionsLoading, setSuggestionsLoading] = useState({});
     const [answerSuggestions, setAnswerSuggestions] = useState({});
     const [selectedFocus, setSelectedFocus] = useState('general');
@@ -119,10 +119,6 @@ const CharacterDesignerWizard = ({
         } finally {
             setNameSuggestionLoading(false);
         }
-    };
-
-    const selectName = (name) => {
-        setCharFlow(prev => ({ ...prev, characterName: name, step: 'interview_init' }));
     };
 
     const startInterview = async (name, idea = '') => {
@@ -444,6 +440,9 @@ const CharacterDesignerWizard = ({
         }
     };
 
+    // Reserved for the grouped-character detection entry point.
+    void startDetectionFlow;
+
     const handleSeparateCharacters = async (group) => {
         setSeparatingDocId(group.docId);
         try {
@@ -548,8 +547,6 @@ const CharacterDesignerWizard = ({
             step: 'loading',
             suggestions: []
         });
-        setSuggestLoading(false);
-
         try {
             const prompt = buildCharacterSuggestionsPrompt(getBookContext());
             const response = await AIService.sendMessage(prompt, apiKey, { model: modelSelected, apiSelected: apiSelected });

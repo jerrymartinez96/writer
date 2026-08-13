@@ -56,7 +56,7 @@ export const useIAStudioState = () => {
     const {
         activeBook, activeChapter, activeWorldDoc, chapters, characters, worldItems,
         saveChapterContent, saveWorldDocContent, updateChapter, updateWorldItem, updateCharacter, createChapter,
-        profile, updateBookData, lazyLoadChapters, saveDocumentSnapshot, flushAllSaves,
+        profile, lazyLoadChapters, saveDocumentSnapshot, flushAllSaves,
         editor
     } = useData();
 
@@ -64,8 +64,6 @@ export const useIAStudioState = () => {
         contextSelections, 
         destinationDoc, 
         onContextChange, 
-        onDestinationChange,
-        sessions,
         activeSession,
         messages,
         setMessages,
@@ -236,7 +234,7 @@ export const useIAStudioState = () => {
         const actionableBlocks = parsedBlocks.filter(b => b.mode !== 'text');
         if (actionableBlocks.length === 0) return;
 
-        const blocks = actionableBlocks.map((block, idx) => {
+        const blocks = actionableBlocks.map((block) => {
             let currentContent = '';
             let title = block.title || 'Documento';
 
@@ -1418,12 +1416,12 @@ export const useIAStudioState = () => {
                         displayContent = (displayContent || fullResponse)
                             .replace(/\[\[inconsistencia[\s\S]*?\[\/inconsistencia\]\]/gi, '')
                             .replace(/\[\[inconsistencia[^\]]*\]\]([\s\S]*?)\[\[\/inconsistencia\]\]/gi, '')
-                            .replace(/\[\[inconsistencia\s+\d+[^\]]*\]\][\s\S]*?(?=\[\[inconsistencia|\z)/gi, '')
+                            .replace(/\[\[inconsistencia\s+\d+[^\]]*\]\][\s\S]*?(?=\[\[inconsistencia|$)/gi, '')
                             .replace(/\[\[titulo\]\][\s\S]*?\[\[\/titulo\]\]/gi, '')
                             .replace(/\[\[problema\]\][\s\S]*?\[\[\/problema\]\]/gi, '')
                             .replace(/\[\[solucion[^\]]*\]\][\s\S]*?\[\[\/solucion\]\]/gi, '')
                             .replace(/UBICACIÓN:\s*[^\n]+\n?/gi, '')
-                            .replace(/SOLUCIÓ?N\s+[A-D]\s*:\s*[\s\S]*?(?=\n(?:SOLUCIÓ?N|\[\[|\z))/gi, '')
+                            .replace(/SOLUCIÓ?N\s+[A-D]\s*:\s*[\s\S]*?(?=\n(?:SOLUCIÓ?N|\[\[|$))/gi, '')
                             .replace(/<inconsistencia[\s\S]*?<\/inconsistencia>/gi, '')
                             .replace(/<inconsistencia[^>]*>([\s\S]*?)<\/inconsistencia>/gi, '')
                             .replace(/<titulo>[\s\S]*?<\/titulo>/gi, '')
@@ -1819,15 +1817,12 @@ Usa obligatoriamente la herramienta \`aplicar_parches_resolucion\` y agrupa todo
 
             const docId = block.docId;
             let docContent = '';
-            let docTitle = block.title;
             if (docId) {
                 const doc = [...(worldItems || []), ...(chapters || [])].find(d => d.id === docId);
                 docContent = doc?.content || '';
-                docTitle = doc?.title || doc?.name || block.title;
             } else {
                 const activeDoc = activeChapter || activeWorldDoc;
                 docContent = activeDoc?.content || '';
-                docTitle = activeDoc?.title || activeDoc?.name || 'Documento';
             }
 
             const systemPrompt = `Eres un asistente de escritura e inyección de parches ultra-preciso.

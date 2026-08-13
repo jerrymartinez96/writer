@@ -4,7 +4,7 @@
  */
 
 import DiffMatchPatch from 'diff-match-patch';
-import { plainTextToHtml, cleanText } from './textUtils';
+import { cleanText } from './textUtils';
 
 const _dmp = new DiffMatchPatch();
 
@@ -222,7 +222,7 @@ export const applyPatch = (chapterHtml, original, replacement) => {
                 }
             }
         }
-    } catch (normErr) {
+    } catch {
         // Continuar con los métodos siguientes si la normalización falla
     }
 
@@ -383,7 +383,7 @@ export const applyPatch = (chapterHtml, original, replacement) => {
                 };
             }
         }
-    } catch (err) {
+    } catch {
         // Ignorar silenciado en producción
     }
 

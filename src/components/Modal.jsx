@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 import { X } from 'lucide-react';
 
 const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
+    const titleId = useId();
     // Close on escape
     useEffect(() => {
         const handleEsc = (e) => {
@@ -25,15 +26,21 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-[4px] animate-in fade-in duration-300 px-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-[4px] animate-in fade-in duration-300 px-4" role="presentation">
             {/* Click outside to close */}
             <div className="absolute inset-0" onClick={onClose}></div>
 
-            <div className={`relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-[0_30px_100px_rgba(0,0,0,0.5)] w-full ${sizeClasses[size] || sizeClasses.md} flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden`}>
+            <div
+                className={`relative bg-[var(--bg-app)] border border-[var(--border-main)] rounded-3xl shadow-[0_30px_100px_rgba(0,0,0,0.5)] w-full ${sizeClasses[size] || sizeClasses.md} flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden`}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+            >
                 <div className="flex items-center justify-between p-6 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/50">
-                    <h3 className="text-xl md:text-2xl font-black text-[var(--text-main)] font-serif italic">{title}</h3>
+                    <h3 id={titleId} className="text-xl md:text-2xl font-black text-[var(--text-main)] font-serif italic">{title}</h3>
                     <button
                         onClick={onClose}
+                        aria-label="Cerrar ventana"
                         className="p-2 rounded-xl text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500 transition-all active:scale-95"
                     >
                         <X size={24} />

@@ -829,7 +829,7 @@ export const parseDestinationsFromResponse = (response, destinationDoc, chapters
             if (parsedJson.texto_original) {
                 return parseToolCallResponse('aplicar_parche', parsedJson, destinationDoc, chapters, worldItems, characters);
             }
-        } catch (e) {}
+        } catch { /* Ignore malformed JSON and continue with other parsers. */ }
     }
 
     const parsedXml = tryParseAIXml(response);
@@ -873,7 +873,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
     let args = {};
     try {
         args = typeof argsJson === 'string' ? JSON.parse(argsJson) : argsJson;
-    } catch (e) {
+    } catch {
         const cleanJson = typeof argsJson === 'string' ? argsJson.trim() : '';
         try {
             const extractProp = (propName) => {
@@ -897,7 +897,7 @@ export const parseToolCallResponse = (name, argsJson, destinationDoc, chapters =
                 args.titulo = extractProp('titulo');
                 args.problema = extractProp('problema');
             }
-        } catch (innerErr) {}
+        } catch { /* Ignore partial fallback extraction. */ }
     }
 
     if (name === 'crear_personaje') {

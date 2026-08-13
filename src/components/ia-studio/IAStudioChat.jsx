@@ -2,9 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import IAStudioMessage from './IAStudioMessage';
 import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Loader2, Wand2, Settings, Volume2 } from 'lucide-react';
 import Modal from '../Modal';
-import { buildContextFromSelections, estimateContextWeight } from './IAStudioUtils';
+import ConfirmModal from '../ConfirmModal';
 import { AIService } from '../../services/AIService';
-import { useData } from '../../context/DataContext';
 import CharacterDesignerWizard from './components/CharacterDesignerWizard';
 import CoWriterSettingsModal from '../coescritor/CoWriterSettingsModal';
 import useCoWriter from '../coescritor/useCoWriter';
@@ -13,16 +12,20 @@ const API_LABELS = {
     deepseek: 'DeepSeek'
 };
 
+const ACTION_GROUPS = [
+    { id: 'conversar', label: 'Conversar', ids: ['chat'] },
+    { id: 'crear', label: 'Crear', ids: ['escribir', 'escena', 'constructor_personaje'] },
+    { id: 'revisar', label: 'Revisar', ids: ['analizar', 'sugerir', 'fragmento', 'formatear'] },
+];
+
 const IAStudioChat = ({
     messages,
     onSend,
     onShowDiff,
     isLoading,
     selectedAction,
-    onNewChat,
     onOpenContext,
     onOpenDestination,
-    onOpenSessions,
     onExport,
     QUICK_ACTIONS,
     selectedModel = '',
@@ -32,7 +35,6 @@ const IAStudioChat = ({
     characters,
     worldItems,
     onModelChange,
-    onRemoveContextItem,
     onCancelStream,
     onRegenerate,
     onDeleteMessage,
@@ -40,9 +42,6 @@ const IAStudioChat = ({
     onRenameSession = null,
     onDeleteSession = null,
     // New props
-    compressContext = false,
-    onToggleCompress = null,
-    activeFragment = '',
     sectionMode = false,
     sectionConfig = null,
     currentSectionIndex = 1,
@@ -68,6 +67,7 @@ const IAStudioChat = ({
     const [sectionSetupTotal, setSectionSetupTotal] = useState(3);
     const [sectionDescriptions, setSectionDescriptions] = useState(['', '', '']);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [editSessionName, setEditSessionName] = useState('');
     const [isCoWriterOpen, setIsCoWriterOpen] = useState(false);
     const [isCoWriterSettingsOpen, setIsCoWriterSettingsOpen] = useState(false);
@@ -85,10 +85,9 @@ const IAStudioChat = ({
 
     const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
     const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+    const [showMorePrompts, setShowMorePrompts] = useState(false);
 
     const getFilteredCommands = () => {
-        const trimmedVal = inputValue.toLowerCase().trim();
-        
         const matchDetectCmd = /^\/detectar\s+(.*)/i.exec(inputValue);
         const matchDetectStart = /^\/detectar\s*$/i.test(inputValue);
         
@@ -177,13 +176,13 @@ const IAStudioChat = ({
         }
     };
 
-    const { profile } = useData();
     const cowriter = useCoWriter();
 
     useEffect(() => {
-        if (activeSession) {
-            setEditSessionName(activeSession.name || '');
-        }
+        const frame = requestAnimationFrame(() => {
+            if (activeSession) setEditSessionName(activeSession.name || '');
+        });
+        return () => cancelAnimationFrame(frame);
     }, [activeSession]);
     
     const messagesEndRef = useRef(null);
@@ -375,14 +374,6 @@ const IAStudioChat = ({
         }
     }, [isLoading]);
 
-    // Elastic textarea height adjustment
-    useEffect(() => {
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
-        }
-    }, [inputValue]);
-
     const handleActionChange = (actionId) => {
         if (onActionChange) {
             onActionChange(actionId);
@@ -499,6 +490,14 @@ const IAStudioChat = ({
     };
 
     const currentAction = QUICK_ACTIONS?.find(a => a.id === selectedAction);
+    const inputHeight = `${Math.min(6, Math.max(1, Math.ceil((inputValue.length || 1) / 80))) * 24}px`;
+    const contextualPrompts = getContextualPrompts();
+    const visibleContextualPrompts = showMorePrompts
+        ? contextualPrompts
+        : contextualPrompts.slice(0, 3);
+    const actionGroups = ACTION_GROUPS
+        .map(group => ({ ...group, actions: QUICK_ACTIONS?.filter(action => group.ids.includes(action.id)) || [] }))
+        .filter(group => group.actions.length > 0);
 
     return (
         <div className="flex-1 flex flex-col min-h-0 max-w-full overflow-x-hidden bg-[var(--bg-app)]">
@@ -662,6 +661,32 @@ const IAStudioChat = ({
                 </div>
             </div>
 
+            {/* Configuration bar: context and destination stay visible without competing with the composer. */}
+            <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6 py-2.5 border-b border-[var(--border-main)]/70 bg-[var(--bg-editor)]/45 shrink-0">
+                <span className="text-[9px] font-bold text-[var(--text-muted)] mr-1">Configuración</span>
+                <button
+                    type="button"
+                    onClick={onOpenContext}
+                    className="flex items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-3 py-1.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+                    title="Configurar contexto de referencia"
+                >
+                    <BookOpen size={12} />
+                    Contexto
+                    <span className="rounded-md bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-bold">{selectedChapterIds.length + selectedWorldItemIds.length + selectedCharacterIds.length}</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={onOpenDestination}
+                    className="flex min-w-0 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                    title={`Configurar destino: ${currentDestLabel()}`}
+                >
+                    <Target size={12} />
+                    <span>Destino</span>
+                    <span className="max-w-[180px] truncate rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold">{destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Nuevo capítulo' : destinationDoc?.docTitle || 'Manual'}</span>
+                </button>
+                <span className="ml-auto hidden text-[10px] text-[var(--text-muted)] sm:inline">Acción: <strong className="text-[var(--text-main)]">{currentAction?.label?.replace(/^\S+\s/u, '').trim() || 'Chat'}</strong></span>
+            </div>
+
             {/* Messages */}
             <div 
                 ref={chatContainerRef}
@@ -697,7 +722,7 @@ const IAStudioChat = ({
                                     <Sparkles size={10} className="text-indigo-500" /> sugerencias contextuales
                                 </p>
                                 <div className="flex overflow-x-auto sm:grid sm:grid-cols-2 gap-2 text-left scrollbar-hide snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
-                                    {getContextualPrompts().map((item, idx) => (
+                                    {visibleContextualPrompts.map((item, idx) => (
                                         <button
                                             key={idx}
                                             onClick={() => {
@@ -714,6 +739,15 @@ const IAStudioChat = ({
                                         </button>
                                     ))}
                                 </div>
+                                {contextualPrompts.length > 3 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowMorePrompts(prev => !prev)}
+                                        className="mt-3 text-[10px] font-semibold text-indigo-500 hover:text-indigo-600 transition-colors"
+                                    >
+                                        {showMorePrompts ? 'Mostrar menos' : `Explorar más (${contextualPrompts.length - 3})`}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ) : (
@@ -999,35 +1033,6 @@ const IAStudioChat = ({
                         </div>
                     )}
 
-                    {/* Summary Bar */}
-                    <div className="text-[10px] text-[var(--text-muted)] font-medium flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 px-1">
-                        <button
-                            type="button"
-                            onClick={onOpenContext}
-                            className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
-                            title="Configurar Contexto de Referencia"
-                        >
-                            <BookOpen size={11} className="text-indigo-500" /> 
-                            Contexto: 
-                            <strong className="text-indigo-600 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/15">
-                                {selectedChapterIds.length + selectedWorldItemIds.length + selectedCharacterIds.length} elem
-                            </strong>
-                        </button>
-                        <span className="opacity-30 hidden sm:inline">·</span>
-                        <button
-                            type="button"
-                            onClick={onOpenDestination}
-                            className="flex items-center gap-1 hover:opacity-80 active:scale-[0.98] transition-all cursor-pointer"
-                            title="Configurar Destino de Escritura"
-                        >
-                            <Target size={11} className="text-emerald-500" /> 
-                            Destino: 
-                            <strong className="text-emerald-600 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/15 truncate max-w-[150px]" title={currentDestLabel()}>
-                                {destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Crear Nuevo' : destinationDoc?.docTitle || 'Manual'}
-                            </strong>
-                        </button>
-                    </div>
-
                     {/* Input + Send */}
                     <div className={`flex items-center gap-2 sm:gap-2.5 bg-[var(--bg-editor)] rounded-2xl pl-2 sm:pl-3 pr-2.5 sm:pr-4 py-2.5 sm:py-3 transition-all duration-300 shadow-sm relative ${
                         isCoWriterOpen
@@ -1084,7 +1089,7 @@ const IAStudioChat = ({
                                             className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 cursor-pointer ${activeColorClass}`}
                                         >
                                             <span className="text-xs transition-transform duration-300">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
-                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim() || 'Chat'}</span>
+                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/^\S+\s/u, '').trim() || 'Chat'}</span>
                                             <ChevronDown size={11} className={`text-current opacity-80 transition-transform duration-300 shrink-0 ${showActionDropdown ? 'rotate-180' : ''}`} />
                                         </button>
 
@@ -1101,34 +1106,37 @@ const IAStudioChat = ({
                                                         Seleccionar Acción
                                                     </div>
                                                     
-                                                    {QUICK_ACTIONS?.map(action => {
-                                                        const isSelected = action.id === selectedAction;
-                                                        return (
-                                                            <button
-                                                                key={action.id}
-                                                                onClick={() => {
-                                                                    handleActionChange(action.id);
-                                                                    setShowActionDropdown(false);
-                                                                }}
-                                                                className={`w-full text-left px-3 py-2.5 sm:py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent cursor-pointer ${
-                                                                    isSelected
-                                                                        ? `${actionColors[action.id] || 'bg-indigo-500/10 text-indigo-500'} font-bold`
-                                                                        : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 hover:translate-x-0.5'
-                                                                }`}
-                                                            >
-                                                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 border transition-transform ${isSelected ? 'scale-110' : ''} ${actionColors[action.id] || 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
-                                                                    {action.label?.match(/^.{1,2}/)?.[0] || '💬'}
-                                                                </span>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <span className="block truncate font-semibold">{action.label?.replace(/[💬✏️📝🎬👥✂️🔍💡]/g, '').trim()}</span>
-                                                                    <span className="block text-[8px] text-[var(--text-muted)] opacity-60 truncate">{action.description}</span>
-                                                                </div>
-                                                                {isSelected && (
-                                                                    <Check size={11} className="text-current shrink-0 animate-in zoom-in-50 duration-200" strokeWidth={3} />
-                                                                )}
-                                                            </button>
-                                                        );
-                                                    })}
+                                                    {actionGroups.map(group => (
+                                                        <React.Fragment key={group.id}>
+                                                            <div className="px-2.5 pt-2 pb-1 text-[9px] font-bold text-[var(--text-muted)] first:pt-1">{group.label}</div>
+                                                            {group.actions.map(action => {
+                                                                const isSelected = action.id === selectedAction;
+                                                                return (
+                                                                    <button
+                                                                        key={action.id}
+                                                                        onClick={() => {
+                                                                            handleActionChange(action.id);
+                                                                            setShowActionDropdown(false);
+                                                                        }}
+                                                                        className={`w-full text-left px-3 py-2.5 sm:py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent cursor-pointer ${
+                                                                            isSelected
+                                                                                ? `${actionColors[action.id] || 'bg-indigo-500/10 text-indigo-500'} font-bold`
+                                                                                : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 hover:translate-x-0.5'
+                                                                        }`}
+                                                                    >
+                                                                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 border transition-transform ${isSelected ? 'scale-110' : ''} ${actionColors[action.id] || 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
+                                                                            {action.label?.match(/^.{1,2}/)?.[0] || '💬'}
+                                                                        </span>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <span className="block truncate font-semibold">{action.label?.replace(/^\S+\s/u, '').trim()}</span>
+                                                                            <span className="block text-[8px] text-[var(--text-muted)] opacity-60 truncate">{action.description}</span>
+                                                                        </div>
+                                                                        {isSelected && <Check size={11} className="text-current shrink-0 animate-in zoom-in-50 duration-200" strokeWidth={3} />}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </React.Fragment>
+                                                    ))}
                                                 </div>
                                             </>
                                         )}
@@ -1153,6 +1161,7 @@ const IAStudioChat = ({
                                     : "Escribe tu mensaje... (Enter para enviar o '/' para comandos)"}
                                 className="flex-1 min-w-0 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
                                 rows={1}
+                                style={{ height: inputHeight }}
                                 disabled={isLoading}
                             />
                         )}
@@ -1308,15 +1317,7 @@ const IAStudioChat = ({
                                 </p>
                             </div>
                             <button
-                                onClick={() => {
-                                    if (confirm('¿Estás seguro de que quieres eliminar esta conversación permanentemente?')) {
-                                        onDeleteSession(activeSession.id);
-                                        setShowSettingsModal(false);
-                                        window.dispatchEvent(new CustomEvent('ia-toast', {
-                                            detail: { message: '🗑️ Conversación eliminada.', type: 'success' }
-                                        }));
-                                    }
-                                }}
+                                onClick={() => setShowDeleteConfirm(true)}
                                 className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.97] shadow-lg shadow-rose-600/15 text-center cursor-pointer shrink-0"
                             >
                                 Eliminar Chat
@@ -1325,6 +1326,22 @@ const IAStudioChat = ({
                     </div>
                 </div>
             </Modal>
+
+            <ConfirmModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={() => {
+                    onDeleteSession?.(activeSession.id);
+                    setShowSettingsModal(false);
+                    window.dispatchEvent(new CustomEvent('ia-toast', {
+                        detail: { message: '🗑️ Conversación eliminada.', type: 'success' }
+                    }));
+                }}
+                title="¿Eliminar conversación?"
+                message={`Esta acción eliminará de forma irreversible el historial de «${activeSession?.name || 'esta conversación'}».`}
+                confirmText="Sí, eliminar"
+                type="danger"
+            />
 
             {/* Coescritor Settings Modal */}
             <CoWriterSettingsModal
