@@ -1,22 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import IAStudioMessage from './IAStudioMessage';
-import { Send, Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, Zap, AlertTriangle, BookOpen, Target, Loader2, Wand2, Settings, Volume2 } from 'lucide-react';
+import { Sparkles, ChevronDown, Check, Download, X, Square, Scissors, Layers, AlertTriangle, BookOpen, Target, Loader2, Wand2, Settings, Volume2, Wrench, Search, ArrowRight, MessageSquare, UserRound, Lightbulb, FileSearch, PenLine, SlidersHorizontal } from 'lucide-react';
 import Modal from '../Modal';
 import ConfirmModal from '../ConfirmModal';
 import { AIService } from '../../services/AIService';
 import CharacterDesignerWizard from './components/CharacterDesignerWizard';
 import CoWriterSettingsModal from '../coescritor/CoWriterSettingsModal';
 import useCoWriter from '../coescritor/useCoWriter';
-
-const API_LABELS = {
-    deepseek: 'DeepSeek'
-};
-
-const ACTION_GROUPS = [
-    { id: 'conversar', label: 'Conversar', ids: ['chat'] },
-    { id: 'crear', label: 'Crear', ids: ['escribir', 'escena', 'constructor_personaje'] },
-    { id: 'revisar', label: 'Revisar', ids: ['analizar', 'sugerir', 'fragmento', 'formatear'] },
-];
 
 const IAStudioChat = ({
     messages,
@@ -59,7 +49,6 @@ const IAStudioChat = ({
     onSectionModeChange = null,
 }) => {
     const [inputValue, setInputValue] = useState('');
-    const [showActionDropdown, setShowActionDropdown] = useState(false);
     const [showModelDropdown, setShowModelDropdown] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [fragmentValue, setFragmentValue] = useState('');
@@ -67,6 +56,9 @@ const IAStudioChat = ({
     const [sectionSetupTotal, setSectionSetupTotal] = useState(3);
     const [sectionDescriptions, setSectionDescriptions] = useState(['', '', '']);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [showToolsModal, setShowToolsModal] = useState(false);
+    const [toolSearch, setToolSearch] = useState('');
+    const [showMoreMenu, setShowMoreMenu] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [editSessionName, setEditSessionName] = useState('');
     const [isCoWriterOpen, setIsCoWriterOpen] = useState(false);
@@ -85,7 +77,6 @@ const IAStudioChat = ({
 
     const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
     const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-    const [showMorePrompts, setShowMorePrompts] = useState(false);
 
     const getFilteredCommands = () => {
         const matchDetectCmd = /^\/detectar\s+(.*)/i.exec(inputValue);
@@ -221,133 +212,6 @@ const IAStudioChat = ({
         return destinationDoc?.docTitle || 'Documento específico';
     };
 
-    // Contextual Prompts Generator
-    const getContextualPrompts = () => {
-        if (selectedAction === 'escena') {
-            return [
-                {
-                    icon: '🎬',
-                    text: 'Planificar siguiente escena',
-                    prompt: 'Ayúdame a planificar la siguiente escena de este capítulo. Proponme ideas para el conflicto principal y el gancho final.'
-                },
-                {
-                    icon: '💬',
-                    text: 'Definir diálogos de la escena',
-                    prompt: '¿Qué interacciones y diálogos crees que deberían ocurrir en esta escena basándote en las fichas de los personajes seleccionados?'
-                },
-                {
-                    icon: '🔍',
-                    text: 'Proponer ideas de ambientación',
-                    prompt: 'Dame ideas sensoriales y de ambientación para situar la escena que estamos planificando.'
-                },
-                {
-                    icon: '💡',
-                    text: 'Preguntas guía para enfocar',
-                    prompt: 'Hazme preguntas estratégicas sobre la escena actual para ayudarme a enfocar los objetivos del capítulo.'
-                }
-            ];
-        }
-
-        const selectedChaptersCount = selectedChapterIds.length;
-        const selectedWorldItemsCount = selectedWorldItemIds.length;
-
-        const prompts = [];
-
-        if (selectedChaptersCount > 0 && selectedWorldItemsCount > 0) {
-            prompts.push({
-                icon: '🔍',
-                text: 'Revisar inconsistencias',
-                prompt: 'Analiza los capítulos y elementos del Master Doc seleccionados en el contexto para identificar cualquier inconsistencia o contradicción narrativa.'
-            });
-            prompts.push({
-                icon: '✍️',
-                text: 'Enriquecer con Master Doc',
-                prompt: 'Utilizando los detalles de los personajes y elementos del Master Doc seleccionados, enriquece las escenas de los capítulos actuales aportando profundidad.'
-            });
-            prompts.push({
-                icon: '💡',
-                text: 'Sugerir tramas secundarias',
-                prompt: 'Sugiere ideas para entrelazar las fichas de los personajes seleccionados con los sucesos de los capítulos actuales.'
-            });
-            prompts.push({
-                icon: '🎭',
-                text: 'Analizar subtextos',
-                prompt: 'Revisa el subtexto y las motivaciones de los personajes seleccionados en el transcurso de los capítulos de contexto.'
-            });
-        } else if (selectedChaptersCount > 0) {
-            prompts.push({
-                icon: '📝',
-                text: 'Aumentar tensión dramática',
-                prompt: 'Reescribe la escena clave de los capítulos seleccionados para aumentar la tensión emocional y el ritmo narrativo.'
-            });
-            prompts.push({
-                icon: '💡',
-                text: 'Analizar ritmo y estructura',
-                prompt: 'Evalúa el ritmo (pacing) y la estructura narrativa de los capítulos seleccionados, proponiendo mejoras específicas.'
-            });
-            prompts.push({
-                icon: '🔍',
-                text: 'Identificar palabras repetitivas',
-                prompt: 'Busca clichés, explicaciones excesivas (telling) y palabras repetitivas en los capítulos seleccionados.'
-            });
-            prompts.push({
-                icon: '✨',
-                text: 'Generar gancho inicial',
-                prompt: 'Reescribe los párrafos iniciales de los capítulos seleccionados para crear un gancho de lectura irresistible.'
-            });
-        } else if (selectedWorldItemsCount > 0) {
-            const selectedNames = [];
-            selectedWorldItemIds.forEach(id => {
-                const item = worldItems?.find(w => w.id === id) || characters?.find(c => c.id === id);
-                if (item) selectedNames.push(item.name || item.title);
-            });
-            const nameList = selectedNames.length > 0 ? selectedNames.slice(0, 2).join(' e ') : 'los personajes';
-
-            prompts.push({
-                icon: '💬',
-                text: `Escribir diálogo: ${nameList.substring(0, 15)}`,
-                prompt: `Escribe una escena de diálogo revelador y tenso entre ${nameList}, basándote en sus perfiles del Master Doc.`
-            });
-            prompts.push({
-                icon: '✍️',
-                text: 'Crear escena del pasado',
-                prompt: `Crea un breve flashback o escena del pasado que explore la relación o el trasfondo de ${nameList}.`
-            });
-            prompts.push({
-                icon: '💡',
-                text: 'Desafíos y conflictos',
-                prompt: `Analiza los perfiles de ${nameList} y describe tres posibles conflictos dramáticos que puedan surgir entre ellos.`
-            });
-            prompts.push({
-                icon: '🚀',
-                text: 'Proyectar arco de evolución',
-                prompt: `Diseña un arco evolutivo interesante para ${nameList} partiendo de sus rasgos actuales en el Master Doc.`
-            });
-        } else {
-            prompts.push({
-                icon: '🧠',
-                text: 'Planificar estructura del libro',
-                prompt: 'Ayúdame a esbozar la estructura de mi próxima novela usando el viaje del héroe. Hazme preguntas guía.'
-            });
-            prompts.push({
-                icon: '✨',
-                text: 'Brainstorming de ideas de trama',
-                prompt: 'Dame 5 conceptos únicos e intrigantes para una novela, con sus respectivos giros dramáticos al final.'
-            });
-            prompts.push({
-                icon: '👑',
-                text: 'Crear plantilla de personaje',
-                prompt: 'Crea una ficha completa para el diseño de un personaje tridimensional, detallando su herida, deseo y necesidad.'
-            });
-            prompts.push({
-                icon: '🌎',
-                text: 'Construcción de mundo (Worldbuilding)',
-                prompt: 'Diseña un sistema de magia, una cultura o una facción política interesante para una historia de fantasía o ciencia ficción.'
-            });
-        }
-        return prompts;
-    };
-
     const handleScroll = useCallback(() => {
         if (!chatContainerRef.current) return;
         const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
@@ -380,7 +244,6 @@ const IAStudioChat = ({
         } else {
             window.dispatchEvent(new CustomEvent('ia-studio-action', { detail: actionId }));
         }
-        setShowActionDropdown(false);
         if (actionId !== 'escribir') {
             setShowSectionSetup(false);
         }
@@ -414,7 +277,7 @@ const IAStudioChat = ({
         }
     };
 
-    const handleSend = () => {
+    const handleSend = async () => {
         const trimmed = inputValue.trim();
         if (!trimmed || isLoading) return;
         if (selectedAction === 'fragmento' && !fragmentValue.trim()) {
@@ -437,13 +300,16 @@ const IAStudioChat = ({
             return;
         }
         console.info('[IAStudio][Chat] Enviando instrucción:', trimmed);
-        void Promise.resolve(onSend(trimmed)).catch((error) => {
+        try {
+            await onSend(trimmed);
+        } catch (error) {
             console.error('[IAStudio][Chat] Error no capturado:', error);
-        });
+            throw error;
+        }
         setInputValue('');
     };
 
-    const handleSuggestionAction = (suggestion, action) => {
+    const handleSuggestionAction = async (suggestion, action) => {
         const idea = suggestion.idea?.trim();
         if (!idea || !onSend) return;
         const prompts = {
@@ -454,9 +320,12 @@ const IAStudioChat = ({
         };
         // Se fuerza el planificador automático para que el modo manual
         // "Sugerir" no bloquee una acción posterior como preparar parches.
-        void Promise.resolve(onSend(prompts[action] || prompts.develop, 'chat')).catch(error => {
+        try {
+            await onSend(prompts[action] || prompts.develop, 'chat');
+        } catch (error) {
             console.error('[IAStudio][Chat] Error al procesar sugerencia:', error);
-        });
+            throw error;
+        }
     };
 
     const handleKeyDown = (e) => {
@@ -489,203 +358,201 @@ const IAStudioChat = ({
         }
     };
 
-    const currentAction = QUICK_ACTIONS?.find(a => a.id === selectedAction);
     const inputHeight = `${Math.min(6, Math.max(1, Math.ceil((inputValue.length || 1) / 80))) * 24}px`;
-    const contextualPrompts = getContextualPrompts();
-    const visibleContextualPrompts = showMorePrompts
-        ? contextualPrompts
-        : contextualPrompts.slice(0, 3);
-    const actionGroups = ACTION_GROUPS
-        .map(group => ({ ...group, actions: QUICK_ACTIONS?.filter(action => group.ids.includes(action.id)) || [] }))
+    const toolGroups = [
+        { id: 'explorar', label: 'Explorar', icon: Lightbulb, ids: ['sugerir', 'chat'] },
+        { id: 'crear', label: 'Crear', icon: PenLine, ids: ['escribir', 'escena', 'constructor_personaje'] },
+        { id: 'revisar', label: 'Revisar', icon: FileSearch, ids: ['analizar', 'fragmento', 'formatear'] },
+    ]
+        .map(group => ({
+            ...group,
+            actions: (QUICK_ACTIONS || []).filter(action => group.ids.includes(action.id) && action.id !== 'chat')
+                .filter(action => {
+                    const query = toolSearch.trim().toLowerCase();
+                    return !query || `${action.label} ${action.description}`.toLowerCase().includes(query);
+                }),
+        }))
         .filter(group => group.actions.length > 0);
 
+    const toolIcons = {
+        escribir: PenLine,
+        escena: Sparkles,
+        constructor_personaje: UserRound,
+        fragmento: Scissors,
+        analizar: FileSearch,
+        sugerir: Lightbulb,
+        formatear: Wand2,
+    };
+
+    const toolThemes = {
+        chat: { label: 'Chat general', icon: MessageSquare, text: 'text-violet-600 dark:text-violet-400', soft: 'bg-violet-500/5', softStrong: 'bg-violet-500/10', border: 'border-violet-500/20', focus: 'focus-within:border-violet-500/50 focus-within:ring-violet-500/10', button: 'bg-violet-600 hover:bg-violet-700' },
+        escribir: { label: 'Escritura', icon: PenLine, text: 'text-emerald-600 dark:text-emerald-400', soft: 'bg-emerald-500/5', softStrong: 'bg-emerald-500/10', border: 'border-emerald-500/25', focus: 'focus-within:border-emerald-500/50 focus-within:ring-emerald-500/10', button: 'bg-emerald-600 hover:bg-emerald-700' },
+        escena: { label: 'Escena por escena', icon: Sparkles, text: 'text-sky-600 dark:text-sky-400', soft: 'bg-sky-500/5', softStrong: 'bg-sky-500/10', border: 'border-sky-500/25', focus: 'focus-within:border-sky-500/50 focus-within:ring-sky-500/10', button: 'bg-sky-600 hover:bg-sky-700' },
+        constructor_personaje: { label: 'Creador de personajes', icon: UserRound, text: 'text-indigo-600 dark:text-indigo-400', soft: 'bg-indigo-500/5', softStrong: 'bg-indigo-500/10', border: 'border-indigo-500/25', focus: 'focus-within:border-indigo-500/50 focus-within:ring-indigo-500/10', button: 'bg-indigo-600 hover:bg-indigo-700' },
+        fragmento: { label: 'Edición de fragmentos', icon: Scissors, text: 'text-amber-600 dark:text-amber-400', soft: 'bg-amber-500/5', softStrong: 'bg-amber-500/10', border: 'border-amber-500/25', focus: 'focus-within:border-amber-500/50 focus-within:ring-amber-500/10', button: 'bg-amber-600 hover:bg-amber-700' },
+        analizar: { label: 'Análisis y continuidad', icon: FileSearch, text: 'text-blue-600 dark:text-blue-400', soft: 'bg-blue-500/5', softStrong: 'bg-blue-500/10', border: 'border-blue-500/25', focus: 'focus-within:border-blue-500/50 focus-within:ring-blue-500/10', button: 'bg-blue-600 hover:bg-blue-700' },
+        sugerir: { label: 'Ideas y sugerencias', icon: Lightbulb, text: 'text-purple-600 dark:text-purple-400', soft: 'bg-purple-500/5', softStrong: 'bg-purple-500/10', border: 'border-purple-500/25', focus: 'focus-within:border-purple-500/50 focus-within:ring-purple-500/10', button: 'bg-purple-600 hover:bg-purple-700' },
+        formatear: { label: 'Formatear documento', icon: Wand2, text: 'text-teal-600 dark:text-teal-400', soft: 'bg-teal-500/5', softStrong: 'bg-teal-500/10', border: 'border-teal-500/25', focus: 'focus-within:border-teal-500/50 focus-within:ring-teal-500/10', button: 'bg-teal-600 hover:bg-teal-700' },
+    };
+
+    const toolTheme = toolThemes[selectedAction] || toolThemes.chat;
+    const ActiveToolIcon = toolTheme.icon;
+
+    const selectTool = (actionId) => {
+        handleActionChange(actionId);
+        setShowToolsModal(false);
+        setToolSearch('');
+    };
+
+    const configurationControls = (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 order-1 overflow-hidden sm:order-2 sm:flex-none">
+            <button type="button" onClick={onOpenContext} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-2 py-1.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-colors sm:w-auto sm:flex-none" title="Configurar contexto de referencia">
+                <BookOpen size={12} />
+                <span className="truncate">Contexto</span>
+                <span className="rounded-md bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-bold">{selectedChapterIds.length + selectedWorldItemIds.length + selectedCharacterIds.length}</span>
+            </button>
+            <button type="button" onClick={onOpenDestination} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors sm:w-auto sm:flex-none" title={`Configurar destino: ${currentDestLabel()}`}>
+                <Target size={12} />
+                <span className="shrink-0">Destino</span>
+                <span className="min-w-0 flex-1 truncate rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold">{destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Nuevo capítulo' : destinationDoc?.docTitle || 'Manual'}</span>
+            </button>
+        </div>
+    );
+
     return (
-        <div className="flex-1 flex flex-col min-h-0 max-w-full overflow-x-hidden bg-[var(--bg-app)]">
+        <div className={`flex-1 flex flex-col min-h-0 max-w-full overflow-x-hidden bg-[var(--bg-app)] border-l-2 ${toolTheme.border} transition-colors duration-300`}>
             {/* Header */}
-            <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                    <button
-                        onClick={() => setShowSettingsModal(true)}
-                        className="group flex items-center gap-1.5 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)]/75 hover:bg-[var(--accent-soft)] hover:border-indigo-500/30 transition-all shadow-sm active:scale-[0.98] text-left min-w-0"
-                        title="Ajustes de la conversación"
-                    >
-                        <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-600/10 border border-indigo-500/20 group-hover:from-indigo-500 group-hover:to-purple-600 flex items-center justify-center shadow-sm shrink-0 transition-all duration-300">
-                            <Sparkles size={14} className="text-indigo-500 group-hover:text-white transition-colors duration-300" />
-                        </div>
-                        <div className="min-w-0">
-                            <span className="block text-[8px] font-black uppercase tracking-wider text-[var(--text-muted)] opacity-60 leading-none">IA Studio</span>
-                            <span className="block text-xs font-black text-[var(--text-main)] truncate max-w-[80px] sm:max-w-[200px] mt-0.5 group-hover:text-indigo-500 transition-colors leading-tight">
-                                {activeSession?.name || 'Conversación'}
-                            </span>
-                        </div>
-                        <ChevronDown size={12} className="text-[var(--text-muted)] opacity-70 shrink-0 group-hover:text-indigo-500 transition-colors" />
-                    </button>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-2 sm:px-4 lg:px-6 py-2.5 sm:py-3 border-b border-[var(--border-main)] bg-[var(--bg-app)] shrink-0">
+                <div className="hidden min-w-0 flex-1 items-center gap-2 sm:flex sm:order-1">
+                    <div className={`w-7 h-7 rounded-xl ${toolTheme.softStrong} border ${toolTheme.border} flex items-center justify-center shadow-sm shrink-0`}>
+                        <ActiveToolIcon size={14} className={toolTheme.text} />
+                    </div>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] opacity-70">IA Studio</span>
                 </div>
 
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* Model Quick Switcher Dropdown */}
+                {configurationControls}
+                <div className="flex items-center gap-1.5 sm:gap-2 order-2 ml-auto sm:order-3">
+                    {/* Secondary conversation actions */}
                     <div className="relative shrink-0">
                         <button
-                            onClick={() => setShowModelDropdown(!showModelDropdown)}
-                            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] text-[11px] font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] hover:border-[var(--border-main)]/80 transition-all shadow-sm"
-                            title="Cambiar modelo activo"
+                            type="button"
+                            onClick={() => setShowMoreMenu(prev => !prev)}
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${showMoreMenu ? `${toolTheme.softStrong} ${toolTheme.text}` : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}
+                            title="Configuración"
+                            aria-label="Configuración"
                         >
-                            <span className="px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase tracking-wider leading-none shrink-0 hidden xs:inline">
-                                DeepSeek
-                            </span>
-                            <span className="truncate max-w-[65px] sm:max-w-[140px] font-medium text-[var(--text-main)]">
-                                {selectedModelName}
-                            </span>
-                            <ChevronDown size={12} className="opacity-70 text-[var(--text-muted)] shrink-0" />
+                            <Settings size={16} />
                         </button>
-                        
-                        {showModelDropdown && (
+                        {showMoreMenu && (
                             <>
-                                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 sm:hidden animate-in fade-in duration-300" onClick={() => setShowModelDropdown(false)} />
-                                <div className="hidden sm:block fixed inset-0 z-30" onClick={() => setShowModelDropdown(false)} />
-                                <div className="fixed bottom-0 left-0 right-0 top-auto w-full rounded-t-3xl border-t border-[var(--border-main)] bg-[var(--bg-editor)] shadow-[0_-10px_40px_rgba(0,0,0,0.35)] z-[100] animate-in slide-in-from-bottom duration-300 p-4 space-y-3 sm:absolute sm:bottom-auto sm:left-auto sm:top-full sm:right-0 sm:mt-1.5 sm:w-64 sm:rounded-2xl sm:border sm:shadow-xl sm:z-45 sm:animate-in sm:fade-in sm:slide-in-from-top-1 sm:zoom-in-95 sm:duration-200 sm:p-1.5 sm:space-y-0.5">
-                                    <div className="flex justify-center sm:hidden mb-1">
-                                        <div className="w-12 h-1 bg-[var(--border-main)] rounded-full opacity-60" />
+                                <div className="fixed inset-0 z-30" onClick={() => setShowMoreMenu(false)} />
+                                <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-xl z-40 p-1.5 text-left animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-200">
+                                    <div className="px-2.5 py-2 border-b border-[var(--border-main)]/40 mb-1">
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Conversación</p>
+                                        <p className="text-[10px] text-[var(--text-main)] truncate mt-0.5">{activeSession?.name || 'Conversación'}</p>
                                     </div>
-                                    
+                                    <div className="px-2.5 py-2 border-b border-[var(--border-main)]/40 mb-1">
+                                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Configuración de IA</span>
+                                            <span className="text-[8px] text-indigo-500 font-bold">Modelo</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowModelDropdown(prev => !prev)}
+                                            className="w-full flex items-center justify-between gap-2 rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] px-2.5 py-2 text-[10px] font-bold text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all"
+                                        >
+                                            <span className="truncate">{selectedModelName}</span>
+                                            <ChevronDown size={11} className={`text-[var(--text-muted)] shrink-0 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
+                                        </button>
+                                        {showModelDropdown && (
+                                            <div className="mt-1.5 rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] p-1">
+                                                <div className="max-h-48 overflow-y-auto space-y-0.5">
+                                                    {filteredModels.map(model => {
+                                                        const isSelected = model.id === selectedModel;
+                                                        return (
+                                                            <button key={model.id} type="button" onClick={() => handleModelSelect(model.id)} className={`w-full text-left px-2 py-2 rounded-lg text-[10px] flex items-center justify-between ${isSelected ? 'bg-indigo-500/10 text-indigo-500 font-bold' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'}`}>
+                                                                <span className="truncate pr-2">{model.name}</span>
+                                                                {isSelected && <Check size={10} className="text-indigo-500 shrink-0" strokeWidth={3} />}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowSettingsModal(true); setShowMoreMenu(false); }}
+                                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-xs text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-colors"
+                                    >
+                                        <Settings size={14} className="text-[var(--text-muted)]" />
+                                        Ajustes de conversación
+                                    </button>
+                                    {messages.length > 0 && onExport && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { onExport(); setShowMoreMenu(false); }}
+                                            className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-xs text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-colors"
+                                        >
+                                            <Download size={14} className="text-[var(--text-muted)]" />
+                                            Exportar conversación
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => { setIsCoWriterSettingsOpen(true); setShowMoreMenu(false); }}
+                                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-xs text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-colors"
+                                    >
+                                        <Wand2 size={14} className={isCoWriterOpen ? 'text-purple-500' : 'text-[var(--text-muted)]'} />
+                                        Configurar Coescritor
+                                    </button>
                                     {onReasoningModeChange && (
-                                        <div className="px-2.5 py-2 border-b border-[var(--border-main)]/30 space-y-2">
+                                        <div className="mt-1 border-t border-[var(--border-main)]/40 px-2.5 py-2.5 space-y-2">
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
-                                                    <Zap size={13} className={chatReasoningMode ? 'text-yellow-500 animate-pulse' : 'text-[var(--text-muted)]'} />
-                                                    <span className="text-[10px] font-bold text-[var(--text-main)]">Razonamiento Profundo</span>
+                                                    <SlidersHorizontal size={14} className={chatReasoningMode ? 'text-yellow-500' : 'text-[var(--text-muted)]'} />
+                                                    <span className="text-[10px] font-semibold text-[var(--text-main)]">Razonamiento profundo</span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     onClick={() => onReasoningModeChange(!chatReasoningMode)}
-                                                    className={`w-8 h-4.5 rounded-full p-0.5 transition-colors focus:outline-none flex items-center relative ${
-                                                        chatReasoningMode ? 'bg-indigo-600' : 'bg-[var(--border-main)]'
-                                                    }`}
+                                                    className={`rounded-full p-0.5 transition-colors flex items-center ${chatReasoningMode ? 'bg-indigo-600' : 'bg-[var(--border-main)]'}`}
                                                     style={{ width: '2rem', height: '1.125rem' }}
-                                                    title="Modo Razonamiento"
+                                                    title="Activar razonamiento profundo"
                                                 >
-                                                    <div
-                                                        className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform transform ${
-                                                            chatReasoningMode ? 'translate-x-3.5' : 'translate-x-0'
-                                                        }`}
-                                                    />
+                                                    <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${chatReasoningMode ? 'translate-x-3.5' : 'translate-x-0'}`} />
                                                 </button>
                                             </div>
-
                                             {chatReasoningMode && onReasoningEffortChange && (
-                                                <div className="flex items-center justify-between bg-[var(--bg-app)] border border-[var(--border-main)]/50 rounded-lg p-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                                                    <span className="text-[8px] font-black uppercase text-[var(--text-muted)] tracking-wider pl-1">Esfuerzo:</span>
-                                                    <div className="flex gap-1 shrink-0">
-                                                        {['high', 'max'].map(effort => {
-                                                            const isSelected = chatReasoningEffort === effort;
-                                                            return (
-                                                                <button
-                                                                    key={effort}
-                                                                    type="button"
-                                                                    onClick={() => onReasoningEffortChange(effort)}
-                                                                    className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase transition-all ${
-                                                                        isSelected
-                                                                            ? 'bg-indigo-500 text-white shadow-sm font-black'
-                                                                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                                                                    }`}
-                                                                >
-                                                                    {effort === 'high' ? 'Alto' : 'Max'}
-                                                                </button>
-                                                            );
-                                                        })}
+                                                <div className="flex items-center justify-between bg-[var(--bg-app)] border border-[var(--border-main)]/50 rounded-lg p-1">
+                                                    <span className="text-[8px] font-black uppercase text-[var(--text-muted)] tracking-wider pl-1">Esfuerzo</span>
+                                                    <div className="flex gap-1">
+                                                        {['high', 'max'].map(effort => (
+                                                            <button key={effort} type="button" onClick={() => onReasoningEffortChange(effort)} className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${chatReasoningEffort === effort ? 'bg-indigo-500 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
+                                                                {effort === 'high' ? 'Alto' : 'Max'}
+                                                            </button>
+                                                        ))}
                                                     </div>
                                                 </div>
                                             )}
                                         </div>
                                     )}
-                                    
-                                    <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1">
-                                        Modelos de DeepSeek
-                                    </div>
-                                    <div className="max-h-60 overflow-y-auto space-y-0.5">
-                                        {filteredModels.map(model => {
-                                            const isSelected = model.id === selectedModel;
-                                            return (
-                                                <button
-                                                    key={model.id}
-                                                    onClick={() => handleModelSelect(model.id)}
-                                                    className={`w-full text-left px-2.5 py-2.5 sm:py-2 text-[10px] transition-all flex items-center justify-between rounded-xl ${
-                                                        isSelected
-                                                            ? 'bg-indigo-500/10 text-indigo-500 font-bold'
-                                                            : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/40'
-                                                    }`}
-                                                >
-                                                    <div className="min-w-0 pr-2">
-                                                        <span className="block truncate font-semibold">{model.name}</span>
-                                                        {model.context_length && (
-                                                            <span className="block text-[7px] text-[var(--text-muted)] opacity-60 mt-0.5">
-                                                                Contexto: {(model.context_length / 1000).toFixed(0)}k tokens
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {isSelected && (
-                                                        <Check size={10} className="text-indigo-500 shrink-0" strokeWidth={3} />
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
                                 </div>
                             </>
                         )}
                     </div>
-
-                    {/* Configuración del Coescritor (cabecera, Idea 3) */}
-                    <button
-                        onClick={() => setIsCoWriterSettingsOpen(true)}
-                        className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 cursor-pointer ${
-                            isCoWriterOpen
-                                ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)]'
-                        }`}
-                        title="Configuración del Coescritor"
-                    >
-                        <Settings size={16} />
-                    </button>
-
-                    {/* Export button */}
-                    {messages.length > 0 && onExport && (
-                        <button
-                            onClick={onExport}
-                            className="w-8 h-8 rounded-xl flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--accent-soft)] transition-all shrink-0 cursor-pointer"
-                            title="Exportar conversación"
-                        >
-                            <Download size={16} />
-                        </button>
-                    )}
                 </div>
             </div>
 
-            {/* Configuration bar: context and destination stay visible without competing with the composer. */}
-            <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6 py-2.5 border-b border-[var(--border-main)]/70 bg-[var(--bg-editor)]/45 shrink-0">
-                <span className="text-[9px] font-bold text-[var(--text-muted)] mr-1">Configuración</span>
-                <button
-                    type="button"
-                    onClick={onOpenContext}
-                    className="flex items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-3 py-1.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
-                    title="Configurar contexto de referencia"
-                >
-                    <BookOpen size={12} />
-                    Contexto
-                    <span className="rounded-md bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-bold">{selectedChapterIds.length + selectedWorldItemIds.length + selectedCharacterIds.length}</span>
-                </button>
-                <button
-                    type="button"
-                    onClick={onOpenDestination}
-                    className="flex min-w-0 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                    title={`Configurar destino: ${currentDestLabel()}`}
-                >
-                    <Target size={12} />
-                    <span>Destino</span>
-                    <span className="max-w-[180px] truncate rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold">{destinationDoc?.mode === 'auto' ? 'Automático' : destinationDoc?.mode === 'new' ? 'Nuevo capítulo' : destinationDoc?.docTitle || 'Manual'}</span>
-                </button>
-                <span className="ml-auto hidden text-[10px] text-[var(--text-muted)] sm:inline">Acción: <strong className="text-[var(--text-main)]">{currentAction?.label?.replace(/^\S+\s/u, '').trim() || 'Chat'}</strong></span>
-            </div>
+            {selectedAction !== 'chat' && (
+                <div className={`flex items-center gap-2 px-3 sm:px-4 lg:px-6 py-1.5 ${toolTheme.soft} border-b ${toolTheme.border} shrink-0 animate-in fade-in slide-in-from-top-1 duration-200`}>
+                    <ActiveToolIcon size={12} className={`${toolTheme.text} shrink-0`} />
+                    <span className={`min-w-0 flex-1 truncate text-[9px] font-black uppercase tracking-wider ${toolTheme.text}`}>{toolTheme.label}</span>
+                    <button type="button" onClick={() => handleActionChange('chat')} className={`${toolTheme.text} opacity-70 hover:opacity-100 shrink-0`} title="Volver al chat general" aria-label="Volver al chat general">
+                        <X size={12} />
+                    </button>
+                </div>
+            )}
 
             {/* Messages */}
             <div 
@@ -712,42 +579,8 @@ const IAStudioChat = ({
                                     ¿En qué te ayudo hoy?
                                 </p>
                                 <p className="text-xs font-medium opacity-50 max-w-md">
-                                    Configura tus referencias a la izquierda o selecciona una sugerencia contextual para guiar tu proceso creativo.
+                                    Escribe lo que necesitas. La IA interpretará si quieres consultar, crear, modificar o revisar.
                                 </p>
-                            </div>
-
-                            {/* Contextual Quick Prompts */}
-                            <div className="w-full max-w-xl mx-auto px-1">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 mb-3 text-left pl-1 flex items-center gap-1.5">
-                                    <Sparkles size={10} className="text-indigo-500" /> sugerencias contextuales
-                                </p>
-                                <div className="flex overflow-x-auto sm:grid sm:grid-cols-2 gap-2 text-left scrollbar-hide snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
-                                    {visibleContextualPrompts.map((item, idx) => (
-                                        <button
-                                            key={idx}
-                                            onClick={() => {
-                                                setInputValue(item.prompt);
-                                                if (inputRef.current) inputRef.current.focus();
-                                            }}
-                                            className="group flex gap-3 p-3 bg-[var(--bg-editor)] border border-[var(--border-main)]/60 hover:border-indigo-500/40 hover:bg-indigo-500/[0.02] rounded-xl transition-all text-xs text-[var(--text-main)] active:scale-[0.99] shadow-sm hover:shadow shrink-0 w-[240px] sm:w-auto snap-center cursor-pointer"
-                                        >
-                                            <span className="text-base shrink-0 group-hover:scale-110 transition-transform">{item.icon}</span>
-                                            <div className="flex-1 min-w-0 text-left">
-                                                <p className="font-semibold truncate text-[11px] group-hover:text-indigo-500 transition-colors">{item.text}</p>
-                                                <p className="text-[9px] text-[var(--text-muted)] opacity-60 truncate mt-0.5">{item.prompt}</p>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                                {contextualPrompts.length > 3 && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowMorePrompts(prev => !prev)}
-                                        className="mt-3 text-[10px] font-semibold text-indigo-500 hover:text-indigo-600 transition-colors"
-                                    >
-                                        {showMorePrompts ? 'Mostrar menos' : `Explorar más (${contextualPrompts.length - 3})`}
-                                    </button>
-                                )}
                             </div>
                         </div>
                     ) : (
@@ -1037,7 +870,7 @@ const IAStudioChat = ({
                     <div className={`flex items-center gap-2 sm:gap-2.5 bg-[var(--bg-editor)] rounded-2xl pl-2 sm:pl-3 pr-2.5 sm:pr-4 py-2.5 sm:py-3 transition-all duration-300 shadow-sm relative ${
                         isCoWriterOpen
                             ? 'border-2 border-purple-500/50 bg-gradient-to-r from-indigo-500/10 to-purple-600/10 ring-2 ring-purple-500/30 shadow-[0_0_24px_rgba(139,92,246,0.25)]'
-                            : 'border border-[var(--border-main)] focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]'
+                            : `border ${toolTheme.border} ${toolTheme.focus} focus-within:ring-4 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]`
                     }`}>
                         {/* Autocomplete Dropdown */}
                         {shouldShowAutocomplete && (
@@ -1068,82 +901,16 @@ const IAStudioChat = ({
                                 })}
                             </div>
                         )}
-                        {/* Action Selector */}
-                        <div className="relative shrink-0 select-none">
-                            {(() => {
-                                const actionColors = {
-                                    chat: 'bg-violet-500/10 text-violet-600 border-violet-500/20 hover:bg-violet-500/20 dark:text-violet-400 dark:border-violet-500/30',
-                                    escribir: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30',
-                                    fragmento: 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/30',
-                                    escena: 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20 dark:text-sky-400 dark:border-sky-500/30',
-                                    constructor_personaje: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/30',
-                                    analizar: 'bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30',
-                                    sugerir: 'bg-purple-500/10 text-purple-600 border-purple-500/20 hover:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/30',
-                                };
-                                const activeColorClass = actionColors[selectedAction] || 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-main)] hover:bg-[var(--accent-soft)]';
-
-                                return (
-                                    <>
-                                        <button
-                                            onClick={() => setShowActionDropdown(!showActionDropdown)}
-                                            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm hover:scale-[1.02] active:scale-95 cursor-pointer ${activeColorClass}`}
-                                        >
-                                            <span className="text-xs transition-transform duration-300">{currentAction?.label?.match(/^.{1,2}/)?.[0] || '💬'}</span>
-                                            <span className="hidden xs:inline">{currentAction?.label?.replace(/^\S+\s/u, '').trim() || 'Chat'}</span>
-                                            <ChevronDown size={11} className={`text-current opacity-80 transition-transform duration-300 shrink-0 ${showActionDropdown ? 'rotate-180' : ''}`} />
-                                        </button>
-
-                                        {showActionDropdown && (
-                                            <>
-                                                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 sm:hidden animate-in fade-in duration-300" onClick={() => setShowActionDropdown(false)} />
-                                                <div className="hidden sm:block fixed inset-0 z-30" onClick={() => setShowActionDropdown(false)} />
-                                                <div className="fixed bottom-0 left-0 right-0 top-auto w-full rounded-t-3xl border-t border-[var(--border-main)] bg-[var(--bg-editor)] shadow-[0_-10px_40px_rgba(0,0,0,0.35)] z-[100] animate-in slide-in-from-bottom duration-300 p-4 space-y-3 sm:absolute sm:bottom-full sm:top-auto sm:left-0 sm:right-auto sm:mb-2.5 sm:w-64 sm:rounded-2xl sm:border sm:shadow-[0_20px_50px_rgba(0,0,0,0.3)] sm:z-40 sm:animate-in sm:fade-in sm:slide-in-from-bottom-2 sm:zoom-in-95 sm:duration-200 sm:p-1.5 sm:space-y-0.5 text-left">
-                                                    <div className="flex justify-center sm:hidden mb-1">
-                                                        <div className="w-12 h-1 bg-[var(--border-main)] rounded-full opacity-60" />
-                                                    </div>
-                                                    
-                                                    <div className="px-2.5 py-1.5 text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 border-b border-[var(--border-main)]/30 mb-1 sm:hidden">
-                                                        Seleccionar Acción
-                                                    </div>
-                                                    
-                                                    {actionGroups.map(group => (
-                                                        <React.Fragment key={group.id}>
-                                                            <div className="px-2.5 pt-2 pb-1 text-[9px] font-bold text-[var(--text-muted)] first:pt-1">{group.label}</div>
-                                                            {group.actions.map(action => {
-                                                                const isSelected = action.id === selectedAction;
-                                                                return (
-                                                                    <button
-                                                                        key={action.id}
-                                                                        onClick={() => {
-                                                                            handleActionChange(action.id);
-                                                                            setShowActionDropdown(false);
-                                                                        }}
-                                                                        className={`w-full text-left px-3 py-2.5 sm:py-2 text-xs transition-all flex items-center gap-2.5 rounded-xl border border-transparent cursor-pointer ${
-                                                                            isSelected
-                                                                                ? `${actionColors[action.id] || 'bg-indigo-500/10 text-indigo-500'} font-bold`
-                                                                                : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]/50 hover:translate-x-0.5'
-                                                                        }`}
-                                                                    >
-                                                                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 border transition-transform ${isSelected ? 'scale-110' : ''} ${actionColors[action.id] || 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
-                                                                            {action.label?.match(/^.{1,2}/)?.[0] || '💬'}
-                                                                        </span>
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <span className="block truncate font-semibold">{action.label?.replace(/^\S+\s/u, '').trim()}</span>
-                                                                            <span className="block text-[8px] text-[var(--text-muted)] opacity-60 truncate">{action.description}</span>
-                                                                        </div>
-                                                                        {isSelected && <Check size={11} className="text-current shrink-0 animate-in zoom-in-50 duration-200" strokeWidth={3} />}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </React.Fragment>
-                                                    ))}
-                                                </div>
-                                            </>
-                                        )}
-                                    </>
-                                );
-                            })()}
-                        </div>
+                        {/* Specialized tools shortcut: icon-only to keep the composer calm. */}
+                        <button
+                            type="button"
+                            onClick={() => setShowToolsModal(true)}
+                            className={`shrink-0 w-9 h-9 rounded-xl border ${toolTheme.border} ${toolTheme.soft} ${toolTheme.text} flex items-center justify-center hover:brightness-95 transition-all active:scale-95`}
+                            title="Explorar herramientas especializadas"
+                            aria-label="Explorar herramientas especializadas"
+                        >
+                            <Wrench size={15} />
+                        </button>
 
                         {/* Textarea */}
                         {selectedAction === 'constructor_personaje' ? (
@@ -1159,7 +926,7 @@ const IAStudioChat = ({
                                 placeholder={isCoWriterOpen
                                     ? "Escribe un comando para el Coescritor… ej. 'Corrige la edad de Nora de 19 a 18'"
                                     : "Escribe tu mensaje... (Enter para enviar o '/' para comandos)"}
-                                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-1.5 max-h-32 scrollbar-hide leading-relaxed"
+                                className="flex-1 min-w-0 self-center bg-transparent text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-40 focus:outline-none resize-none py-0 pl-2 max-h-32 scrollbar-hide leading-6"
                                 rows={1}
                                 style={{ height: inputHeight }}
                                 disabled={isLoading}
@@ -1214,30 +981,24 @@ const IAStudioChat = ({
                             ) : cowriter.status === 'processing' ? (
                                 <Loader2 size={16} className="animate-spin" />
                             ) : (
-                                <Wand2 size={16} />
+                                <Volume2 size={16} />
                             )}
                         </button>
 
-                        {/* Send / Stop button */}
-                        <button
-                            onClick={isLoading ? onCancelStream : handleSend}
-                            disabled={!isLoading && !inputValue.trim() && selectedAction !== 'escena'}
-                            className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-md cursor-pointer ${
-                                isLoading 
-                                    ? 'bg-rose-500 text-white hover:bg-rose-600' 
-                                    : 'bg-[var(--accent-main)] text-white hover:bg-[var(--accent-main)]/80 disabled:opacity-30 disabled:cursor-not-allowed'
-                            }`}
-                            title={isLoading ? "Detener generación" : "Enviar mensaje"}
-                        >
-                            {isLoading ? (
-                                <Square size={16} fill="currentColor" className="animate-pulse" />
-                            ) : (
-                                <Send size={18} />
-                            )}
-                        </button>
+                        {/* Enter sends messages; only expose a stop control while a response is streaming. */}
+                        {isLoading && (
+                            <button
+                                type="button"
+                                onClick={onCancelStream}
+                                className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500 text-white hover:bg-rose-600 transition-all active:scale-95 shadow-md cursor-pointer"
+                                title="Detener generación"
+                            >
+                                <Square size={15} fill="currentColor" className="animate-pulse" />
+                            </button>
+                        )}
                     </div>
                     <p className="text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-30 mt-2 text-center animate-pulse">
-                        Shift+Enter para nueva línea · Sesiones guardadas automáticamente en local
+                        Enter para enviar · Shift+Enter para nueva línea · Sesiones guardadas automáticamente en local
                     </p>
                 </div>
             </div>
@@ -1323,6 +1084,104 @@ const IAStudioChat = ({
                                 Eliminar Chat
                             </button>
                         </div>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Specialized tools library */}
+            <Modal
+                isOpen={showToolsModal}
+                onClose={() => {
+                    setShowToolsModal(false);
+                    setToolSearch('');
+                }}
+                title="Herramientas de IA Studio"
+                size="lg"
+            >
+                <div className="p-5 sm:p-6 space-y-5 text-left">
+                    <div className="flex items-start gap-3 rounded-2xl border border-indigo-500/15 bg-indigo-500/5 p-4">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                            <Sparkles size={17} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold text-[var(--text-main)]">El chat general sigue siendo el punto de partida</p>
+                            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed mt-1">
+                                Escribe lo que necesitas y la IA interpretará si conviene consultar, crear, modificar o revisar. Usa una herramienta cuando quieras entrar directamente a un flujo especializado.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                        <input
+                            value={toolSearch}
+                            onChange={(e) => setToolSearch(e.target.value)}
+                            placeholder="Buscar una herramienta…"
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl pl-9 pr-3 py-2.5 text-xs text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-60 outline-none focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/10"
+                        />
+                    </div>
+
+                    <div className="space-y-5">
+                        {toolGroups.map(group => {
+                            const GroupIcon = group.icon;
+                            return (
+                                <section key={group.id}>
+                                    <div className="flex items-center gap-2 mb-2.5">
+                                        <GroupIcon size={13} className="text-indigo-500" />
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">{group.label}</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {group.actions.map(action => {
+                                            const ToolIcon = toolIcons[action.id] || Wrench;
+                                            const isActive = selectedAction === action.id;
+                                            return (
+                                                <button
+                                                    key={action.id}
+                                                    type="button"
+                                                    onClick={() => selectTool(action.id)}
+                                                    className={`group flex items-start gap-3 text-left p-3 rounded-2xl border transition-all active:scale-[0.99] ${
+                                                        isActive
+                                                            ? 'border-indigo-500/40 bg-indigo-500/10'
+                                                            : 'border-[var(--border-main)] bg-[var(--bg-editor)] hover:border-indigo-500/30 hover:bg-indigo-500/[0.04]'
+                                                    }`}
+                                                >
+                                                    <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isActive ? 'bg-indigo-500 text-white' : 'bg-indigo-500/10 text-indigo-500 group-hover:bg-indigo-500 group-hover:text-white'}`}>
+                                                        <ToolIcon size={15} />
+                                                    </span>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--text-main)]">
+                                                            {action.label?.replace(/^\S+\s/u, '').trim()}
+                                                            {isActive && <Check size={12} className="text-indigo-500" strokeWidth={3} />}
+                                                        </span>
+                                                        <span className="block text-[10px] text-[var(--text-muted)] leading-relaxed mt-0.5">{action.description}</span>
+                                                    </span>
+                                                    <ArrowRight size={13} className="mt-1 text-[var(--text-muted)] opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all shrink-0" />
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            );
+                        })}
+                        {toolGroups.length === 0 && (
+                            <div className="py-8 text-center text-xs text-[var(--text-muted)]">
+                                No encontramos una herramienta con ese nombre.
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="border-t border-[var(--border-main)]/60 pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                            ¿No sabes cuál elegir? Regresa al chat y deja que la IA lo determine.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => selectTool('chat')}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/20 bg-violet-500/5 text-violet-600 dark:text-violet-400 text-[10px] font-bold hover:bg-violet-500/10 transition-colors shrink-0"
+                        >
+                            <MessageSquare size={12} />
+                            Seguir en el chat
+                        </button>
                     </div>
                 </div>
             </Modal>

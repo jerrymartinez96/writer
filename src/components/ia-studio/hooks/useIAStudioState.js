@@ -229,9 +229,48 @@ export const useIAStudioState = () => {
 
     // Show diff - supports multiple document blocks
     const handleShowDiff = useCallback((parsedBlocks) => {
-        if (!parsedBlocks || parsedBlocks.length === 0) return;
+        let blocksToShow = parsedBlocks;
 
-        const actionableBlocks = parsedBlocks.filter(b => b.mode !== 'text');
+        // Los mensajes guardados pueden contener la respuesta de una herramienta
+        // nativa serializada como { tool_call: { name, arguments } }.
+        // Reconstruir sus bloques evita abrir un diff vacío al consultar después
+        // el botón "Ver cambios".
+        if (typeof parsedBlocks === 'string') {
+            try {
+                const savedResponse = JSON.parse(parsedBlocks);
+                const toolCall = savedResponse?.tool_call;
+                if (toolCall?.name) {
+                    blocksToShow = parseToolCallResponse(
+                        toolCall.name,
+                        toolCall.arguments,
+                        destinationDoc,
+                        chapters,
+                        worldItems,
+                        characters
+                    );
+                } else {
+                    blocksToShow = parseDestinationsFromResponse(
+                        parsedBlocks,
+                        destinationDoc,
+                        chapters,
+                        worldItems,
+                        characters
+                    );
+                }
+            } catch {
+                blocksToShow = parseDestinationsFromResponse(
+                    parsedBlocks,
+                    destinationDoc,
+                    chapters,
+                    worldItems,
+                    characters
+                );
+            }
+        }
+
+        if (!Array.isArray(blocksToShow) || blocksToShow.length === 0) return;
+
+        const actionableBlocks = blocksToShow.filter(b => b.mode !== 'text');
         if (actionableBlocks.length === 0) return;
 
         const blocks = actionableBlocks.map((block) => {
@@ -299,7 +338,7 @@ export const useIAStudioState = () => {
 
         lastParsedBlocksRef.current = blocks;
         setDiffBlocks(blocks);
-    }, [chapters, worldItems, activeChapter, activeWorldDoc, characters]);
+    }, [chapters, worldItems, activeChapter, activeWorldDoc, characters, destinationDoc]);
 
     const getApiKey = useCallback(() => {
         const aiConfig = profile?.aiConfig || {};
@@ -2368,6 +2407,7 @@ Por favor, localiza en el documento dónde va este cambio, extrae el texto origi
 
         // Callbacks / Handlers
         handleSend,
+        handleShowDiff,
         handleResolveInconsistency,
         handleReopenInconsistency,
         handleCancelStream,

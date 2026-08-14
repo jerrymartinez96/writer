@@ -36,11 +36,43 @@ const ReviewModal = ({ title, count, icon, accent = 'purple', onClose, children 
     );
 };
 
-const SuggestionCardsView = ({ message, onSuggestionAction, isModal = false }) => {
+const SuggestionCardsView = ({ message, onSuggestionAction, onClose, isModal = false }) => {
     const suggestions = useMemo(() => parseSuggestionsFromResponse(message.rawResponse || message.content), [message.rawResponse, message.content]);
     const [edited, setEdited] = useState({});
     const [hidden, setHidden] = useState({});
     const [isOpen, setIsOpen] = useState(false);
+    const [actionStates, setActionStates] = useState({});
+
+    const actionLabels = {
+        develop: 'Desarrollar',
+        analyze: 'Analizar impacto',
+        prepare: 'Preparar cambios',
+        variant: 'Otra variante',
+    };
+
+    const handleSuggestionAction = async (suggestion, action) => {
+        const actionKey = suggestion.id;
+        if (actionStates[actionKey]?.status === 'sending') return;
+
+        setActionStates(prev => ({
+            ...prev,
+            [actionKey]: { status: 'sending', action }
+        }));
+        onClose?.();
+
+        try {
+            await Promise.resolve(onSuggestionAction?.(suggestion, action));
+            setActionStates(prev => ({
+                ...prev,
+                [actionKey]: { status: 'sent', action }
+            }));
+        } catch {
+            setActionStates(prev => ({
+                ...prev,
+                [actionKey]: { status: 'error', action }
+            }));
+        }
+    };
 
     const impactClass = {
         bajo: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
@@ -55,7 +87,7 @@ const SuggestionCardsView = ({ message, onSuggestionAction, isModal = false }) =
                     <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-purple-500"><Lightbulb size={15} /> Propuestas creativas</span>
                     <span className="rounded-lg bg-purple-500 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Revisar {suggestions.length}</span>
                 </button>
-                {isOpen && <ReviewModal title="Propuestas creativas" count={suggestions.length} accent="purple" icon={<Lightbulb size={17} />} onClose={() => setIsOpen(false)}><SuggestionCardsView message={message} onSuggestionAction={onSuggestionAction} isModal /></ReviewModal>}
+                {isOpen && <ReviewModal title="Propuestas creativas" count={suggestions.length} accent="purple" icon={<Lightbulb size={17} />} onClose={() => setIsOpen(false)}><SuggestionCardsView message={message} onSuggestionAction={onSuggestionAction} onClose={() => setIsOpen(false)} isModal /></ReviewModal>}
             </>
         );
     }
@@ -69,6 +101,8 @@ const SuggestionCardsView = ({ message, onSuggestionAction, isModal = false }) =
                 if (hidden[suggestion.id]) return null;
                 const currentIdea = edited[suggestion.id] ?? suggestion.idea;
                 const impact = suggestion.impact in impactClass ? suggestion.impact : 'medio';
+                const actionState = actionStates[suggestion.id];
+                const isSending = actionState?.status === 'sending';
                 return (
                     <div key={suggestion.id} className="rounded-2xl border-2 border-purple-500/20 bg-purple-500/[0.025] overflow-hidden shadow-sm">
                         <div className="px-4 py-3 border-b border-purple-500/10 flex items-start justify-between gap-3">
@@ -98,12 +132,34 @@ const SuggestionCardsView = ({ message, onSuggestionAction, isModal = false }) =
                                     <p className="mt-1 whitespace-pre-wrap">{suggestion.consequences}</p>
                                 </div>
                             )}
+                            {actionState && (
+                                <div
+                                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[10px] font-bold ${
+                                        actionState.status === 'error'
+                                            ? 'border-rose-500/25 bg-rose-500/10 text-rose-500'
+                                            : actionState.status === 'sending'
+                                                ? 'border-purple-500/25 bg-purple-500/10 text-purple-500'
+                                                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-500'
+                                    }`}
+                                    role="status"
+                                    aria-live="polite"
+                                >
+                                    {actionState.status === 'sending' ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                                    <span>
+                                        {actionState.status === 'sending'
+                                            ? `Enviando: ${actionLabels[actionState.action]}…`
+                                            : actionState.status === 'error'
+                                                ? 'No se pudo enviar la solicitud. Inténtalo de nuevo.'
+                                                : `Solicitud enviada: ${actionLabels[actionState.action]}. Revisa el chat.`}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex flex-wrap gap-2">
-                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'develop')} className="rounded-lg bg-purple-500 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white hover:bg-purple-600">Desarrollar</button>
-                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'analyze')} className="rounded-lg border border-indigo-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-indigo-500 hover:bg-indigo-500/10">Analizar impacto</button>
-                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'prepare')} className="rounded-lg border border-emerald-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-emerald-500 hover:bg-emerald-500/10">Preparar cambios</button>
-                                <button onClick={() => onSuggestionAction?.({ ...suggestion, idea: currentIdea }, 'variant')} className="rounded-lg border border-amber-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-500 hover:bg-amber-500/10">Otra variante</button>
-                                <button onClick={() => setHidden(prev => ({ ...prev, [suggestion.id]: true }))} className="rounded-lg border border-[var(--border-main)] px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">Descartar</button>
+                                <button disabled={isSending} onClick={() => handleSuggestionAction({ ...suggestion, idea: currentIdea }, 'develop')} className="rounded-lg bg-purple-500 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white hover:bg-purple-600 disabled:cursor-wait disabled:opacity-50">Desarrollar</button>
+                                <button disabled={isSending} onClick={() => handleSuggestionAction({ ...suggestion, idea: currentIdea }, 'analyze')} className="rounded-lg border border-indigo-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-indigo-500 hover:bg-indigo-500/10 disabled:cursor-wait disabled:opacity-50">Analizar impacto</button>
+                                <button disabled={isSending} onClick={() => handleSuggestionAction({ ...suggestion, idea: currentIdea }, 'prepare')} className="rounded-lg border border-emerald-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-emerald-500 hover:bg-emerald-500/10 disabled:cursor-wait disabled:opacity-50">Preparar cambios</button>
+                                <button disabled={isSending} onClick={() => handleSuggestionAction({ ...suggestion, idea: currentIdea }, 'variant')} className="rounded-lg border border-amber-500/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-500 hover:bg-amber-500/10 disabled:cursor-wait disabled:opacity-50">Otra variante</button>
+                                <button disabled={isSending} onClick={() => setHidden(prev => ({ ...prev, [suggestion.id]: true }))} className="rounded-lg border border-[var(--border-main)] px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)] disabled:cursor-wait disabled:opacity-50">Descartar</button>
                             </div>
                         </div>
                     </div>

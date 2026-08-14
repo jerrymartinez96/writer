@@ -2,7 +2,7 @@ import React from 'react';
 import IAStudioChat from './IAStudioChat';
 import IAStudioDiff from './IAStudioDiff';
 import IAStudioContextConfigModal from './IAStudioContextConfigModal';
-import { parseDestinationsFromResponse, QUICK_ACTIONS } from './IAStudioUtils';
+import { QUICK_ACTIONS } from './IAStudioUtils';
 import { useIAStudioState } from './hooks/useIAStudioState';
 
 const IAStudio = () => {
@@ -43,6 +43,7 @@ const IAStudio = () => {
 
         // Callbacks / Handlers
         handleSend,
+        handleShowDiff,
         handleResolveInconsistency,
         handleReopenInconsistency,
         handleCancelStream,
@@ -73,10 +74,7 @@ const IAStudio = () => {
                 activeSession={activeSession}
                 onRenameSession={renameSession}
                 onDeleteSession={deleteSession}
-                onShowDiff={(content) => {
-                    const parsed = parseDestinationsFromResponse(content, destinationDoc, chapters, worldItems, characters);
-                    setDiffBlocks(parsed);
-                }}
+                onShowDiff={handleShowDiff}
                 isLoading={isLoading}
                 selectedAction={selectedAction}
                 onNewChat={handleNewChat}
