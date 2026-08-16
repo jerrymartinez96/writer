@@ -1,8 +1,8 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Zap, MessageSquare } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Zap, MessageSquare, Wrench } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { useState, useMemo } from 'react'
 import { useIAStudioContext } from '../context/IAStudioContext'
-import { QUICK_ACTIONS, buildContextFromSelections, estimateContextWeight } from './ia-studio/IAStudioUtils'
+import { buildContextFromSelections, estimateContextWeight } from '../services/ai-next/contextUtils'
 import Modal from './Modal'
 import ConfirmModal from './ConfirmModal'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -113,13 +113,11 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     } = useData();
     const { 
         contextSelections, 
-        destinationDoc,
         sessions,
         activeSession,
         switchSession,
         newSession,
         deleteSession,
-        renameSession,
         messages = [],
         compressContext = false,
         setCompressContext
@@ -422,11 +420,11 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
 
                     <button
                         onClick={() => handleSelectMobile(() => setActiveView('ia-studio'))}
-                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'ia-studio' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'ia-studio' || activeView === 'ia-studio-next' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
                         title="IA Studio"
                     >
-                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'ia-studio' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-purple-500/10 text-purple-500'}`}>
-                            <Sparkles size={isSidebarCollapsed ? 18 : 14} />
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'ia-studio' || activeView === 'ia-studio-next' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-indigo-500/10 text-indigo-500'}`}>
+                            <Sparkles size={16} />
                         </div>
                         {!isSidebarCollapsed && <span>IA Studio</span>}
                     </button>
@@ -623,7 +621,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 );
                             })}
                         </div>
-                    ) : activeView === 'ia-studio' && !isSidebarCollapsed ? (
+                    ) : activeView === '__legacy-ia-studio-disabled__' && !isSidebarCollapsed ? (
                         <div className="px-4 py-4 space-y-4 flex flex-col h-full min-h-0 animate-in fade-in duration-300">
                             {/* Separator and Sessions list */}
                             <div className="flex-1 flex flex-col min-h-0">

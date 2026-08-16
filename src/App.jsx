@@ -4,6 +4,7 @@ import CommandPalette from './components/CommandPalette'
 import Modal from './components/Modal'
 import Login from './components/Login'
 import { DataProvider, useData } from './context/DataContext'
+import { ToolRoomProvider } from './context/ToolRoomContext'
 import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2, Check } from 'lucide-react'
 
 // Lazy loaded views
@@ -13,7 +14,9 @@ const SettingsView = lazy(() => import('./components/SettingsView'))
 const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
 const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
-const IAStudio = lazy(() => import('./components/ia-studio/IAStudio'))
+const IAStudioNext = lazy(() => import('./components/ia-studio-next/IAStudioNext'))
+const CharacterToolRoom = lazy(() => import('./components/toolrooms/CharacterToolRoom'))
+import { CoWriterRoom, WorldRoom, NarratorRoom, CoherenceRoom } from './components/toolrooms/AdditionalToolRooms'
 
 const LoadingScreen = () => (
   <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
@@ -28,6 +31,11 @@ const LoadingScreen = () => (
 function AppContent() {
   const { activeBook, activeChapter, activeWorldDoc, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
   const [timeSinceSave, setTimeSinceSave] = useState('Recién');
+
+  useEffect(() => {
+    // Normalize previously persisted navigation to the canonical IA Studio view.
+    if (activeView === 'ia-studio-next' || activeView === 'toolrooms') setActiveView('ia-studio');
+  }, [activeView, setActiveView]);
 
   useEffect(() => {
     const updateRelativeTime = () => {
@@ -185,7 +193,18 @@ function AppContent() {
   const renderActiveView = () => {
     switch (activeView) {
       case 'ia-studio':
-        return <IAStudio />;
+      case 'ia-studio-next':
+        return <IAStudioNext />;
+      case 'toolroom:characters':
+        return <CharacterToolRoom />;
+      case 'toolroom:cowriter':
+        return <CoWriterRoom />;
+      case 'toolroom:world':
+        return <WorldRoom />;
+      case 'toolroom:narrator':
+        return <NarratorRoom />;
+      case 'toolroom:coherence':
+        return <CoherenceRoom />;
       case 'world':
         return <WorldView />;
       case 'settings':
@@ -232,7 +251,7 @@ function AppContent() {
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
                   ? (activeWorldDoc?.title || activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'ia-studio' ? 'IA Studio' : activeView === 'trash' ? 'Papelera' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'ia-studio' || activeView === 'ia-studio-next' ? 'IA Studio' : activeView === 'toolrooms' ? 'Tool Rooms' : activeView === 'toolroom:characters' ? 'Diseñador de personajes' : activeView === 'trash' ? 'Papelera' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}
@@ -336,7 +355,9 @@ function App() {
     <ToastProvider>
       <DataProvider>
         <IAStudioProvider>
-          <AppContent />
+          <ToolRoomProvider>
+            <AppContent />
+          </ToolRoomProvider>
         </IAStudioProvider>
       </DataProvider>
     </ToastProvider>

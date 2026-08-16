@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import SessionManager from '../components/ia-studio/IAStudioSessionManager';
+import SessionManager from '../services/ai-next/CoreSessionStore';
 import { useData } from './DataContext';
 
 const IAStudioContext = createContext(null);
@@ -190,4 +190,3 @@ export const useIAStudioContext = () => {
     if (!ctx) throw new Error('useIAStudioContext must be used within IAStudioProvider');
     return ctx;
 };
-

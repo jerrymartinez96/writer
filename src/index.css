@@ -612,4 +612,16 @@ body {
   }
 }
 
+/* Core IA Studio chat — keep the composer compact across viewports. */
+textarea[aria-label="Mensaje para Core IA Studio"] {
+  min-height: 2.75rem;
+  padding-block: 0.625rem;
+}
+
+@media (min-width: 640px) {
+  textarea[aria-label="Mensaje para Core IA Studio"] {
+    min-height: 3rem;
+    padding-block: 0.75rem;
+  }
+}
 

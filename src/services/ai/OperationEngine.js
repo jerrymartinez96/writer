@@ -1,5 +1,5 @@
-import { applyPatch } from '../../components/ia-studio/utils/diffUtils';
-import { resolveTargetDoc } from '../../components/ia-studio/utils/domainUtils';
+import { applyPatch } from '../ai-next/patchUtils';
+import { resolveTargetDoc } from '../ai-next/domainResolver';
 
 /**
  * Contrato común para operaciones ejecutadas por IA Studio y Coescritor.

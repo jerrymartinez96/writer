@@ -126,6 +126,24 @@ export const DataProvider = ({ children }) => {
 
     // Auth Listener
     useEffect(() => {
+        // Bypass temporal únicamente para desarrollo local con el usuario de pruebas.
+        // En producción, Firebase Auth continúa siendo obligatorio.
+        if (import.meta.env.DEV) {
+            const devUser = {
+                uid: 'TZLJ51XTyONUVoGbLfG48O9irz33',
+                displayName: 'Usuario de pruebas',
+                email: 'test@local.dev',
+                photoURL: null,
+            };
+            setUser(devUser);
+            setProfile({ id: devUser.uid, displayName: devUser.displayName, email: devUser.email, photoURL: devUser.photoURL });
+            getUserProfile(devUser.uid).then((userProfile) => {
+                if (userProfile) setProfile(userProfile);
+            }).catch((error) => console.warn('Perfil de pruebas no disponible; se usará el perfil local:', error));
+            setAuthLoading(false);
+            return undefined;
+        }
+
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
             if (currentUser) {
@@ -439,11 +457,20 @@ export const DataProvider = ({ children }) => {
         }
     };
 
-    const handleUpdateChapter = async (chapterId, updateData) => {
+    const handleUpdateChapter = async (chapterId, updateData, options = {}) => {
         if (!activeBook) return;
         setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, ...updateData } : c));
         if (activeChapter && activeChapter.id === chapterId) {
             setActiveChapter(prev => ({ ...prev, ...updateData }));
+        }
+
+        if (options.immediate) {
+            const expectedToken = activeChapter && activeChapter.id === chapterId ? activeChapter.lastSyncToken : null;
+            const newToken = await updateChapterApi(activeBook.id, chapterId, updateData, expectedToken);
+            setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, lastSyncToken: newToken } : c));
+            if (activeChapter && activeChapter.id === chapterId) setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
+            setLastSaved(new Date());
+            return newToken;
         }
 
         const saveKey = `chap_meta_${chapterId}`;
@@ -580,7 +607,7 @@ export const DataProvider = ({ children }) => {
             return ch && !ch.isLoaded;
         });
 
-        if (unloadedIds.length === 0) return;
+        if (unloadedIds.length === 0) return [];
 
         try {
             const fetched = await Promise.all(
@@ -601,8 +628,10 @@ export const DataProvider = ({ children }) => {
                     return found ? found : ch;
                 }));
             }
+            return validFetched;
         } catch (error) {
             console.error("lazyLoadChapters failed", error);
+            throw error;
         }
     }, [activeBook?.id, chapters, sanitizeHtml]);
 
@@ -618,7 +647,7 @@ export const DataProvider = ({ children }) => {
         }
     };
 
-    const handleUpdateCharacter = async (charId, updateData) => {
+    const handleUpdateCharacter = async (charId, updateData, options = {}) => {
         if (!activeBook) return;
         setCharacters(prev => prev.map(c => c.id === charId ? { ...c, ...updateData } : c));
         
@@ -629,6 +658,12 @@ export const DataProvider = ({ children }) => {
                 title: updateData.name !== undefined ? updateData.name : prev.title,
                 role: updateData.role !== undefined ? updateData.role : prev.role
             }));
+        }
+
+        if (options.immediate) {
+            await updateCharacterApi(activeBook.id, charId, updateData);
+            setLastSaved(new Date());
+            return true;
         }
 
         const saveKey = `char_${charId}`;
@@ -787,11 +822,17 @@ export const DataProvider = ({ children }) => {
         }
     };
 
-    const handleUpdateWorldItem = async (itemId, updateData) => {
+    const handleUpdateWorldItem = async (itemId, updateData, options = {}) => {
         if (!activeBook) return;
         setWorldItems(prev => prev.map(item => item.id === itemId ? { ...item, ...updateData } : item));
         if (activeWorldDoc && activeWorldDoc.id === itemId) {
             setActiveWorldDoc(prev => ({ ...prev, ...updateData }));
+        }
+
+        if (options.immediate) {
+            await updateWorldItemApi(activeBook.id, itemId, updateData);
+            setLastSaved(new Date());
+            return true;
         }
 
         const saveKey = `world_${itemId}`;

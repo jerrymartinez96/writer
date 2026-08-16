@@ -39,6 +39,7 @@ const Editor = () => {
     const isWorldDocMode = !!activeWorldDoc && !activeChapter;
     const toast = useToast();
     const [isFocusMode, setIsFocusMode] = useState(false);
+
     const [readingFont, setReadingFont] = useState('font-[Arial,sans-serif]');
     const [readingWidth, setReadingWidth] = useState('md');
     const [readingTextSize, setReadingTextSize] = useState('base');

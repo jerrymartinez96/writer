@@ -59,6 +59,41 @@ export const AI_RESPONSE_SCHEMA = {
     required: ["type"]
 };
 
+export const COHERENCE_AUDIT_SCHEMA = {
+    type: "function",
+    function: {
+        name: "reportar_incoherencias",
+        description: "Devuelve únicamente contradicciones objetivas encontradas entre documentos del libro. No reportes dudas, omisiones, mejoras narrativas ni situaciones compatibles.",
+        parameters: {
+            type: "object",
+            properties: {
+                summary: { type: "string", description: "Resumen breve de la revisión." },
+                findings: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            documentAId: { type: "string", description: "ID exacto del primer documento en conflicto." },
+                            documentBId: { type: "string", description: "ID exacto del segundo documento en conflicto." },
+                            title: { type: "string", description: "Título breve de la contradicción real." },
+                            claimA: { type: "string", description: "Afirmación verificable del documento A." },
+                            claimB: { type: "string", description: "Afirmación verificable del documento B." },
+                            evidenceA: { type: "string", description: "Fragmento o dato concreto que demuestra la afirmación A." },
+                            evidenceB: { type: "string", description: "Fragmento o dato concreto que demuestra la afirmación B." },
+                            whyContradictory: { type: "string", description: "Explicación precisa de por qué ambas afirmaciones no pueden ser verdaderas al mismo tiempo." },
+                            severity: { type: "string", enum: ["medium", "high"] },
+                            confidence: { type: "number", minimum: 0, maximum: 1 },
+                            suggestedAction: { type: "string", description: "Acción concreta para resolver el conflicto." }
+                        },
+                        required: ["documentAId", "documentBId", "title", "claimA", "claimB", "evidenceA", "evidenceB", "whyContradictory", "severity", "confidence", "suggestedAction"]
+                    }
+                }
+            },
+            required: ["summary", "findings"]
+        }
+    }
+};
+
 export const DEEPSEEK_SCHEMAS = [
     {
         type: "function",
@@ -343,11 +378,19 @@ export const AIService = {
                 temperature: temperature,
                 max_tokens: options.max_tokens || 8192,
             };
-            console.info('[AIService] Request no-stream:', { model, messageCount: messagesList.length, enableTools: !!options.enableTools });
+            console.info('[AIService] Request no-stream:', {
+                model,
+                messageCount: messagesList.length,
+                enableTools: !!options.enableTools,
+                useJsonMode: !!options.useJsonMode,
+                reasoningMode: options.reasoningMode ?? false,
+                reasoningEffort: options.reasoningMode ? (options.reasoningEffort || 'default') : 'disabled',
+                maxTokens: options.max_tokens || 8192,
+            });
 
             // Enable schemas for tool calling if requested
             if (options.enableTools || (typeof model === 'string' && model.startsWith('deepseek') && options.enableTools !== false)) {
-                body.tools = DEEPSEEK_SCHEMAS;
+                body.tools = options.tools || DEEPSEEK_SCHEMAS;
                 body.tool_choice = options.toolChoice || "auto";
             }
 
@@ -373,7 +416,8 @@ export const AIService = {
                         "Authorization": `Bearer ${apiKey}`,
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: options.signal
                 });
             });
 
@@ -383,7 +427,7 @@ export const AIService = {
             }
 
             const data = await response.json();
-            console.info('[AIService] Response no-stream:', { model, status: response.status, hasChoices: !!data.choices?.length });
+            console.info('[AIService] Response no-stream:', { model, status: response.status, hasChoices: !!data.choices?.length, finishReason: data.choices?.[0]?.finish_reason, messageKeys: Object.keys(data.choices?.[0]?.message || {}), contentLength: data.choices?.[0]?.message?.content?.length || 0, reasoningContentLength: data.choices?.[0]?.message?.reasoning_content?.length || 0, toolCallCount: data.choices?.[0]?.message?.tool_calls?.length || 0 });
             if (data.choices && data.choices[0] && data.choices[0].message) {
                 const msg = data.choices[0].message;
                 if (msg.tool_calls && msg.tool_calls.length > 0) {

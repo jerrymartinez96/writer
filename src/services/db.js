@@ -453,6 +453,27 @@ export const saveChapterSnapshot = async (bookId, chapterId, content) => {
     }
 };
 
+export const saveEntitySnapshot = async (bookId, collectionName, entityId, content, triggerType = 'toolroom') => {
+    const entityCollection = SNAPSHOT_COLLECTIONS[collectionName];
+    if (!entityCollection) throw new Error(`Colección de snapshots no permitida: ${collectionName}`);
+    const entityRef = doc(db, BOOKS_COLLECTION, bookId, entityCollection, entityId);
+    const snapshotsRef = collection(entityRef, SNAPSHOTS_COLLECTION);
+    const existing = await getDocs(query(snapshotsRef, orderBy('createdAt', 'desc')));
+    if (existing.docs.length >= 20) {
+        await Promise.all(existing.docs.slice(19).map((snapshot) => deleteDoc(snapshot.ref)));
+    }
+    const snapshotRef = await addDoc(snapshotsRef, { content: compressData(content || ''), triggerType, createdAt: serverTimestamp() });
+    return { id: snapshotRef.id, entityId, collectionName, content, triggerType };
+};
+
+export const getEntitySnapshots = async (bookId, collectionName, entityId) => {
+    const entityCollection = SNAPSHOT_COLLECTIONS[collectionName];
+    if (!entityCollection) throw new Error(`Colección de snapshots no permitida: ${collectionName}`);
+    const entityRef = doc(db, BOOKS_COLLECTION, bookId, entityCollection, entityId);
+    const snapshots = await getDocs(query(collection(entityRef, SNAPSHOTS_COLLECTION), orderBy('createdAt', 'desc')));
+    return snapshots.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data(), content: decompressData(snapshot.data().content || '') }));
+};
+
 export const deleteAllChapterSnapshots = async (bookId, chapterId) => {
     try {
         const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
@@ -544,6 +565,7 @@ export const permanentlyDeleteCharacter = async (bookId, characterId) => {
 
 // --- WORLD / LORE ---
 const WORLD_COLLECTION = 'world';
+const SNAPSHOT_COLLECTIONS = Object.freeze({ chapters: CHAPTERS_COLLECTION, characters: CHARACTERS_COLLECTION, world: WORLD_COLLECTION });
 
 export const getWorld = async (bookId) => {
     try {

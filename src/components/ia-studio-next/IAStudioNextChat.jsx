@@ -1,0 +1,116 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Bot, ChevronDown, Loader2, Plus, Send, Sparkles, Square, Wrench } from 'lucide-react';
+import { useData } from '../../context/DataContext';
+import { useIAStudioContext } from '../../context/IAStudioContext';
+import { useToolRooms } from '../../context/ToolRoomContext';
+import * as SessionManager from '../../services/ai-next/CoreSessionStore';
+import CoreContextConfigModal from './CoreContextConfigModal';
+import AIService from '../../services/AIService';
+import { createRequestEnvelope } from '../../services/ai-next/RequestEnvelope';
+import { classifyCoreRequest } from '../../services/ai-next/CoreRouter';
+import CoreOperationPanel from './CoreOperationPanel';
+import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions';
+
+const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
+
+const SessionToolbar = ({ sessions, activeSession, onSwitch, onNew }) => {
+    const [open, setOpen] = useState(false);
+    const containerRef = useRef(null);
+    useEffect(() => {
+        const close = (event) => { if (!containerRef.current?.contains(event.target)) setOpen(false); };
+        const closeOnEscape = (event) => { if (event.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', close);
+        document.addEventListener('keydown', closeOnEscape);
+        return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', closeOnEscape); };
+    }, []);
+    const selectSession = (sessionId) => { onSwitch(sessionId); setOpen(false); };
+    return <div className="flex items-center gap-2"><div ref={containerRef} className="relative"><button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="inline-flex max-w-48 items-center gap-2 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-3 py-2 text-[10px] font-black outline-none transition-colors hover:border-indigo-500 focus:border-indigo-500"><span className="max-w-32 truncate">{activeSession?.name || 'Seleccionar sesión'}</span><ChevronDown size={13} className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} /></button>{open && <div role="listbox" aria-label="Sesiones del Core" className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-1.5 shadow-2xl">{sessions.length === 0 ? <p className="px-3 py-2 text-xs text-[var(--text-muted)]">No hay sesiones.</p> : sessions.map((session) => <button key={session.id} type="button" role="option" aria-selected={activeSession?.id === session.id} onClick={() => selectSession(session.id)} className={`w-full rounded-xl px-3 py-2.5 text-left text-xs font-bold transition-colors ${activeSession?.id === session.id ? 'bg-indigo-500/10 text-indigo-500' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}><span className="block truncate">{session.name}</span><span className="mt-0.5 block text-[9px] font-medium text-[var(--text-muted)]">{session.messages?.length || 0} mensajes</span></button>)}</div>}</div><button type="button" onClick={onNew} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-main)] px-2.5 py-2 text-[10px] font-black text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-500" title="Nueva sesión"><Plus size={13} /> <span className="hidden sm:inline">Nueva</span></button></div>;
+};
+
+const ContextToolbar = ({ chapters, characters, worldItems, selections }) => {
+    const [open, setOpen] = useState(false);
+    const groups = [
+        { key: 'chapterIds', label: 'Capítulos', items: chapters, getId: (item) => item.id, getName: (item) => item.title },
+        { key: 'characterIds', label: 'Personajes', items: characters, getId: (item) => item.id, getName: (item) => item.name },
+        { key: 'worldItemIds', label: 'Mundo', items: worldItems, getId: (item) => item.id, getName: (item) => item.title },
+    ];
+    const total = groups.reduce((sum, group) => sum + (selections?.[group.key]?.length || 0), 0);
+    return <><button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-3 py-2 text-[10px] font-black text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-500"><span>Contexto</span><span className="rounded-full bg-indigo-500/10 px-1.5 py-0.5 text-indigo-500">{total}</span><ChevronDown size={13} /></button><CoreContextConfigModal isOpen={open} onClose={() => setOpen(false)} chapters={chapters} worldItems={worldItems} characters={characters} /></>;
+};
+
+const IAStudioNextChat = ({ onBack }) => {
+    const { activeBook, activeChapter, chapters = [], characters = [], worldItems = [], profile } = useData();
+    const { messages: storedMessages, setMessages: setStoredMessages, sessions, activeSession, switchSession, newSession, contextSelections } = useIAStudioContext();
+    const { openToolRoom } = useToolRooms();
+    const [messages, setMessages] = useState([]);
+    const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [operation, setOperation] = useState(null);
+    const abortControllerRef = useRef(null);
+    const context = useMemo(() => {
+        const selectedChapters = chapters.filter((item) => (contextSelections?.chapterIds || []).includes(item.id));
+        const selectedCharacters = characters.filter((item) => (contextSelections?.characterIds || []).includes(item.id));
+        const selectedWorld = worldItems.filter((item) => (contextSelections?.worldItemIds || []).includes(item.id));
+        const selected = [...selectedChapters.map((item) => `Capítulo: ${item.title}\n${item.content || ''}`), ...selectedCharacters.map((item) => `Personaje: ${item.name}\n${item.description || ''}`), ...selectedWorld.map((item) => `Mundo: ${item.title}\n${item.content || ''}`)];
+        if (selected.length) return selected.join('\n\n');
+        return activeChapter ? `Capítulo activo: ${activeChapter.title}\n${activeChapter.content || ''}` : 'No hay un capítulo activo seleccionado.';
+    }, [activeChapter, chapters, characters, worldItems, contextSelections]);
+
+    useEffect(() => {
+        setMessages(storedMessages?.length ? storedMessages : [{ role: 'assistant', content: 'Soy el Core de IA Studio. Puedo conversar, analizar tu obra y derivar trabajos especializados a la Tool Room adecuada.' }]);
+    }, [activeSession?.id, storedMessages]);
+
+    const appendMessage = (message) => {
+        const nextMessage = { ...message, id: message.id || `next-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+        setMessages((previous) => {
+            const next = [...previous, nextMessage];
+            setStoredMessages(next);
+            if (activeSession?.id) SessionManager.addMessage(activeSession.id, nextMessage);
+            return next;
+        });
+    };
+
+    const send = async () => {
+        const message = input.trim();
+        if (!message || loading) return;
+        const selectedContext = {
+            chapterIds: contextSelections?.chapterIds?.length ? contextSelections.chapterIds : (activeChapter?.id ? [activeChapter.id] : []),
+            characterIds: contextSelections?.characterIds || [],
+            worldItemIds: contextSelections?.worldItemIds || [],
+        };
+        const envelope = createRequestEnvelope({ userMessage: message, activeBookId: activeBook?.id, context: selectedContext });
+        const route = classifyCoreRequest(envelope);
+        setInput(''); setError(''); appendMessage({ role: 'user', content: message });
+        if (route.capability === 'patch' || route.capability === 'multi_patch') {
+            setOperation({ request: { message, context: envelope.context }, capability: route.capability });
+            return;
+        }
+        if (route.route === 'toolroom' && route.toolId) {
+            try { window.sessionStorage.setItem('verne-ia-studio-launch', JSON.stringify({ roomId: route.toolId, prompt: message, context: envelope.context, contextLabel: activeChapter?.title || '', createdAt: new Date().toISOString() })); } catch { /* navigation continues */ }
+            openToolRoom(`toolroom:${route.toolId}`);
+            return;
+        }
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+        setLoading(true);
+        try {
+            const key = getApiKey(profile);
+            if (!key) throw new Error('Configura una API Key de DeepSeek para usar el Core.');
+            const prompt = `${route.capability === 'analyze' ? 'Analiza con claridad y estructura.' : 'Responde de forma útil y concreta.'}\n\nSolicitud: ${message}\n\nContexto controlado:\n${context}`;
+            const response = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.35, enableTools: false, max_tokens: 3000, signal: abortController.signal }));
+            appendMessage({ role: 'assistant', content: response, route });
+        } catch (requestError) {
+            if (requestError?.name !== 'AbortError') setError(requestError?.message || 'No se pudo completar la respuesta.');
+        } finally {
+            if (abortControllerRef.current === abortController) abortControllerRef.current = null;
+            setLoading(false);
+        }
+    };
+
+    const stop = () => abortControllerRef.current?.abort();
+
+    return <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-app)] text-[var(--text-main)]"><header className="shrink-0 border-b border-[var(--border-main)] bg-[var(--bg-app)]/90 px-3 py-2.5 sm:px-4 lg:px-8"><div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2.5"><div className="flex min-w-0 items-center gap-2.5"><button type="button" onClick={onBack} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--border-main)] px-2.5 py-1.5 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)]"><ArrowLeft size={14} /> <span className="hidden xs:inline">IA Studio</span></button><div className="hidden h-6 w-px bg-[var(--border-main)] sm:block" /><div className="flex min-w-0 items-center gap-2"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white"><Bot size={16} /></span><div className="min-w-0"><p className="truncate text-[8px] font-black uppercase tracking-[0.16em] text-indigo-500">Core IA Studio</p><h1 className="truncate text-sm font-serif font-black">Chat principal</h1></div></div></div><div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto"><SessionToolbar sessions={sessions} activeSession={activeSession} onSwitch={switchSession} onNew={newSession} /><ContextToolbar selections={contextSelections} chapters={chapters} characters={characters} worldItems={worldItems} /></div></div></header><div className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto max-w-3xl space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-8">{messages.map((item, index) => <article key={item.id || `${item.role}-${index}`} className={`rounded-2xl border p-3.5 sm:p-4 ${item.role === 'user' ? 'sm:ml-8 border-indigo-500/20 bg-indigo-500/5' : 'sm:mr-8 border-[var(--border-main)] bg-[var(--bg-editor)]'}`}><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)]">{item.role === 'assistant' ? <Bot size={13} className="shrink-0 text-indigo-500" /> : <Wrench size={13} className="shrink-0 text-amber-500" />} {item.role === 'assistant' ? 'Core IA' : 'Tú'}{item.route && <span className="ml-auto rounded-full bg-indigo-500/10 px-2 py-1 text-[9px] text-indigo-500">Core · {item.route.capability}</span>}</div><p className="mt-2.5 whitespace-pre-wrap break-words text-sm leading-relaxed sm:mt-3">{item.content}</p></article>)}{loading && <div className="sm:mr-8 flex items-center gap-2 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-3.5 text-xs text-[var(--text-muted)] sm:p-4"><Loader2 size={15} className="shrink-0 animate-spin text-indigo-500" /> El Core está consultando la IA…</div>}{error && <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-3 text-xs text-red-600">{error}</div>}{operation && <CoreOperationPanel request={operation.request} capability={operation.capability} onClose={() => setOperation(null)} />}</div></div><div className="shrink-0 border-t border-[var(--border-main)] bg-[var(--bg-app)]/95 px-3 py-2.5 backdrop-blur-xl sm:p-4"><div className="mx-auto max-w-3xl"><div className="relative"><textarea aria-label="Mensaje para Core IA Studio" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} rows={1} placeholder="Escribe una pregunta o instrucción…" className="min-h-12 w-full resize-none rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-4 py-3 pr-14 text-sm leading-6 outline-none placeholder:text-center focus:border-indigo-500 sm:min-h-14 sm:px-5 sm:py-3.5 sm:pr-14" /><button type="button" onClick={loading ? stop : send} disabled={!loading && !input.trim()} aria-label={loading ? 'Parar respuesta' : 'Enviar mensaje'} title={loading ? 'Parar respuesta' : 'Enviar mensaje'} className={`absolute inset-y-0 right-2 my-auto inline-flex h-8 w-8 -translate-y-0.5 items-center justify-center rounded-xl text-white transition-colors ${loading ? 'bg-rose-500 hover:bg-rose-400' : 'bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40'}`}>{loading ? <Square size={14} fill="currentColor" /> : <Send size={15} />}</button></div></div></div></section>;
+};
+
+export default IAStudioNextChat;
