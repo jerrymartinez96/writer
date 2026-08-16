@@ -16,7 +16,11 @@ const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
 const IAStudioNext = lazy(() => import('./components/ia-studio-next/IAStudioNext'))
 const CharacterToolRoom = lazy(() => import('./components/toolrooms/CharacterToolRoom'))
-import { CoWriterRoom, WorldRoom, NarratorRoom, CoherenceRoom } from './components/toolrooms/AdditionalToolRooms'
+const ConsistencyToolRoom = lazy(() => import('./components/toolrooms/ConsistencyToolRoom'))
+const CoWriterRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoWriterRoom: Component }) => ({ default: Component })))
+const WorldRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ WorldRoom: Component }) => ({ default: Component })))
+const NarratorRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ NarratorRoom: Component }) => ({ default: Component })))
+const CoherenceRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoherenceRoom: Component }) => ({ default: Component })))
 
 const LoadingScreen = () => (
   <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
@@ -205,6 +209,8 @@ function AppContent() {
         return <NarratorRoom />;
       case 'toolroom:coherence':
         return <CoherenceRoom />;
+      case 'toolroom:consistency':
+        return <ConsistencyToolRoom />;
       case 'world':
         return <WorldView />;
       case 'settings':

@@ -55,7 +55,7 @@ export const applyPlainTextPatch = (content, originalText, replacementText) => {
     const source = String(content || '');
     const original = String(originalText || '');
     const replacement = String(replacementText || '');
-    if (!original || !replacement) return null;
+    if (!original || replacement === undefined || replacement === null) return null;
     if (source.includes(original)) return source.replace(original, replacement);
     if (typeof DOMParser === 'undefined') return null;
     const parser = new DOMParser();

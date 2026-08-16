@@ -11,8 +11,13 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('firebase')) return 'vendor-firebase';
+            if (id.includes('/react-dom/') || id.includes('/scheduler/')) return 'vendor-react';
             if (id.includes('@tiptap')) return 'vendor-tiptap';
             if (id.includes('lucide-react') || id.includes('@dnd-kit')) return 'vendor-ui';
+            if (id.includes('jspdf')) return 'vendor-export-pdf';
+            if (id.includes('docx') || id.includes('file-saver') || id.includes('html-to-text')) return 'vendor-export';
+            if (id.includes('dexie') || id.includes('lz-string') || id.includes('dompurify')) return 'vendor-data';
+            if (id.includes('tippy.js') || id.includes('tailwind-merge') || id.includes('clsx')) return 'vendor-utils';
             return 'vendor';
           }
         }

@@ -151,7 +151,203 @@ const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7
     }
 };
 
+const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000 }) => {
+    const apiKey = getToolRoomApiKey(profile);
+    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
+    const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, {
+        temperature: 0.35,
+        useJsonMode: true,
+        enableTools: false,
+        reasoningMode: true,
+        max_tokens,
+    }));
+    return parseJson(raw);
+};
+
 export const getToolRoomApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
+
+export const getStructureSourceHash = ({ structureContent = '', chapters = [] }) => {
+    const source = [
+        toPlainText(structureContent),
+        ...chapters.map((chapter) => `${chapter.id || ''}|${chapter.title || ''}|${toPlainText(chapter.content || '')}`),
+    ].join('\u0001');
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+        hash ^= source.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `structure-${(hash >>> 0).toString(16)}`;
+};
+
+const normalizeStructureChapter = (chapter, index) => ({
+    id: String(chapter?.id || `structure-chapter-${index + 1}`),
+    title: String(chapter?.title || `Capítulo ${index + 1}`),
+    position: Number(chapter?.position) || index + 1,
+    summary: String(chapter?.summary || ''),
+    purpose: String(chapter?.purpose || ''),
+    conflict: String(chapter?.conflict || ''),
+    characters: Array.isArray(chapter?.characters) ? chapter.characters.map(String) : [],
+    status: ['written', 'pending', 'empty', 'uncertain'].includes(chapter?.status) ? chapter.status : 'pending',
+});
+
+const normalizeStructureMatch = (match) => ({
+    structureChapterId: String(match?.structureChapterId || ''),
+    manuscriptChapterId: String(match?.manuscriptChapterId || ''),
+    confidence: Math.min(1, Math.max(0, Number(match?.confidence) || 0)),
+    reason: String(match?.reason || ''),
+});
+
+export const requestChapterStructureAnalysis = async ({ profile, structureContent = '', chapters = [], lastChapter = null, worldContent = '', characters = [] }) => {
+    const normalizedChapters = chapters.map((chapter) => ({
+        id: String(chapter.id || ''),
+        title: String(chapter.title || ''),
+        content: toPlainText(chapter.content || ''),
+    })).filter((chapter) => chapter.id);
+    const prompt = `Eres un editor de continuidad narrativa. Analiza el documento de Estructura y compáralo con los capítulos existentes. No modifiques ningún documento. Si el documento no contiene capítulos claramente identificables, devuelve chapters vacío y explica que se necesita diseñar el siguiente capítulo.
+
+Devuelve únicamente JSON válido con esta forma:
+{"summary":"...","chapters":[{"id":"stable-id","title":"...","position":1,"summary":"...","purpose":"...","conflict":"...","characters":["..."],"status":"written|pending|empty|uncertain"}],"matches":[{"structureChapterId":"...","manuscriptChapterId":"...","confidence":0.0,"reason":"..."}],"openThreads":["..."],"recommendedNextChapterId":"","recommendation":"..."}
+
+Usa un id estable para cada capítulo de estructura basado en su posición y título. Un capítulo solo puede marcarse written o empty si existe evidencia en el manuscrito. Las coincidencias son sugerencias para confirmación humana, nunca decisiones definitivas.
+
+Documento de Estructura:
+${toPlainText(structureContent) || '(vacío)'}
+
+Capítulos del manuscrito:
+${JSON.stringify(normalizedChapters)}
+
+Último capítulo disponible:
+${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
+
+Información general del mundo:
+${toPlainText(worldContent) || '(sin información general)'}
+
+Personajes:
+${JSON.stringify(characters.map((character) => ({ name: character.name, description: toPlainText(character.description || '') })))} `;
+    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 9000 });
+    const structureChapters = Array.isArray(parsed.chapters) ? parsed.chapters.map(normalizeStructureChapter) : [];
+    const validIds = new Set(structureChapters.map((chapter) => chapter.id));
+    const validManuscriptIds = new Set(normalizedChapters.map((chapter) => chapter.id));
+    const matches = Array.isArray(parsed.matches) ? parsed.matches.map(normalizeStructureMatch).filter((match) => validIds.has(match.structureChapterId) && validManuscriptIds.has(match.manuscriptChapterId)) : [];
+    const matchedIds = new Set(matches.map((match) => match.structureChapterId));
+    const pendingChapters = structureChapters.filter((chapter) => !matchedIds.has(chapter.id) || ['pending', 'empty', 'uncertain'].includes(chapter.status));
+    const recommended = structureChapters.find((chapter) => chapter.id === String(parsed.recommendedNextChapterId || '')) || pendingChapters[0] || null;
+    return {
+        summary: String(parsed.summary || ''),
+        chapters: structureChapters,
+        matches,
+        pendingChapters,
+        openThreads: Array.isArray(parsed.openThreads) ? parsed.openThreads.map(String).filter(Boolean) : [],
+        recommendedNextChapterId: recommended?.id || '',
+        recommendation: String(parsed.recommendation || ''),
+    };
+};
+
+const normalizeDirection = (direction, index) => ({
+    id: String(direction?.id || `direction-${index + 1}`),
+    title: String(direction?.title || `Dirección ${index + 1}`),
+    premise: String(direction?.premise || direction?.summary || ''),
+    purpose: String(direction?.purpose || ''),
+    conflict: String(direction?.conflict || ''),
+    revelations: Array.isArray(direction?.revelations) ? direction.revelations.map(String) : [],
+    consequences: Array.isArray(direction?.consequences) ? direction.consequences.map(String) : [],
+    risk: String(direction?.risk || ''),
+    toneFit: String(direction?.toneFit || ''),
+});
+
+export const requestChapterDirections = async ({ profile, idea = '', chapterPlan = null, lastChapter = null, openThreads = [], contextContent = '' }) => {
+    const prompt = `Eres un editor de desarrollo narrativo. Propón exactamente tres direcciones distintas para el próximo capítulo. Usa la continuidad y la idea del usuario, pero no redactes el capítulo. Devuelve únicamente JSON válido: {"directions":[{"id":"...","title":"...","premise":"...","purpose":"...","conflict":"...","revelations":["..."],"consequences":["..."],"risk":"...","toneFit":"..."}]}. Una dirección debe ser conservadora, otra debe aumentar la tensión y otra debe ofrecer una alternativa más arriesgada sin romper los hechos establecidos.
+
+Idea del usuario: ${idea || '(sin idea adicional)'}
+Plan detectado: ${JSON.stringify(chapterPlan || {})}
+Último capítulo: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
+Cabos abiertos: ${JSON.stringify(openThreads)}
+Contexto de apoyo: ${toPlainText(contextContent) || '(sin contexto adicional)'}`;
+    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 6500 });
+    return { directions: Array.isArray(parsed.directions) ? parsed.directions.slice(0, 3).map(normalizeDirection) : [] };
+};
+
+const normalizeScene = (scene, index) => ({
+    id: String(scene?.id || `scene-${index + 1}`),
+    number: Number(scene?.number) || index + 1,
+    title: String(scene?.title || `Escena ${index + 1}`),
+    objective: String(scene?.objective || ''),
+    setting: String(scene?.setting || ''),
+    characters: Array.isArray(scene?.characters) ? scene.characters.map(String) : [],
+    conflict: String(scene?.conflict || ''),
+    action: String(scene?.action || ''),
+    revelation: String(scene?.revelation || ''),
+    emotionalChange: String(scene?.emotionalChange || ''),
+    transition: String(scene?.transition || ''),
+    estimatedWords: Number(scene?.estimatedWords) || 0,
+});
+
+export const requestChapterScene = async ({ profile, chapterPlan = null, direction = null, scenes = [], size = 'standard', lastChapter = null, contextContent = '', instruction = '' }) => {
+    const nextNumber = scenes.length + 1;
+    const prompt = `Eres un diseñador de escenas. Propón únicamente la escena ${nextNumber} del capítulo; no escribas prosa narrativa. Devuelve JSON válido: {"scene":{"id":"...","number":${nextNumber},"title":"...","objective":"...","setting":"...","characters":["..."],"conflict":"...","action":"...","revelation":"...","emotionalChange":"...","transition":"...","estimatedWords":0}}. La escena debe avanzar el capítulo, respetar lo aprobado anteriormente y no resolver antes de tiempo los conflictos que aún deben continuar.
+
+Tamaño objetivo: ${size}
+Plan: ${JSON.stringify(chapterPlan || {})}
+Dirección elegida: ${JSON.stringify(direction || {})}
+Escenas aprobadas: ${JSON.stringify(scenes)}
+Último capítulo: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
+Contexto: ${toPlainText(contextContent) || '(sin contexto adicional)'}
+Instrucción adicional: ${instruction || '(ninguna)'}`;
+    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 4500 });
+    if (!parsed.scene) throw new Error('La IA no devolvió una escena válida.');
+    return normalizeScene(parsed.scene, nextNumber - 1);
+};
+
+const normalizeConsistencyFinding = (finding, index, allowedIds) => {
+    const documentId = String(finding?.documentId || '');
+    if (!allowedIds.has(documentId)) return null;
+    return {
+        id: String(finding?.id || `consistency-${Date.now()}-${index}`),
+        documentId,
+        title: String(finding?.title || 'Detalle para revisar'),
+        excerpt: String(finding?.excerpt || finding?.context || ''),
+        originalText: String(finding?.originalText || ''),
+        replacementText: String(finding?.replacementText || ''),
+        replacementEdited: false,
+        reason: String(finding?.reason || ''),
+        severity: ['low', 'medium', 'high'].includes(finding?.severity) ? finding.severity : 'medium',
+        confidence: Math.min(1, Math.max(0, Number(finding?.confidence) || 0)),
+        category: String(finding?.category || 'detail'),
+        status: 'pending',
+    };
+};
+
+export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'custom', query = '', canonical = '', documents = [], instruction = '' }) => {
+    const normalizedDocuments = documents.map((document) => ({
+        id: String(document.id || ''),
+        type: String(document.type || 'document'),
+        title: String(document.title || document.name || document.id || 'Documento'),
+        content: toPlainText(document.content || document.description || ''),
+    })).filter((document) => document.id && document.content);
+    if (!normalizedDocuments.length) return { summary: 'No hay documentos con contenido suficiente para analizar.', findings: [] };
+    const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
+    const prompt = `Eres un editor de continuidad y estilo para una obra narrativa. Busca detalles repetidos, desactualizados o variables entre documentos. No modifiques nada y no conviertas una coincidencia legítima en un error sin evidencia. Devuelve únicamente JSON válido con esta forma:
+{"summary":"...","findings":[{"id":"...","documentId":"...","category":"mulettilla|character|world|terminology|timeline|custom","title":"...","excerpt":"fragmento breve con contexto","originalText":"texto exacto que puede reemplazarse","replacementText":"reemplazo sugerido","reason":"por qué debe revisarse","severity":"low|medium|high","confidence":0.0}]}
+
+Reglas:
+- Cada finding debe apuntar a un documentId válido.
+- originalText debe contener el fragmento mínimo necesario para aplicar un cambio seguro y debe aparecer literalmente en el documento. Si quitar solo la frase dejaría una oración rota, incluye la oración completa en originalText y devuelve una versión reescrita completa en replacementText.
+- replacementText debe conservar una oración gramatical, su puntuación y el sentido narrativo. Para muletillas no devuelvas replacementText vacío: reescribe el fragmento o la oración de forma natural. Solo deja replacementText vacío cuando eliminar todo originalText sea claramente correcto y la oración siga siendo válida.
+- No propongas cambiar hechos solo porque aparecen una vez.
+- Para muletillas, revisa si pertenecen al personaje indicado y conserva usos intencionales. Si el usuario pide eliminar una muletilla, elimina también conectores, comas o construcciones que queden sobrantes.
+- Para detalles globales, compara la fuente de verdad con las apariciones y marca las dudosas con confianza baja.
+
+Tipo de auditoría: ${auditType}
+Elemento o búsqueda: ${query || '(detectar automáticamente)'}
+Versión correcta o fuente de verdad: ${canonical || '(no definida; solo detectar)'}
+Instrucción adicional: ${instruction || '(ninguna)'}
+
+Documentos:
+${JSON.stringify(normalizedDocuments)}`;
+    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 9000 });
+    const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds)).filter(Boolean).filter((finding) => finding.originalText || !finding.replacementText) : [];
+    return { summary: String(parsed.summary || ''), findings };
+};
 
 export const requestCoherenceAnalysis = async ({ profile, documents = [] }) => {
     const normalizedDocuments = normalizeDocuments(documents);

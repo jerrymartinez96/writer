@@ -13,6 +13,7 @@ const defaultRoomState = {
     missionStatus: 'idle',
     missionId: null,
     lastVisitedAt: null,
+    designer: null,
 };
 
 export const ToolRoomProvider = ({ children }) => {

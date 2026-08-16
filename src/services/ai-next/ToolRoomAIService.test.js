@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AIService from '../AIService';
-import { buildCoherencePatches, requestCoherenceAnalysis, requestCoherenceResolutionOptions, requestToolRoomInsight, requestToolRoomProposal, validateCoherenceFinding } from './ToolRoomAIService';
+import { buildCoherencePatches, getStructureSourceHash, requestChapterDirections, requestChapterScene, requestChapterStructureAnalysis, requestCoherenceAnalysis, requestCoherenceResolutionOptions, requestGlobalConsistencyAnalysis, requestToolRoomInsight, requestToolRoomProposal, validateCoherenceFinding } from './ToolRoomAIService';
 
 vi.mock('../AIService', () => ({
     default: { sendMessage: vi.fn() },
@@ -41,6 +41,81 @@ describe('ToolRoomAIService', () => {
             instruction: 'Amplía el lugar',
             sourceContent: 'Ciudad',
         })).rejects.toThrow('replacement válido');
+    });
+
+    it('normaliza el análisis de estructura y conserva solo coincidencias válidas', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({
+            summary: 'Hay un capítulo pendiente.',
+            chapters: [
+                { id: 'chapter-1', title: 'La llegada', position: 1, status: 'written', summary: 'Llega al pueblo.' },
+                { id: 'chapter-2', title: 'La pista', position: 2, status: 'pending', summary: 'Encuentra una pista.' },
+            ],
+            matches: [
+                { structureChapterId: 'chapter-1', manuscriptChapterId: 'manuscript-1', confidence: 0.95, reason: 'Título y hechos coinciden.' },
+                { structureChapterId: 'fake', manuscriptChapterId: 'manuscript-1', confidence: 0.99 },
+            ],
+            openThreads: ['La identidad del informante'],
+            recommendedNextChapterId: 'chapter-2',
+            recommendation: 'Continuar con La pista.',
+        }));
+
+        const result = await requestChapterStructureAnalysis({
+            profile,
+            structureContent: 'Capítulo 1: La llegada\nCapítulo 2: La pista',
+            chapters: [{ id: 'manuscript-1', title: 'La llegada', content: '<p>Contenido</p>' }],
+            lastChapter: { title: 'La llegada', content: '<p>Contenido</p>' },
+        });
+
+        expect(result.chapters).toHaveLength(2);
+        expect(result.matches).toHaveLength(1);
+        expect(result.pendingChapters[0].id).toBe('chapter-2');
+        expect(result.recommendedNextChapterId).toBe('chapter-2');
+    });
+
+    it('mantiene la huella del análisis mientras Estructura no cambia', () => {
+        const first = getStructureSourceHash({ structureContent: '<p>Capítulo 1</p>' });
+        const same = getStructureSourceHash({ structureContent: '<p>Capítulo 1</p>' });
+        const changed = getStructureSourceHash({ structureContent: '<p>Capítulo 2</p>' });
+        expect(same).toBe(first);
+        expect(changed).not.toBe(first);
+    });
+
+    it('normaliza tres direcciones narrativas', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ directions: [
+            { id: 'a', title: 'Conservadora', premise: 'Sigue la pista.', risk: 'low' },
+            { id: 'b', title: 'Tensa', premise: 'Provoca una confrontación.', risk: 'medium' },
+            { id: 'c', title: 'Arriesgada', premise: 'Cambia el punto de vista.', risk: 'high' },
+        ] }));
+
+        const result = await requestChapterDirections({ profile, idea: 'Una pista sobre el hermano.' });
+        expect(result.directions).toHaveLength(3);
+        expect(result.directions[1].title).toBe('Tensa');
+    });
+
+    it('devuelve una escena normalizada para continuar el diseño', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ scene: {
+            id: 'scene-1', number: 1, title: 'La estación', objective: 'Encontrar la pista', setting: 'Estación abandonada',
+            characters: ['Elena'], conflict: 'Alguien la observa', action: 'Revisa una taquilla', revelation: 'Encuentra una fecha',
+            emotionalChange: 'Pasa de curiosidad a miedo', transition: 'Escucha pasos', estimatedWords: 700,
+        } }));
+
+        const result = await requestChapterScene({ profile, chapterPlan: { title: 'La pista' }, direction: { title: 'Tensa' }, scenes: [] });
+        expect(result).toMatchObject({ number: 1, title: 'La estación', estimatedWords: 700 });
+        expect(result.characters).toEqual(['Elena']);
+    });
+
+    it('normaliza hallazgos de consistencia global y descarta documentos inválidos', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({
+            summary: 'Se encontraron dos apariciones para revisar.',
+            findings: [
+                { id: 'f-1', documentId: 'chapter-1', category: 'mulettilla', title: 'Muletilla repetida', excerpt: 'Elena dijo: ya sabes…', originalText: 'ya sabes', replacementText: '', reason: 'Aparece varias veces.', confidence: 0.94, severity: 'medium' },
+                { id: 'invalid', documentId: 'missing', originalText: 'x', replacementText: 'y', confidence: 1 },
+            ],
+        }));
+
+        const result = await requestGlobalConsistencyAnalysis({ profile, auditType: 'mulettilla', query: 'Elena', documents: [{ id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Elena dijo: ya sabes</p>' }] });
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0]).toMatchObject({ documentId: 'chapter-1', originalText: 'ya sabes', confidence: 0.94 });
     });
 
     it('normaliza hallazgos de auditoría y conserva el contexto auxiliar', async () => {

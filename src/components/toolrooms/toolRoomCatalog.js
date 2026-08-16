@@ -1,4 +1,4 @@
-import { BookOpen, Globe2, Headphones, Network, UsersRound } from 'lucide-react';
+import { BookOpen, Globe2, Headphones, Network, ScanSearch, UsersRound } from 'lucide-react';
 
 /**
  * Catálogo único de Tool Rooms.
@@ -58,6 +58,17 @@ export const TOOL_ROOMS = [
         description: 'Detecta contradicciones de personajes, tiempo, lugares y continuidad.',
         icon: Globe2,
         accent: 'cyan',
+        status: 'available',
+        contextRequirements: ['document'],
+    },
+    {
+        id: 'consistency',
+        route: 'toolroom:consistency',
+        title: 'Consistencia global',
+        eyebrow: 'Control transversal',
+        description: 'Encuentra muletillas, detalles variables y referencias desactualizadas en toda la obra.',
+        icon: ScanSearch,
+        accent: 'amber',
         status: 'available',
         contextRequirements: ['document'],
     },

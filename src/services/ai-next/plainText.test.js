@@ -26,4 +26,9 @@ describe('toPlainText', () => {
         expect(applyPlainTextPatch('Antes: dos meses. Después: catorce UMAs.', 'dos meses', 'tres meses'))
             .toBe('Antes: tres meses. Después: catorce UMAs.');
     });
+
+    it('permite eliminar una coincidencia al usar un reemplazo vacío', () => {
+        expect(applyPlainTextPatch('Elena, ya sabes, volvió a entrar.', 'ya sabes, ', ''))
+            .toBe('Elena, volvió a entrar.');
+    });
 });
