@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPlainTextPatch, toPlainText } from './plainText';
+import { applyPlainTextPatch, formatDraftText, toEditorHtml, toPlainText } from './plainText';
 
 describe('toPlainText', () => {
     it('elimina etiquetas de formato y conserva el contenido', () => {
@@ -30,5 +30,20 @@ describe('toPlainText', () => {
     it('permite eliminar una coincidencia al usar un reemplazo vacío', () => {
         expect(applyPlainTextPatch('Elena, ya sabes, volvió a entrar.', 'ya sabes, ', ''))
             .toBe('Elena, volvió a entrar.');
+    });
+
+    it('localiza texto con variantes de espacios y comillas tipográficas', () => {
+        expect(applyPlainTextPatch('Elena “ya  sabes” volvió.', '"ya sabes" volvió', 'regresó'))
+            .toBe('Elena regresó.');
+    });
+
+    it('separa un borrador largo sin saltos en párrafos y diálogos', () => {
+        const formatted = formatDraftText('La primera escena comienza y continúa con suficiente texto para formar un bloque narrativo largo. Kai observa la ventana y piensa en Arcadia. La mañana parece tranquila, pero algo cambia. —No estoy seguro —dijo Kai. La puerta se abrió lentamente y todos guardaron silencio.');
+        expect(formatted).toContain('\n\n—No estoy seguro');
+        expect(formatted.split('\n\n').length).toBeGreaterThan(1);
+    });
+
+    it('convierte el borrador formateado en párrafos HTML para el editor', () => {
+        expect(toEditorHtml('Primero.\n\nSegundo.')).toBe('<p>Primero.</p><p>Segundo.</p>');
     });
 });

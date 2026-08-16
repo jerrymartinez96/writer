@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
 import Modal from './Modal';
 import ConfirmModal from './ConfirmModal';
-import { History, Save, RotateCcw, Clock, Info, FileText, ChevronRight, Calendar, ChevronLeft, Diff, Trash2 } from 'lucide-react';
+import { History, Save, RotateCcw, Clock, Info, FileText, ChevronRight, Calendar, ChevronLeft, ChevronUp, ChevronDown, Diff, Trash2 } from 'lucide-react';
 import { diff_match_patch } from 'diff-match-patch';
 
 const HistoryModal = ({ isOpen, onClose, editor }) => {
@@ -24,6 +24,9 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
     const [snapToDelete, setSnapToDelete] = useState(null);
     const [mobileView, setMobileView] = useState('list'); // 'list' or 'preview'
     const [showDiff, setShowDiff] = useState(true);
+    const [showOnlyChanged, setShowOnlyChanged] = useState(false);
+    const [selectedChangeIndex, setSelectedChangeIndex] = useState(0);
+    const diffContainerRef = useRef(null);
 
     useEffect(() => {
         if (isOpen && activeDoc) {
@@ -32,6 +35,8 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
             setSelectedSnapshot(null);
             setMobileView('list');
             setShowDiff(true);
+            setShowOnlyChanged(false);
+            setSelectedChangeIndex(0);
         }
     }, [isOpen, activeDoc]);
 
@@ -40,7 +45,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
         try {
             const data = await getDocumentSnapshots(activeDoc.id);
             setSnapshots(data);
-        } catch (error) {
+        } catch {
             toast.error("Error al cargar el historial.");
         } finally {
             setLoading(false);
@@ -60,7 +65,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
             await saveDocumentSnapshot(activeDoc.id, currentContent, 'manual');
             toast.success("Respaldo creado con éxito");
             await loadSnapshots();
-        } catch (error) {
+        } catch {
             toast.error("Error al guardar la versión.");
         } finally {
             setLoading(false);
@@ -100,11 +105,12 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
             if (selectedSnapshot && selectedSnapshot.id === snapToDelete) {
                 setSelectedSnapshot(null);
                 setShowDiff(false);
+                setSelectedChangeIndex(0);
                 setMobileView('list');
             }
             
             await loadSnapshots();
-        } catch (error) {
+        } catch {
             toast.error("Error al eliminar el punto de control.");
         } finally {
             setIsDeleteConfirmOpen(false);
@@ -151,12 +157,29 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
         }
     };
 
-    // Calculate diff between selectedSnapshot and its predecessor in the timeline (snapshots[index + 1])
-    const diffHtml = useMemo(() => {
-        if (!showDiff || !selectedSnapshot || !snapshots.length) return null;
+    const normalizeSnapshotContent = (content) => String(content || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const snapshotEntries = useMemo(() => snapshots.map((snapshot, index) => ({
+        snapshot,
+        index,
+        hasChanges: index === snapshots.length - 1
+            || normalizeSnapshotContent(snapshot.content) !== normalizeSnapshotContent(snapshots[index + 1]?.content)
+    })), [snapshots]);
+
+    const visibleSnapshotEntries = showOnlyChanged
+        ? snapshotEntries.filter(({ hasChanges }) => hasChanges)
+        : snapshotEntries;
+
+    // Calculate diff blocks between selectedSnapshot and its predecessor in the timeline.
+    const diffData = useMemo(() => {
+        if (!showDiff || !selectedSnapshot || !snapshots.length) return { html: null, changes: [] };
 
         const currentIndex = snapshots.findIndex(s => s.id === selectedSnapshot.id);
-        if (currentIndex === -1) return null;
+        if (currentIndex === -1) return { html: null, changes: [] };
 
         const predecessor = snapshots[currentIndex + 1];
         const stripTags = (html) => html.replace(/<p>/g, '\n').replace(/<\/p>/g, '\n').replace(/<br\s*\/?>/g, '\n').replace(/<[^>]*>/g, '').trim();
@@ -168,15 +191,77 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
         const diffs = dmp.diff_main(textOld, textNew);
         dmp.diff_cleanupSemantic(diffs);
 
-        // Convert the diff array to HTML with custom coloring
-        return diffs.map(([type, text]) => {
-            const cleanText = text.replace(/\n/g, '<br/>');
-            if (type === 0) return `<span class="opacity-100">${cleanText}</span>`;
-            if (type === 1) return `<span class="bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold px-0.5 rounded border-b border-emerald-500/50" title="Añadido en esta versión">${cleanText}</span>`;
-            if (type === -1) return `<span class="bg-rose-500/20 text-rose-600 dark:text-rose-400 line-through px-0.5 rounded border-b border-rose-500/50" title="Eliminado en esta versión">${cleanText}</span>`;
-            return cleanText;
-        }).join('');
+        const escapeHtml = (value) => value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+        const changes = [];
+        const output = [];
+        let activeChange = null;
+
+        diffs.forEach(([type, text]) => {
+            const cleanText = escapeHtml(text).replace(/\n/g, '<br/>');
+            if (type === 0) {
+                output.push(`<span class="opacity-100">${cleanText}</span>`);
+                activeChange = null;
+                return;
+            }
+
+            if (!activeChange) {
+                activeChange = { id: `diff-change-${changes.length}`, types: [], text: '' };
+                changes.push(activeChange);
+            }
+            activeChange.types.push(type);
+            activeChange.text += text;
+            const isAddition = type === 1;
+            const classes = isAddition
+                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold px-0.5 rounded border-b border-emerald-500/50'
+                : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 line-through px-0.5 rounded border-b border-rose-500/50';
+            output.push(`<span data-diff-change="${activeChange.id}" class="diff-change ${classes}" title="${isAddition ? 'Añadido' : 'Eliminado'} en esta versión">${cleanText}</span>`);
+        });
+
+        return { html: output.join(''), changes };
     }, [showDiff, selectedSnapshot, snapshots]);
+
+    useEffect(() => {
+        if (!showDiff || !diffData.changes.length || !diffContainerRef.current) return;
+        const change = diffData.changes[selectedChangeIndex];
+        const element = change && diffContainerRef.current.querySelector(`[data-diff-change="${change.id}"]`);
+        diffContainerRef.current.querySelectorAll('.diff-change-selected').forEach((node) => {
+            node.classList.remove('diff-change-selected', 'ring-2', 'ring-indigo-500', 'ring-offset-1', 'ring-offset-[var(--bg-editor)]');
+        });
+        if (element) element.classList.add('diff-change-selected', 'ring-2', 'ring-indigo-500', 'ring-offset-1', 'ring-offset-[var(--bg-editor)]');
+        element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [diffData, selectedChangeIndex, showDiff]);
+
+    useEffect(() => {
+        setSelectedChangeIndex(0);
+    }, [selectedSnapshot?.id]);
+
+    const goToChange = useCallback((direction) => {
+        if (!diffData.changes.length) return;
+        setSelectedChangeIndex((current) => (current + direction + diffData.changes.length) % diffData.changes.length);
+    }, [diffData.changes.length]);
+
+    useEffect(() => {
+        if (!isOpen || !showDiff || !diffData.changes.length) return undefined;
+        const handleKeyDown = (event) => {
+            const target = event.target;
+            if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable) return;
+            if (event.key === 'ArrowDown' || event.key.toLowerCase() === 'j') {
+                event.preventDefault();
+                goToChange(1);
+            }
+            if (event.key === 'ArrowUp' || event.key.toLowerCase() === 'k') {
+                event.preventDefault();
+                goToChange(-1);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, showDiff, diffData.changes.length, goToChange]);
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={activeChapter ? "Historial del Capítulo" : "Historial del Documento"} size="xl">
@@ -191,8 +276,15 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                         <div>
                             <h3 className="font-serif font-black text-2xl text-[var(--text-main)] italic leading-none">Cápsulas de Tiempo</h3>
                             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 mt-2">
-                                {snapshots.length} de 120 puntos de control activos
+                                {visibleSnapshotEntries.length}{showOnlyChanged ? ` de ${snapshots.length}` : ''} de 120 puntos de control activos
                             </p>
+                            <button
+                                type="button"
+                                onClick={() => setShowOnlyChanged((current) => !current)}
+                                className={`mt-3 rounded-xl border px-3 py-2 text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${showOnlyChanged ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500' : 'border-[var(--border-main)] text-[var(--text-muted)] hover:border-indigo-500/50 hover:text-indigo-500'}`}
+                            >
+                                {showOnlyChanged ? 'Mostrar todas' : 'Solo con cambios'}
+                            </button>
                         </div>
                     </div>
                     
@@ -216,7 +308,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                                 Sin registros
                             </div>
                         ) : (
-                            snapshots.map((snap, index) => {
+                            visibleSnapshotEntries.map(({ snapshot: snap, index }) => {
                                 const isActive = selectedSnapshot?.id === snap.id;
                                 const { date, time } = formatDate(snap.createdAt);
                                 const words = getWordCount(snap.content);
@@ -310,7 +402,8 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                                         </div>
                                     </div>
                                     {showDiff && (
-                                        <div className="flex gap-6 items-center animate-in fade-in slide-in-from-top-2 duration-300 bg-white/5 p-3 rounded-2xl border border-white/5">
+                                        <div className="flex flex-wrap gap-3 items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300 bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <div className="flex flex-wrap gap-6 items-center">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"></div>
                                                 <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Eliminado</span>
@@ -319,13 +412,19 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
                                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
                                                 <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Añadido</span>
                                             </div>
+                                            </div>
+                                            {diffData.changes.length > 0 && <div className="flex items-center gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-2 py-1.5">
+                                                <span className="px-1 text-[10px] font-black uppercase tracking-wider text-indigo-500">Cambio {selectedChangeIndex + 1} de {diffData.changes.length}</span>
+                                                <button type="button" onClick={() => goToChange(-1)} className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-indigo-500/10 hover:text-indigo-500" title="Cambio anterior" aria-label="Ir al cambio anterior"><ChevronUp size={15} /></button>
+                                                <button type="button" onClick={() => goToChange(1)} className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-indigo-500/10 hover:text-indigo-500" title="Siguiente cambio" aria-label="Ir al siguiente cambio"><ChevronDown size={15} /></button>
+                                            </div>}
                                         </div>
                                     )}
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-6 md:p-12 scrollbar-hide bg-white/5">
+                                <div ref={diffContainerRef} className="flex-1 overflow-y-auto p-6 md:p-12 scrollbar-hide bg-white/5">
                                     <div 
                                         className="font-serif prose prose-base md:prose-lg dark:prose-invert max-w-none prose-p:leading-[1.8] prose-p:text-[var(--text-main)] selection:bg-indigo-500 selection:text-white"
-                                        dangerouslySetInnerHTML={{ __html: showDiff ? diffHtml : selectedSnapshot.content }}
+                                        dangerouslySetInnerHTML={{ __html: showDiff ? diffData.html : selectedSnapshot.content }}
                                     />
                                 </div>
                             </>

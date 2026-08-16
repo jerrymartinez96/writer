@@ -15,6 +15,48 @@ export const toPlainText = (value) => decodeBasicEntities(String(value || '')
     .replace(/\n{3,}/g, '\n\n')
     .trim());
 
+const splitSentences = (value) => value.match(/[^.!?…]+[.!?…]+(?:["”»])?|[^.!?…]+$/g) || [value];
+
+export const formatDraftText = (value) => {
+    const plain = toPlainText(value);
+    if (!plain) return '';
+    const existingBlocks = plain.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    const sourceBlocks = existingBlocks.length > 1 ? existingBlocks : plain.replace(/\s+(?=—)/g, '\n\n').split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    const paragraphs = [];
+    sourceBlocks.forEach((block) => {
+        if (block.startsWith('—') || block.length < 650) {
+            paragraphs.push(block);
+            return;
+        }
+        let current = '';
+        splitSentences(block).forEach((sentence) => {
+            const next = current ? `${current} ${sentence.trim()}` : sentence.trim();
+            if (current && (next.length >= 420 || splitSentences(current).length >= 4)) {
+                paragraphs.push(current.trim());
+                current = sentence.trim();
+            } else {
+                current = next;
+            }
+        });
+        if (current) paragraphs.push(current.trim());
+    });
+    return paragraphs.join('\n\n');
+};
+
+const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+export const toEditorHtml = (value) => formatDraftText(value)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
 const getTextNodes = (root) => {
     const nodes = [];
     if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return nodes;
@@ -28,26 +70,40 @@ const getTextNodes = (root) => {
     return nodes;
 };
 
+const normalizeForMatch = (value) => String(value || '')
+    .normalize('NFKC')
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[‐‑‒–—―]/g, '-')
+    .replace(/\u00a0/g, ' ');
+
 const locatePlainRange = (textNodes, fullText, searchText) => {
     const exactStart = fullText.indexOf(searchText);
     if (exactStart >= 0) return { start: exactStart, end: exactStart + searchText.length };
-    const compact = (value) => value.replace(/\s+/g, ' ');
-    const compactFull = compact(fullText);
-    const compactSearch = compact(searchText).trim();
-    const compactStart = compactFull.indexOf(compactSearch);
-    if (compactStart < 0 || !compactSearch) return null;
-    const map = [];
-    let compactIndex = 0;
-    let wasSpace = false;
-    for (let index = 0; index < fullText.length; index += 1) {
-        const isSpace = /\s/.test(fullText[index]);
-        if (isSpace && wasSpace) continue;
-        map[compactIndex] = index;
-        compactIndex += 1;
-        wasSpace = isSpace;
-    }
-    const start = map[compactStart];
-    const last = map[compactStart + compactSearch.length - 1];
+    const buildIndex = (value) => {
+        let normalized = '';
+        const map = [];
+        let wasSpace = false;
+        normalizeForMatch(value).split('').forEach((character, index) => {
+            if (/\s/.test(character)) {
+                if (wasSpace) return;
+                normalized += ' ';
+                map.push(index);
+                wasSpace = true;
+                return;
+            }
+            normalized += character;
+            map.push(index);
+            wasSpace = false;
+        });
+        return { normalized, map };
+    };
+    const indexedFull = buildIndex(fullText);
+    const normalizedSearch = normalizeForMatch(searchText).replace(/\s+/g, ' ').trim();
+    const normalizedStart = indexedFull.normalized.indexOf(normalizedSearch);
+    if (normalizedStart < 0 || !normalizedSearch) return null;
+    const start = indexedFull.map[normalizedStart];
+    const last = indexedFull.map[normalizedStart + normalizedSearch.length - 1];
     return { start, end: last === undefined ? start : last + 1 };
 };
 
@@ -57,13 +113,16 @@ export const applyPlainTextPatch = (content, originalText, replacementText) => {
     const replacement = String(replacementText || '');
     if (!original || replacement === undefined || replacement === null) return null;
     if (source.includes(original)) return source.replace(original, replacement);
-    if (typeof DOMParser === 'undefined') return null;
+    if (typeof DOMParser === 'undefined') {
+        const range = locatePlainRange([], source, original);
+        return range ? `${source.slice(0, range.start)}${replacement}${source.slice(range.end)}` : null;
+    }
     const parser = new DOMParser();
     const root = parser.parseFromString(`<div>${source}</div>`, 'text/html').body.firstElementChild;
     if (!root) return null;
     const textNodes = getTextNodes(root);
     const fullText = textNodes.map((node) => node.nodeValue || '').join('');
-    const range = locatePlainRange(textNodes, fullText, original);
+    const range = locatePlainRange(textNodes, fullText, normalizeForMatch(original));
     if (!range) return null;
     let cursor = 0;
     let startNode = null;

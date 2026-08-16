@@ -100,6 +100,14 @@ export const saveLocalSnapshot = async (documentId, content, triggerType = 'auto
             .equals(documentId)
             .sortBy('createdAt');
 
+        // Los guardados automáticos no deben llenar el historial con copias idénticas.
+        // Los manuales sí se conservan porque representan una decisión explícita del usuario.
+        if (triggerType !== 'manual' && existing.length > 0) {
+            const latest = existing[existing.length - 1];
+            const latestContent = decompressData(latest.content);
+            if (latestContent === content) return false;
+        }
+
         // 2. Keep only the last 119 snapshots (so the new one makes 120)
         if (existing.length >= 120) {
             const toDelete = existing.slice(0, existing.length - 119);
@@ -114,6 +122,7 @@ export const saveLocalSnapshot = async (documentId, content, triggerType = 'auto
             createdAt: now,
             triggerType
         });
+        return true;
     } catch (error) {
         console.error('Error saving local snapshot to IndexedDB:', error);
     }

@@ -584,6 +584,84 @@ body {
   text-underline-offset: 2px;
 }
 
+/* El chat usa bloques inline para mantener el contenido compatible con su
+   contenedor actual, que es un párrafo React. */
+.ia-md-paragraph,
+.ia-md-heading,
+.ia-md-list,
+.ia-md-quote,
+.ia-md-code-block {
+  display: block;
+}
+
+.ia-md-heading {
+  font-weight: 800;
+  margin-top: 1.1em;
+  margin-bottom: 0.35em;
+  letter-spacing: -0.02em;
+}
+
+.ia-md-heading:first-child {
+  margin-top: 0;
+}
+
+.ia-md-heading-1 { font-size: 1.25em; }
+.ia-md-heading-2 { font-size: 1.1em; border-bottom: 1px solid var(--border-main); padding-bottom: 0.2em; }
+.ia-md-heading-3,
+.ia-md-heading-4 { font-size: 1em; }
+
+.ia-md-list {
+  margin: 0.35em 0 0.75em;
+}
+
+.ia-md-list-item {
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.3em;
+}
+
+.ia-md-marker {
+  flex: 0 0 1.25em;
+  color: var(--accent-main);
+  font-weight: 800;
+}
+
+.ia-md-list-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.ia-md-quote {
+  margin: 0.75em 0;
+  padding: 0.4em 0.75em;
+  border-left: 3px solid var(--accent-main);
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: var(--accent-soft);
+  font-style: italic;
+}
+
+.ia-md-divider {
+  display: block;
+  border-top: 1px solid var(--border-main);
+  margin: 1em 0;
+  opacity: 0.5;
+}
+
+.ia-md-code-block {
+  margin: 0.75em 0;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--border-main);
+  border-radius: 0.75rem;
+  background: var(--bg-app);
+}
+
+.ia-md-code-block code {
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
 /* Error variant — red tint */
 .ia-markdown--error {
   color: #ef4444;
@@ -624,4 +702,3 @@ textarea[aria-label="Mensaje para Core IA Studio"] {
     padding-block: 0.75rem;
   }
 }
-

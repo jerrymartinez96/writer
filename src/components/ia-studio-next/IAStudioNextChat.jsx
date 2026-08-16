@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bot, ChevronDown, Loader2, Plus, Send, Sparkles, Square, Wrench } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronDown, Loader2, Plus, Send, Sparkles, Square, Trash2, Wrench } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useIAStudioContext } from '../../context/IAStudioContext';
 import { useToolRooms } from '../../context/ToolRoomContext';
@@ -13,7 +13,69 @@ import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions'
 
 const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
 
+const renderInlineMarkdown = (value) => {
+    const tokens = String(value || '').split(/(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^\s)]+\))/g).filter(Boolean);
+    return tokens.map((token, index) => {
+        if (token.startsWith('**') || token.startsWith('__')) return <strong key={index}>{token.slice(2, -2)}</strong>;
+        if ((token.startsWith('*') && token.endsWith('*')) || (token.startsWith('_') && token.endsWith('_'))) return <em key={index}>{token.slice(1, -1)}</em>;
+        if (token.startsWith('`')) return <code key={index}>{token.slice(1, -1)}</code>;
+        const link = token.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/);
+        if (link) {
+            const safeHref = /^(https?:|mailto:)/i.test(link[2]) ? link[2] : '#';
+            return <a key={index} href={safeHref} target="_blank" rel="noreferrer">{link[1]}</a>;
+        }
+        return <React.Fragment key={index}>{token}</React.Fragment>;
+    });
+};
+
+const MarkdownMessage = ({ content }) => {
+    const lines = String(content || '').replace(/\r/g, '').split('\n');
+    const blocks = [];
+    let paragraph = [];
+    const flushParagraph = () => {
+        if (!paragraph.length) return;
+        blocks.push(<span key={`p-${blocks.length}`} className="ia-md-paragraph">{paragraph.map((line, index) => <React.Fragment key={index}>{index > 0 && <br />}{renderInlineMarkdown(line)}</React.Fragment>)}</span>);
+        paragraph = [];
+    };
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (!line.trim()) { flushParagraph(); continue; }
+        if (/^```/.test(line)) {
+            flushParagraph();
+            const code = [];
+            index += 1;
+            while (index < lines.length && !/^```/.test(lines[index])) { code.push(lines[index]); index += 1; }
+            blocks.push(<span key={`code-${blocks.length}`} className="ia-md-code-block"><code>{code.join('\n')}</code></span>);
+            continue;
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) { flushParagraph(); blocks.push(<span key={`h-${blocks.length}`} className={`ia-md-heading ia-md-heading-${heading[1].length}`}>{renderInlineMarkdown(heading[2])}</span>); continue; }
+        if (/^\s*(\*{3,}|-{3,}|_{3,})\s*$/.test(line)) { flushParagraph(); blocks.push(<span key={`hr-${blocks.length}`} className="ia-md-divider" />); continue; }
+        const list = line.match(/^\s*([-*+]\s+|\d+[.)]\s+)(.+)$/);
+        if (list) {
+            flushParagraph();
+            const ordered = /^\d/.test(list[1]);
+            const items = [list[2]];
+            while (index + 1 < lines.length) {
+                const next = lines[index + 1].match(/^\s*([-*+]\s+|\d+[.)]\s+)(.+)$/);
+                if (!next || /^\d/.test(next[1]) !== ordered) break;
+                items.push(next[2]); index += 1;
+            }
+            blocks.push(<span key={`list-${blocks.length}`} className={`ia-md-list ${ordered ? 'ia-md-list-ordered' : ''}`}>{items.map((item, itemIndex) => <span className="ia-md-list-item" key={itemIndex}><span className="ia-md-marker">{ordered ? `${itemIndex + 1}.` : '•'}</span><span className="ia-md-list-content">{renderInlineMarkdown(item)}</span></span>)}</span>);
+            continue;
+        }
+        const quote = line.match(/^\s*>\s?(.*)$/);
+        if (quote) { flushParagraph(); blocks.push(<span key={`quote-${blocks.length}`} className="ia-md-quote">{renderInlineMarkdown(quote[1])}</span>); continue; }
+        paragraph.push(line);
+    }
+    flushParagraph();
+    return <span className="ia-markdown">{blocks}</span>;
+};
+
+const toDisplayMessage = (message) => ({ ...message, content: <MarkdownMessage content={message.content} /> });
+
 const SessionToolbar = ({ sessions, activeSession, onSwitch, onNew }) => {
+    const { deleteSession: removeSession } = useIAStudioContext();
     const [open, setOpen] = useState(false);
     const containerRef = useRef(null);
     useEffect(() => {
@@ -24,7 +86,11 @@ const SessionToolbar = ({ sessions, activeSession, onSwitch, onNew }) => {
         return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', closeOnEscape); };
     }, []);
     const selectSession = (sessionId) => { onSwitch(sessionId); setOpen(false); };
-    return <div className="flex items-center gap-2"><div ref={containerRef} className="relative"><button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="inline-flex max-w-48 items-center gap-2 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-3 py-2 text-[10px] font-black outline-none transition-colors hover:border-indigo-500 focus:border-indigo-500"><span className="max-w-32 truncate">{activeSession?.name || 'Seleccionar sesión'}</span><ChevronDown size={13} className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} /></button>{open && <div role="listbox" aria-label="Sesiones del Core" className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-1.5 shadow-2xl">{sessions.length === 0 ? <p className="px-3 py-2 text-xs text-[var(--text-muted)]">No hay sesiones.</p> : sessions.map((session) => <button key={session.id} type="button" role="option" aria-selected={activeSession?.id === session.id} onClick={() => selectSession(session.id)} className={`w-full rounded-xl px-3 py-2.5 text-left text-xs font-bold transition-colors ${activeSession?.id === session.id ? 'bg-indigo-500/10 text-indigo-500' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}><span className="block truncate">{session.name}</span><span className="mt-0.5 block text-[9px] font-medium text-[var(--text-muted)]">{session.messages?.length || 0} mensajes</span></button>)}</div>}</div><button type="button" onClick={onNew} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-main)] px-2.5 py-2 text-[10px] font-black text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-500" title="Nueva sesión"><Plus size={13} /> <span className="hidden sm:inline">Nueva</span></button></div>;
+    const removeActiveSession = () => {
+        if (!activeSession) return;
+        if (window.confirm(`¿Eliminar la conversación «${activeSession.name}»? Esta acción no se puede deshacer.`)) removeSession(activeSession.id);
+    };
+    return <div className="flex items-center gap-2"><div ref={containerRef} className="relative"><button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="inline-flex max-w-48 items-center gap-2 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-3 py-2 text-[10px] font-black outline-none transition-colors hover:border-indigo-500 focus:border-indigo-500"><span className="max-w-32 truncate">{activeSession?.name || 'Seleccionar sesión'}</span><ChevronDown size={13} className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} /></button>{open && <div role="listbox" aria-label="Sesiones del Core" className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-1.5 shadow-2xl">{sessions.length === 0 ? <p className="px-3 py-2 text-xs text-[var(--text-muted)]">No hay sesiones.</p> : sessions.map((session) => <button key={session.id} type="button" role="option" aria-selected={activeSession?.id === session.id} onClick={() => selectSession(session.id)} className={`w-full rounded-xl px-3 py-2.5 text-left text-xs font-bold transition-colors ${activeSession?.id === session.id ? 'bg-indigo-500/10 text-indigo-500' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}><span className="block truncate">{session.name}</span><span className="mt-0.5 block text-[9px] font-medium text-[var(--text-muted)]">{session.messages?.length || 0} mensajes</span></button>)}</div>}</div><button type="button" onClick={onNew} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-main)] px-2.5 py-2 text-[10px] font-black text-[var(--text-muted)] hover:border-indigo-500 hover:text-indigo-500" title="Nueva sesión"><Plus size={13} /> <span className="hidden sm:inline">Nueva</span></button><button type="button" onClick={removeActiveSession} disabled={!activeSession} className="inline-flex items-center justify-center rounded-xl border border-[var(--border-main)] px-2.5 py-2 text-[var(--text-muted)] hover:border-red-500 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40" title="Eliminar conversación" aria-label="Eliminar conversación"><Trash2 size={14} /></button></div>;
 };
 
 const ContextToolbar = ({ chapters, characters, worldItems, selections }) => {
@@ -58,17 +124,15 @@ const IAStudioNextChat = ({ onBack }) => {
     }, [activeChapter, chapters, characters, worldItems, contextSelections]);
 
     useEffect(() => {
-        setMessages(storedMessages?.length ? storedMessages : [{ role: 'assistant', content: 'Soy el Core de IA Studio. Puedo conversar, analizar tu obra y derivar trabajos especializados a la Tool Room adecuada.' }]);
+        const initialMessages = storedMessages?.length ? storedMessages : [{ role: 'assistant', content: 'Soy el Core de IA Studio. Puedo conversar, analizar tu obra y derivar trabajos especializados a la Tool Room adecuada.' }];
+        setMessages(initialMessages.map(toDisplayMessage));
     }, [activeSession?.id, storedMessages]);
 
     const appendMessage = (message) => {
         const nextMessage = { ...message, id: message.id || `next-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
-        setMessages((previous) => {
-            const next = [...previous, nextMessage];
-            setStoredMessages(next);
-            if (activeSession?.id) SessionManager.addMessage(activeSession.id, nextMessage);
-            return next;
-        });
+        setMessages((previous) => [...previous, toDisplayMessage(nextMessage)]);
+        setStoredMessages((previous) => [...previous, nextMessage]);
+        if (activeSession?.id) SessionManager.addMessage(activeSession.id, nextMessage);
     };
 
     const send = async () => {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AIService from '../AIService';
-import { buildCoherencePatches, getStructureSourceHash, requestChapterDirections, requestChapterScene, requestChapterStructureAnalysis, requestCoherenceAnalysis, requestCoherenceResolutionOptions, requestGlobalConsistencyAnalysis, requestToolRoomInsight, requestToolRoomProposal, validateCoherenceFinding } from './ToolRoomAIService';
+import { buildCoherencePatches, getStructureSourceHash, requestChapterDirections, requestChapterDraft, requestChapterFormatting, requestChapterScene, requestChapterStructureAnalysis, requestCoherenceAnalysis, requestCoherenceResolutionOptions, requestGlobalConsistencyAnalysis, requestToolRoomInsight, requestToolRoomProposal, validateCoherenceFinding } from './ToolRoomAIService';
 
 vi.mock('../AIService', () => ({
     default: { sendMessage: vi.fn() },
@@ -104,6 +104,48 @@ describe('ToolRoomAIService', () => {
         expect(result.characters).toEqual(['Elena']);
     });
 
+    it('recupera el análisis de estructura cuando la respuesta inicial llega vacía', async () => {
+        AIService.sendMessage
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Estructura recuperada', chapters: [], matches: [], openThreads: [], recommendation: '' }));
+
+        const result = await requestChapterStructureAnalysis({
+            profile,
+            structureContent: 'Capítulo 1: La llegada',
+            chapters: [{ id: 'chapter-1', title: 'Capítulo 1', content: '<p>La llegada.</p>' }],
+        });
+
+        expect(result.summary).toBe('Estructura recuperada');
+        expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, enableTools: true, toolChoice: 'auto' }));
+    });
+
+    it('reintenta el análisis estructurado cuando los argumentos de la tool no son JSON válido', async () => {
+        AIService.sendMessage
+            .mockResolvedValueOnce('{"summary":"incompleto"')
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis reparado', chapters: [], matches: [], openThreads: [], recommendation: '' }));
+
+        const result = await requestChapterStructureAnalysis({ profile, structureContent: 'Capítulo 1', chapters: [] });
+
+        expect(result.summary).toBe('Análisis reparado');
+        expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, toolChoice: 'required' }));
+    });
+
+    it('permite puntos suspensivos dentro del capítulo pero rechaza un marcador de truncamiento al final', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ summary: 'Capítulo', replacement: '—No estoy segura… —dijo Nora.\n\nLa puerta se cerró.', wordCount: 8, usedScenes: [1], risk: 'low' }));
+        await expect(requestChapterDraft({ profile, title: 'La puerta', sizeLabel: '', contextContent: 'Contexto' })).resolves.toMatchObject({ replacement: expect.stringContaining('No estoy segura') });
+
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ summary: 'Capítulo', replacement: 'La escena quedó incompleta […]', wordCount: 5, usedScenes: [1], risk: 'high' }));
+        await expect(requestChapterDraft({ profile, title: 'La puerta', sizeLabel: '', contextContent: 'Contexto' })).rejects.toThrow('capítulo truncado');
+    });
+
+    it('formatea un capítulo sin permitir cambios de contenido', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ formattedText: 'Primero.\n\n—Hola —dijo Kai.' }));
+        const result = await requestChapterFormatting({ profile, text: 'Primero. —Hola —dijo Kai.' });
+        expect(result).toBe('Primero.\n\n—Hola —dijo Kai.');
+    });
+
     it('normaliza hallazgos de consistencia global y descarta documentos inválidos', async () => {
         AIService.sendMessage.mockResolvedValue(JSON.stringify({
             summary: 'Se encontraron dos apariciones para revisar.',
@@ -116,6 +158,23 @@ describe('ToolRoomAIService', () => {
         const result = await requestGlobalConsistencyAnalysis({ profile, auditType: 'mulettilla', query: 'Elena', documents: [{ id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Elena dijo: ya sabes</p>' }] });
         expect(result.findings).toHaveLength(1);
         expect(result.findings[0]).toMatchObject({ documentId: 'chapter-1', originalText: 'ya sabes', confidence: 0.94 });
+    });
+
+    it('reintenta el análisis de consistencia sin razonamiento cuando la primera respuesta llega vacía', async () => {
+        AIService.sendMessage
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis recuperado', findings: [] }));
+
+        const result = await requestGlobalConsistencyAnalysis({
+            profile,
+            auditType: 'custom',
+            query: 'detalle',
+            documents: [{ id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Texto</p>' }],
+        });
+
+        expect(result).toEqual({ summary: 'Análisis recuperado', findings: [] });
+        expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, useJsonMode: true, enableTools: false }));
     });
 
     it('normaliza hallazgos de auditoría y conserva el contexto auxiliar', async () => {

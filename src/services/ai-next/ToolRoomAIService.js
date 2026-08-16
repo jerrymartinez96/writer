@@ -1,5 +1,5 @@
 import AIService, { COHERENCE_AUDIT_SCHEMA } from '../AIService';
-import { toPlainText } from './plainText';
+import { formatDraftText, toPlainText } from './plainText';
 import { getConfiguredAIOptions } from './AIRequestOptions';
 
 const parseJson = (value) => {
@@ -122,6 +122,62 @@ const COHERENCE_CUSTOM_OPTION_TOOL = {
     },
 };
 
+const CHAPTER_STRUCTURE_ANALYSIS_TOOL = {
+    type: 'function',
+    function: {
+        name: 'analizar_estructura_capitulos',
+        description: 'Analiza el documento de Estructura completo y lo compara con el manuscrito. No modifica documentos.',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                chapters: { type: 'array', items: { type: 'object', properties: {
+                    id: { type: 'string' }, title: { type: 'string' }, position: { type: 'number' }, summary: { type: 'string' }, purpose: { type: 'string' }, conflict: { type: 'string' }, characters: { type: 'array', items: { type: 'string' } }, status: { type: 'string', enum: ['written', 'pending', 'empty', 'uncertain'] },
+                }, required: ['title', 'position', 'summary', 'purpose', 'conflict', 'characters', 'status'] } },
+                matches: { type: 'array', items: { type: 'object', properties: { structureChapterId: { type: 'string' }, manuscriptChapterId: { type: 'string' }, confidence: { type: 'number' }, reason: { type: 'string' } }, required: ['structureChapterId', 'manuscriptChapterId', 'confidence', 'reason'] } },
+                openThreads: { type: 'array', items: { type: 'string' } },
+                recommendedNextChapterId: { type: 'string' },
+                recommendation: { type: 'string' },
+            },
+            required: ['summary', 'chapters', 'matches', 'openThreads', 'recommendedNextChapterId', 'recommendation'],
+        },
+    },
+};
+
+const CHAPTER_DRAFT_TOOL = {
+    type: 'function',
+    function: {
+        name: 'redactar_capitulo_desde_estructura',
+        description: 'Redacta un capítulo completo a partir de una estructura aprobada. No devuelve un resumen ni modifica documentos.',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                replacement: { type: 'string', description: 'Texto completo del capítulo en texto plano, con párrafos separados por líneas en blanco.' },
+                wordCount: { type: 'number' },
+                usedScenes: { type: 'array', items: { type: 'number' } },
+                risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+            },
+            required: ['summary', 'replacement', 'wordCount', 'usedScenes', 'risk'],
+        },
+    },
+};
+
+const CHAPTER_FORMAT_TOOL = {
+    type: 'function',
+    function: {
+        name: 'aplicar_formateo_lectura',
+        description: 'Organiza un capítulo para lectura cómoda sin cambiar ninguna palabra, signo ni el orden del contenido.',
+        parameters: {
+            type: 'object',
+            properties: {
+                formattedText: { type: 'string', description: 'El mismo texto completo, con párrafos y diálogos separados por líneas en blanco.' },
+            },
+            required: ['formattedText'],
+        },
+    },
+};
+
 const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
@@ -138,30 +194,46 @@ const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7
         const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, requestOptions));
         return parseJson(raw);
     } catch (error) {
-        if (!String(error?.message || '').includes('respuesta vacía')) throw error;
-        // DeepSeek puede terminar un turno de razonamiento sin emitir tool_call.
-        // Conservamos la primera ruta razonada y solo usamos esta recuperación
-        // para no bloquear la auditoría.
-        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDebes llamar obligatoriamente a la herramienta disponible y devolver todos sus argumentos.`, apiKey, getConfiguredAIOptions(profile, {
+        const errorMessage = String(error?.message || '');
+        const canRecover = errorMessage.includes('respuesta vacía') || errorMessage.includes('JSON válido');
+        if (!canRecover) throw error;
+        // DeepSeek puede terminar el razonamiento sin emitir una tool o producir
+        // argumentos truncados. El segundo intento obliga una llamada limpia.
+        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDebes llamar obligatoriamente a la herramienta disponible. Devuelve todos sus argumentos como JSON válido y completo; no escribas texto fuera de la herramienta.`, apiKey, getConfiguredAIOptions(profile, {
             ...requestOptions,
             reasoningMode: false,
             toolChoice: 'required',
+            max_tokens: Math.max(6000, Math.min(max_tokens, 12000)),
         }));
         return parseJson(recoveryRaw);
     }
 };
 
-const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000 }) => {
+const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000, reasoningMode = true }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
-    const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, {
+    const requestOptions = getConfiguredAIOptions(profile, {
         temperature: 0.35,
         useJsonMode: true,
         enableTools: false,
-        reasoningMode: true,
+        reasoningMode,
         max_tokens,
-    }));
-    return parseJson(raw);
+    });
+    try {
+        const raw = await AIService.sendMessage(prompt, apiKey, requestOptions);
+        return parseJson(raw);
+    } catch (error) {
+        if (!String(error?.message || '').includes('respuesta vacía')) throw error;
+        // Algunos modelos consumen el turno en razonamiento y no emiten el JSON.
+        // Reintentamos como una respuesta JSON directa para no perder la auditoría.
+        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDevuelve ahora únicamente el objeto JSON solicitado, sin razonamiento previo ni texto adicional.`, apiKey, {
+            ...requestOptions,
+            temperature: 0.15,
+            reasoningMode: false,
+            reasoningEffort: 'disabled',
+        });
+        return parseJson(recoveryRaw);
+    }
 };
 
 export const getToolRoomApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
@@ -203,28 +275,43 @@ export const requestChapterStructureAnalysis = async ({ profile, structureConten
         title: String(chapter.title || ''),
         content: toPlainText(chapter.content || ''),
     })).filter((chapter) => chapter.id);
-    const prompt = `Eres un editor de continuidad narrativa. Analiza el documento de Estructura y compáralo con los capítulos existentes. No modifiques ningún documento. Si el documento no contiene capítulos claramente identificables, devuelve chapters vacío y explica que se necesita diseñar el siguiente capítulo.
-
-Devuelve únicamente JSON válido con esta forma:
-{"summary":"...","chapters":[{"id":"stable-id","title":"...","position":1,"summary":"...","purpose":"...","conflict":"...","characters":["..."],"status":"written|pending|empty|uncertain"}],"matches":[{"structureChapterId":"...","manuscriptChapterId":"...","confidence":0.0,"reason":"..."}],"openThreads":["..."],"recommendedNextChapterId":"","recommendation":"..."}
-
-Usa un id estable para cada capítulo de estructura basado en su posición y título. Un capítulo solo puede marcarse written o empty si existe evidencia en el manuscrito. Las coincidencias son sugerencias para confirmación humana, nunca decisiones definitivas.
-
-Documento de Estructura:
-${toPlainText(structureContent) || '(vacío)'}
-
-Capítulos del manuscrito:
-${JSON.stringify(normalizedChapters)}
-
-Último capítulo disponible:
-${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
-
-Información general del mundo:
-${toPlainText(worldContent) || '(sin información general)'}
-
-Personajes:
-${JSON.stringify(characters.map((character) => ({ name: character.name, description: toPlainText(character.description || '') })))} `;
-    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 9000 });
+    const prompt = [
+        'ROL: Eres el editor principal de continuidad de una novela. Esta tarea es de diagnóstico, no de escritura.',
+        'OBJETIVO: interpretar el documento Estructura completo, compararlo con el manuscrito y recomendar qué capítulo debe redactarse después.',
+        '',
+        'JERARQUÍA DE FUENTES:',
+        '1. El documento de Estructura define el plan previsto y sus títulos, posiciones, propósitos, conflictos y escenas.',
+        '2. El manuscrito define lo que realmente está escrito; nunca supongas que una intención de Estructura ya ocurrió.',
+        '3. Mundo, personajes y último capítulo sirven para comprobar continuidad, no para inventar capítulos ausentes.',
+        '',
+        'REGLAS DE ANÁLISIS:',
+        '- Extrae todos los capítulos identificables en Estructura, incluso si el texto usa formato libre.',
+        '- Conserva el orden y posición narrativa. No fusiones capítulos distintos.',
+        '- Marca written solo con evidencia clara en el manuscrito; marca empty solo si existe un capítulo equivalente sin contenido.',
+        '- Usa uncertain cuando título, hechos o contenido sugieren una coincidencia pero no permiten confirmarla.',
+        '- Una coincidencia debe comparar hechos, personajes, eventos y posición, no solo títulos parecidos.',
+        '- No marques automáticamente nada como confirmado: matches son sugerencias para revisión humana.',
+        '- Detecta cabos abiertos únicamente cuando estén respaldados por Estructura o manuscrito.',
+        '- Si Estructura está vacía o no contiene capítulos, devuelve chapters vacío y explica que debe diseñarse el siguiente capítulo.',
+        '',
+        'CONTRATO: llama a la herramienta analizar_estructura_capitulos. No escribas prosa ni devuelvas texto fuera de la herramienta.',
+        '',
+        'DOCUMENTO DE ESTRUCTURA (fuente de plan):',
+        toPlainText(structureContent) || '(vacío)',
+        '',
+        'CAPÍTULOS DEL MANUSCRITO (fuente de hechos escritos):',
+        JSON.stringify(normalizedChapters),
+        '',
+        'ÚLTIMO CAPÍTULO DISPONIBLE:',
+        JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null),
+        '',
+        'INFORMACIÓN GENERAL DEL MUNDO:',
+        toPlainText(worldContent) || '(sin información general)',
+        '',
+        'PERSONAJES:',
+        JSON.stringify(characters.map((character) => ({ name: character.name, description: toPlainText(character.description || '') }))),
+    ].join('\n');
+    const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_STRUCTURE_ANALYSIS_TOOL, max_tokens: 12000 });
     const structureChapters = Array.isArray(parsed.chapters) ? parsed.chapters.map(normalizeStructureChapter) : [];
     const validIds = new Set(structureChapters.map((chapter) => chapter.id));
     const validManuscriptIds = new Set(normalizedChapters.map((chapter) => chapter.id));
@@ -243,6 +330,97 @@ ${JSON.stringify(characters.map((character) => ({ name: character.name, descript
     };
 };
 
+export const requestChapterDraft = async ({ profile, title = '', plan = null, structure = '', sizeLabel = '', contextContent = '', lastChapter = null }) => {
+    const prompt = [
+        'ROL: Eres el novelista responsable de redactar un capítulo completo y el editor de continuidad que debe impedir contradicciones.',
+        'TAREA: escribe el capítulo indicado por la estructura aprobada. No entregues un resumen, esquema, muestra, explicación ni comentario editorial.',
+        '',
+        'ORDEN DE PRIORIDAD:',
+        '1. Estructura aprobada y escenas aprobadas: son la fuente de verdad del capítulo.',
+        '2. Continuidad del manuscrito y último capítulo: determina hechos, relaciones, tono y punto de partida.',
+        '3. Mundo y personajes: completan detalles compatibles, pero no autorizan inventar giros que contradigan el plan.',
+        '4. Instrucciones de estilo: se aplican siempre que no contradigan una fuente superior.',
+        '',
+        'PLANIFICACIÓN OBLIGATORIA:',
+        '- Desarrolla todas las escenas aprobadas en el orden recibido; no las omitas, fusiones ni sustituyas.',
+        '- Cada escena debe tener objetivo, acción, conflicto y consecuencia visible.',
+        '- Usa transiciones claras entre escenas y evita saltos temporales sin señal narrativa.',
+        '- El final debe dejar exactamente la consecuencia prevista por la estructura, no resolver cabos reservados para capítulos posteriores.',
+        '',
+        'CONTINUIDAD Y ESTILO:',
+        '- Conserva el punto de vista, persona narrativa, tiempo verbal, tono, registro y tratamiento de los diálogos del manuscrito.',
+        '- No introduzcas personajes, lugares, poderes, relaciones, fechas o hechos que no estén autorizados por el contexto.',
+        '- Si falta un detalle, elige la opción más conservadora y compatible; no rellenes el vacío con una revelación nueva.',
+        '- No repitas información que el último capítulo ya mostró salvo que sea necesario desde otro punto de vista.',
+        '',
+        'FORMATO Y COMPLETITUD:',
+        '- Devuelve prosa narrativa completa en texto plano.',
+        '- Separa cada párrafo con una línea en blanco; separa también los bloques de diálogo para que el editor pueda leerlos.',
+        '- No uses HTML, Markdown, encabezados técnicos, notas del autor, etiquetas de escena ni texto fuera del capítulo.',
+        '- No termines con una frase incompleta, una elipsis terminal, "[…]", "[...]", "continuará" o un resumen del resto.',
+        `- Tamaño objetivo: ${sizeLabel}. Permanece dentro del rango sin recortar escenas ni sustituirlas por un resumen.`,
+        '',
+        '',
+        `Título: ${title}`,
+        `Plan estructurado: ${JSON.stringify(plan || {})}`,
+        'Estructura aprobada completa:',
+        toPlainText(structure) || '(no disponible; usa el plan estructurado)',
+        '',
+        'Último capítulo:',
+        JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null),
+        '',
+        'Contexto completo de continuidad:',
+        toPlainText(contextContent) || '(sin contexto adicional)',
+    ].join('\n');
+    const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_DRAFT_TOOL, max_tokens: 14000 });
+    const replacement = formatDraftText(parsed.replacement || '');
+    if (!replacement) throw new Error('La IA no devolvió un capítulo completo.');
+    const ending = replacement.slice(-240).trim();
+    if (/(?:\[\.\.\.\]|\[…\]|\b(?:continuará|fin del fragmento)\b)\s*$/i.test(ending)
+        || /(?:\.\.\.|…)\s*$/.test(ending)) {
+        throw new Error('La IA devolvió un capítulo truncado. Regenera la propuesta.');
+    }
+    const wordCount = replacement.split(/\s+/).filter(Boolean).length;
+    const sizeMatch = String(sizeLabel).match(/(\d[\d,]*)\s*[–-]\s*(\d[\d,]*)/);
+    if (sizeMatch) {
+        const minimum = Number(sizeMatch[1].replace(/,/g, ''));
+        const maximum = Number(sizeMatch[2].replace(/,/g, ''));
+        if (wordCount < minimum * 0.55) throw new Error(`La propuesta es demasiado corta: ${wordCount.toLocaleString()} de ${minimum.toLocaleString()} palabras mínimas esperadas.`);
+        if (wordCount > maximum * 1.25) throw new Error(`La propuesta supera el tamaño elegido: ${wordCount.toLocaleString()} de ${maximum.toLocaleString()} palabras máximas orientativas.`);
+    }
+    return {
+        summary: String(parsed.summary || 'Capítulo generado desde la estructura aprobada.'),
+        replacement,
+        wordCount: Number(parsed.wordCount) || wordCount,
+        usedScenes: Array.isArray(parsed.usedScenes) ? parsed.usedScenes.map(Number).filter(Number.isFinite) : [],
+        risk: ['low', 'medium', 'high'].includes(parsed.risk) ? parsed.risk : 'medium',
+    };
+};
+
+export const requestChapterFormatting = async ({ profile, text = '' }) => {
+    const original = toPlainText(text);
+    if (!original) throw new Error('No hay texto para formatear.');
+    const prompt = [
+        'ROL: Eres un corrector de formato de lectura.',
+        'TAREA: organiza el texto completo para que sea legible en un editor narrativo.',
+        'REGLA ABSOLUTA: no cambies, elimines, añadas ni reordenes ninguna palabra, signo, diálogo o fragmento.',
+        'Solo puedes insertar saltos de línea dobles entre párrafos, bloques de diálogo y cambios claros de escena.',
+        'Conserva exactamente la ortografía, puntuación, comillas, guiones, nombres y orden original.',
+        'No resumas, no corrijas estilo, no reescribas y no agregues títulos.',
+        'Devuelve únicamente la respuesta de la herramienta aplicar_formateo_lectura.',
+        '',
+        'TEXTO ORIGINAL COMPLETO:',
+        original,
+    ].join('\n\n');
+    const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_FORMAT_TOOL, max_tokens: 14000 });
+    const formattedText = formatDraftText(parsed.formattedText || '');
+    const normalize = (value) => toPlainText(value).replace(/\s+/g, ' ').trim();
+    if (!formattedText || normalize(formattedText) !== normalize(original)) {
+        throw new Error('El formateador alteró el contenido. Se conserva el texto original.');
+    }
+    return formattedText;
+};
+
 const normalizeDirection = (direction, index) => ({
     id: String(direction?.id || `direction-${index + 1}`),
     title: String(direction?.title || `Dirección ${index + 1}`),
@@ -256,13 +434,23 @@ const normalizeDirection = (direction, index) => ({
 });
 
 export const requestChapterDirections = async ({ profile, idea = '', chapterPlan = null, lastChapter = null, openThreads = [], contextContent = '' }) => {
-    const prompt = `Eres un editor de desarrollo narrativo. Propón exactamente tres direcciones distintas para el próximo capítulo. Usa la continuidad y la idea del usuario, pero no redactes el capítulo. Devuelve únicamente JSON válido: {"directions":[{"id":"...","title":"...","premise":"...","purpose":"...","conflict":"...","revelations":["..."],"consequences":["..."],"risk":"...","toneFit":"..."}]}. Una dirección debe ser conservadora, otra debe aumentar la tensión y otra debe ofrecer una alternativa más arriesgada sin romper los hechos establecidos.
-
-Idea del usuario: ${idea || '(sin idea adicional)'}
-Plan detectado: ${JSON.stringify(chapterPlan || {})}
-Último capítulo: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
-Cabos abiertos: ${JSON.stringify(openThreads)}
-Contexto de apoyo: ${toPlainText(contextContent) || '(sin contexto adicional)'}`;
+    const prompt = [
+        'ROL: Eres un editor de desarrollo narrativo. Diseña posibilidades, pero no redactes prosa.',
+        'TAREA: propone exactamente tres direcciones realmente distintas para el próximo capítulo.',
+        'Las tres opciones deben conservar los hechos establecidos y responder a la idea del usuario.',
+        'Opción 1: conservadora, continúa el plan con el menor riesgo de continuidad.',
+        'Opción 2: aumenta la tensión o el costo emocional sin resolver prematuramente los conflictos.',
+        'Opción 3: más arriesgada, pero compatible con los hechos y con consecuencias narrativas claras.',
+        'Cada dirección debe explicar propósito, conflicto central, revelaciones posibles, consecuencias, riesgos y compatibilidad tonal.',
+        'No inventes una solución definitiva si la estructura indica que el conflicto debe continuar.',
+        'Devuelve únicamente el JSON solicitado; no incluyas comentarios fuera de él.',
+        '',
+        `IDEA DEL USUARIO:\n${idea || '(sin idea adicional)'}`,
+        `PLAN DETECTADO:\n${JSON.stringify(chapterPlan || {})}`,
+        `ÚLTIMO CAPÍTULO:\n${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}`,
+        `CABOS ABIERTOS:\n${JSON.stringify(openThreads)}`,
+        `CONTEXTO DE APOYO:\n${toPlainText(contextContent) || '(sin contexto adicional)'}`,
+    ].join('\n\n');
     const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 6500 });
     return { directions: Array.isArray(parsed.directions) ? parsed.directions.slice(0, 3).map(normalizeDirection) : [] };
 };
@@ -284,15 +472,23 @@ const normalizeScene = (scene, index) => ({
 
 export const requestChapterScene = async ({ profile, chapterPlan = null, direction = null, scenes = [], size = 'standard', lastChapter = null, contextContent = '', instruction = '' }) => {
     const nextNumber = scenes.length + 1;
-    const prompt = `Eres un diseñador de escenas. Propón únicamente la escena ${nextNumber} del capítulo; no escribas prosa narrativa. Devuelve JSON válido: {"scene":{"id":"...","number":${nextNumber},"title":"...","objective":"...","setting":"...","characters":["..."],"conflict":"...","action":"...","revelation":"...","emotionalChange":"...","transition":"...","estimatedWords":0}}. La escena debe avanzar el capítulo, respetar lo aprobado anteriormente y no resolver antes de tiempo los conflictos que aún deben continuar.
-
-Tamaño objetivo: ${size}
-Plan: ${JSON.stringify(chapterPlan || {})}
-Dirección elegida: ${JSON.stringify(direction || {})}
-Escenas aprobadas: ${JSON.stringify(scenes)}
-Último capítulo: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}
-Contexto: ${toPlainText(contextContent) || '(sin contexto adicional)'}
-Instrucción adicional: ${instruction || '(ninguna)'}`;
+    const prompt = [
+        'ROL: Eres un diseñador de escenas, no un redactor de prosa.',
+        `TAREA: propone únicamente la escena ${nextNumber} del capítulo en el formato solicitado.`,
+        'La escena debe continuar lo aprobado, avanzar el conflicto y dejar una transición clara hacia la siguiente.',
+        'No repitas una escena aprobada, no resuelvas antes de tiempo el conflicto principal y no introduzcas personajes o hechos no autorizados.',
+        'Si una revelación está reservada para después, conviértela en indicio o tensión, no la reveles completa.',
+        'Cada campo debe ser concreto y accionable para un escritor: objetivo, lugar/momento, personajes, conflicto, acción, revelación, cambio emocional y transición.',
+        'Devuelve únicamente el objeto scene; no incluyas prosa narrativa ni explicaciones.',
+        '',
+        `TAMAÑO OBJETIVO: ${size}`,
+        `PLAN: ${JSON.stringify(chapterPlan || {})}`,
+        `DIRECCIÓN ELEGIDA: ${JSON.stringify(direction || {})}`,
+        `ESCENAS APROBADAS: ${JSON.stringify(scenes)}`,
+        `ÚLTIMO CAPÍTULO: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}`,
+        `CONTEXTO: ${toPlainText(contextContent) || '(sin contexto adicional)'}`,
+        `INSTRUCCIÓN ADICIONAL: ${instruction || '(ninguna)'}`,
+    ].join('\n\n');
     const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 4500 });
     if (!parsed.scene) throw new Error('La IA no devolvió una escena válida.');
     return normalizeScene(parsed.scene, nextNumber - 1);

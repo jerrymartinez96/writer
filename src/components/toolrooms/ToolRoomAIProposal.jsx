@@ -1,21 +1,37 @@
 import React, { useState } from 'react';
-import { Check, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
+import { Check, Copy, Expand, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import { requestToolRoomProposal } from '../../services/ai-next/ToolRoomAIService';
+import { requestChapterDraft, requestChapterFormatting, requestToolRoomProposal } from '../../services/ai-next/ToolRoomAIService';
 import SanitizedContentPreview from './SanitizedContentPreview';
 
-const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', contextContent = '', onApply, applyLabel = 'Aprobar y guardar' }) => {
+const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', contextContent = '', onApply, applyLabel = 'Aprobar y guardar', proposalRequest = null, proposalValidator = null }) => {
     const { profile } = useData();
     const [proposal, setProposal] = useState(null);
     const [status, setStatus] = useState('idle');
     const [error, setError] = useState('');
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isFormatting, setIsFormatting] = useState(false);
 
     const generate = async () => {
         if (status === 'loading' || status === 'saving') return;
         setStatus('loading');
         setError('');
         try {
-            const nextProposal = await requestToolRoomProposal({ profile, instruction, sourceContent, contextContent, roomName });
+            const chapterDraftRequest = roomName === 'Redactor desde Estructura'
+                ? ({ profile: requestProfile, contextContent: requestContext, instruction: requestInstruction }) => requestChapterDraft({
+                    profile: requestProfile,
+                    title: requestInstruction.match(/capítulo\s+(.+?)\s+respetando/i)?.[1] || 'Capítulo',
+                    structure: requestContext,
+                    contextContent: requestContext,
+                    sizeLabel: requestInstruction.match(/Extensión (?:orientativa|objetivo):\s*([^]+)/i)?.[1] || '1,200–2,000 palabras',
+                })
+                : null;
+            const nextProposal = proposalRequest
+                ? await proposalRequest({ profile, instruction, sourceContent, contextContent, roomName })
+                : chapterDraftRequest
+                    ? await chapterDraftRequest({ profile, contextContent, instruction })
+                : await requestToolRoomProposal({ profile, instruction, sourceContent, contextContent, roomName });
+            if (proposalValidator) proposalValidator(nextProposal);
             setProposal(nextProposal);
             setStatus('review');
         } catch (requestError) {
@@ -45,6 +61,24 @@ const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', context
     };
 
     const busy = status === 'loading' || status === 'saving';
+    const updateReplacement = (replacement) => setProposal((current) => current ? { ...current, replacement } : current);
+    const copyProposal = async () => {
+        if (!proposal?.replacement || !navigator.clipboard) return;
+        await navigator.clipboard.writeText(proposal.replacement);
+    };
+    const formatProposal = async () => {
+        if (!proposal?.replacement || isFormatting) return;
+        setIsFormatting(true);
+        setError('');
+        try {
+            const formatted = await requestChapterFormatting({ profile, text: proposal.replacement });
+            setProposal((current) => current ? { ...current, replacement: formatted } : current);
+        } catch (formatError) {
+            setError(formatError?.message || 'No se pudo formatear la propuesta.');
+        } finally {
+            setIsFormatting(false);
+        }
+    };
 
     return (
         <div className="mt-6 rounded-2xl border border-[var(--accent-main)]/25 bg-[var(--accent-soft)]/30 p-4">
@@ -65,12 +99,15 @@ const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', context
                     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
                         <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600">Propuesta · riesgo {proposal.risk}</p>
                         <div className="mt-2 max-h-52 overflow-auto"><SanitizedContentPreview content={proposal.replacement} /></div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">{roomName === 'Redactor desde Estructura' && <button type="button" onClick={formatProposal} disabled={isFormatting || busy} className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 px-2.5 py-1.5 text-[10px] font-black text-emerald-700 disabled:opacity-60">{isFormatting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} {isFormatting ? 'Formateando…' : 'Formatear texto'}</button>}<button type="button" onClick={() => setIsExpanded(true)} className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 px-2.5 py-1.5 text-[10px] font-black text-emerald-700"><Expand size={13} /> Ver completa y editar</button>{proposal.wordCount && <span className="text-[10px] text-[var(--text-muted)]">{proposal.wordCount.toLocaleString()} palabras</span>}</div>
                     </div>
                 </div>
             )}
 
             {proposal?.summary && <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{proposal.summary}</p>}
             {error && <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-600">{error}</div>}
+
+            {isExpanded && proposal && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setIsExpanded(false)}><div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-2xl" role="dialog" aria-modal="true" aria-label="Propuesta completa"><div className="flex items-center justify-between gap-3 border-b border-[var(--border-main)] p-5"><div><p className="text-[9px] font-black uppercase tracking-[0.16em] text-[var(--accent-main)]">Revisión ampliada</p><h3 className="mt-1 text-xl font-serif font-black">{roomName}</h3></div><div className="flex items-center gap-2"><button type="button" onClick={copyProposal} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><Copy size={14} /> Copiar</button><button type="button" onClick={() => setIsExpanded(false)} className="rounded-xl p-2 text-[var(--text-muted)] hover:bg-[var(--accent-soft)]" aria-label="Cerrar"><X size={18} /></button></div></div><textarea value={proposal.replacement} onChange={(event) => updateReplacement(event.target.value)} className="min-h-[55vh] flex-1 resize-none bg-[var(--bg-app)] p-6 font-serif text-base leading-8 outline-none" /><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-main)] p-4"><span className="text-xs text-[var(--text-muted)]">{proposal.replacement.split(/\s+/).filter(Boolean).length.toLocaleString()} palabras · Puedes editar antes de aprobar.</span><button type="button" onClick={() => setIsExpanded(false)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white"><Check size={14} /> Terminar revisión</button></div></div></div>}
 
             <div className="mt-4 flex flex-wrap gap-2">
                 {!proposal && (

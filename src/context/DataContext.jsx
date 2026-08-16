@@ -558,18 +558,23 @@ export const DataProvider = ({ children }) => {
     const handleSelectChapter = async (chapter, bookIdOverride = null) => {
         await flushAllSaves();
 
-        let chapterToActivate = chapter;
+        const chapterReference = typeof chapter === 'string'
+            ? chapters.find((item) => item.id === chapter)
+            : chapter;
+        if (!chapterReference) return;
+
+        let chapterToActivate = chapterReference;
         const bookId = bookIdOverride || (activeBook ? activeBook.id : null);
 
         // LAZY LOAD: If chapter exists but content is not loaded, fetch it now
-        if (chapter && !chapter.isLoaded && bookId) {
+        if (chapterReference && !chapterReference.isLoaded && bookId) {
             try {
-                const fullChapter = await getChapter(bookId, chapter.id);
+                const fullChapter = await getChapter(bookId, chapterReference.id);
                 if (fullChapter) {
                     const safeContent = sanitizeHtml(fullChapter.content);
                     chapterToActivate = { ...fullChapter, content: safeContent, isLoaded: true };
                     // Update master list with the now-loaded chapter (prevents re-fetching)
-                    setChapters(prev => prev.map(ch => ch.id === chapter.id ? chapterToActivate : ch));
+                    setChapters(prev => prev.map(ch => ch.id === chapterReference.id ? chapterToActivate : ch));
                 }
             } catch (error) {
                 console.error("Lazy loading failed, using metadata-only chapter", error);
@@ -595,8 +600,8 @@ export const DataProvider = ({ children }) => {
             }
         }
         setActiveView('editor');
-        if (bookId && chapter) {
-            localStorage.setItem(`lastChapter_${bookId}`, chapter.id);
+        if (bookId && chapterReference) {
+            localStorage.setItem(`lastChapter_${bookId}`, chapterReference.id);
         }
     }
 
