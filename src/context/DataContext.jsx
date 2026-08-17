@@ -126,24 +126,6 @@ export const DataProvider = ({ children }) => {
 
     // Auth Listener
     useEffect(() => {
-        // Bypass temporal únicamente para desarrollo local con el usuario de pruebas.
-        // En producción, Firebase Auth continúa siendo obligatorio.
-        if (import.meta.env.DEV) {
-            const devUser = {
-                uid: 'TZLJ51XTyONUVoGbLfG48O9irz33',
-                displayName: 'Usuario de pruebas',
-                email: 'test@local.dev',
-                photoURL: null,
-            };
-            setUser(devUser);
-            setProfile({ id: devUser.uid, displayName: devUser.displayName, email: devUser.email, photoURL: devUser.photoURL });
-            getUserProfile(devUser.uid).then((userProfile) => {
-                if (userProfile) setProfile(userProfile);
-            }).catch((error) => console.warn('Perfil de pruebas no disponible; se usará el perfil local:', error));
-            setAuthLoading(false);
-            return undefined;
-        }
-
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
             if (currentUser) {

@@ -17,8 +17,8 @@ const LibraryView = lazy(() => import('./components/LibraryView'))
 const IAStudioNext = lazy(() => import('./components/ia-studio-next/IAStudioNext'))
 const CharacterToolRoom = lazy(() => import('./components/toolrooms/CharacterToolRoom'))
 const ConsistencyToolRoom = lazy(() => import('./components/toolrooms/ConsistencyToolRoom'))
+const ConstructorGlobal = lazy(() => import('./components/toolrooms/ConstructorGlobal'))
 const CoWriterRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoWriterRoom: Component }) => ({ default: Component })))
-const WorldRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ WorldRoom: Component }) => ({ default: Component })))
 const NarratorRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ NarratorRoom: Component }) => ({ default: Component })))
 const CoherenceRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoherenceRoom: Component }) => ({ default: Component })))
 
@@ -204,7 +204,9 @@ function AppContent() {
       case 'toolroom:cowriter':
         return <CoWriterRoom />;
       case 'toolroom:world':
-        return <WorldRoom />;
+        return <ConstructorGlobal />;
+      case 'toolroom:global-constructor':
+        return <ConstructorGlobal />;
       case 'toolroom:narrator':
         return <NarratorRoom />;
       case 'toolroom:coherence':

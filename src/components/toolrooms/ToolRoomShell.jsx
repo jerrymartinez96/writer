@@ -1,6 +1,5 @@
 import React from 'react';
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, Save } from 'lucide-react';
-import { useToolRooms } from '../../context/ToolRoomContext';
 
 const accentClasses = {
     amber: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
@@ -17,8 +16,7 @@ const statusLabels = {
     saved: 'Guardado',
 };
 
-const ToolRoomShell = ({ room, status = 'ready', children, context, title, description, headerAction }) => {
-    const { returnToIAStudio } = useToolRooms();
+const ToolRoomShell = ({ room, status = 'ready', children, context, title, headerAction }) => {
     const Icon = room.icon;
     const statusText = statusLabels[status] || statusLabels.ready;
 
@@ -48,6 +46,7 @@ const ToolRoomShell = ({ room, status = 'ready', children, context, title, descr
 
             <div className="flex-1 min-h-0 overflow-y-auto">
                 <div className="max-w-[1500px] mx-auto p-4 lg:p-8">
+                    {context && <div className="mb-5">{context}</div>}
                     {children}
                 </div>
             </div>

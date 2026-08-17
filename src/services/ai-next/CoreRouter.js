@@ -57,6 +57,18 @@ const hasPreservedConstraint = (text) => includesAny(text, [
 const looksLikePatch = (text) => !hasPreservedConstraint(text) && includesAny(text, ['cambia ', 'cambiar ', 'corrige ', 'corregir ', 'reemplaza ', 'reemplazar ', 'actualiza ', 'actualizar ', 'modifica ', 'modificar ']);
 const looksLikeAnalysis = (text) => includesAny(text, ['analiza', 'analizar', 'revisa', 'revisar', 'audita', 'auditar', 'detecta', 'detectar', 'evalua', 'evalúa']);
 const looksLikeSuggestion = (text) => includesAny(text, ['sugiere', 'sugerir', 'dame ideas', 'propone', 'proponer', 'que te parece', 'qué te parece', 'quizas', 'quizá']);
+const looksLikeNarrativeChange = (text) => includesAny(text, [
+    'trama', 'arco narrativo', 'redencion', 'redención', 'lealtad', 'traicion', 'traición',
+    'canon', 'continuidad', 'historia', 'personaje', 'capitulo', 'capítulo', 'master doc',
+    'documento de estructura', 'estructura de capitulos', 'estructura de capítulos',
+]);
+
+const getNarrativeImpact = (text) => {
+    const mentionsDocuments = (text.match(/\b(capitulo|capítulo|documento|personaje|casa|conde|vizcondesa)s?\b/g) || []).length;
+    if (mentionsDocuments >= 3 || includesAny(text, ['todos los capitulos', 'todos los capítulos', 'toda la obra', 'master doc', 'documento de estructura'])) return 'high';
+    if (mentionsDocuments >= 1 || looksLikeNarrativeChange(text)) return 'medium';
+    return 'low';
+};
 
 /**
  * Clasifica sin llamar al modelo. Esta primera versión es deliberadamente
@@ -85,13 +97,22 @@ export const classifyCoreRequest = (envelope) => {
 
     if (looksLikePatch(text)) {
         const multi = looksLikeMultiPatch(text);
+        const impactLevel = getNarrativeImpact(text);
         return {
             route: 'core',
             capability: multi ? CORE_CAPABILITIES.MULTI_PATCH : CORE_CAPABILITIES.PATCH,
             toolId: null,
             confidence: multi ? 0.9 : 0.86,
             needsConfirmation: true,
-            reason: multi ? 'La solicitud parece afectar varios documentos o ubicaciones.' : 'La solicitud parece ser una modificación puntual.',
+            impactLevel,
+            recommendedTool: impactLevel === 'high' ? 'coherence' : impactLevel === 'medium' ? 'consistency' : null,
+            reason: impactLevel === 'high'
+                ? 'El cambio parece afectar la continuidad global y varios documentos.'
+                : impactLevel === 'medium'
+                    ? 'El cambio parece afectar la continuidad de uno o más documentos.'
+                    : multi
+                        ? 'La solicitud parece afectar varios documentos o ubicaciones.'
+                        : 'La solicitud parece ser una modificación puntual.',
         };
     }
 

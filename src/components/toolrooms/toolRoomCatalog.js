@@ -7,6 +7,17 @@ import { BookOpen, Globe2, Headphones, Network, ScanSearch, UsersRound } from 'l
  */
 export const TOOL_ROOMS = [
     {
+        id: 'global-constructor',
+        route: 'toolroom:global-constructor',
+        title: 'Constructor Global',
+        eyebrow: 'Canon y continuidad',
+        description: 'Crea, modifica y sincroniza el canon global de tu obra con impacto visible.',
+        icon: Globe2,
+        accent: 'indigo',
+        status: 'available',
+        contextRequirements: ['document'],
+    },
+    {
         id: 'characters',
         route: 'toolroom:characters',
         title: 'Diseñador de personajes',
@@ -38,6 +49,7 @@ export const TOOL_ROOMS = [
         accent: 'emerald',
         status: 'available',
         contextRequirements: ['world'],
+        visible: false,
     },
     {
         id: 'narrator',

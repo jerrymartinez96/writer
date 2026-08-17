@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import AIService from '../../services/AIService';
@@ -22,19 +22,51 @@ const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.dee
 const CoreOperationPanel = ({ request, capability, onClose }) => {
     const { activeBook, activeChapter, chapters = [], characters = [], worldItems = [], profile, updateCharacter, updateWorldItem, selectChapter } = useData();
     const [proposal, setProposal] = useState(null);
+    const [impactAnalysis, setImpactAnalysis] = useState(null);
     const [status, setStatus] = useState('idle');
     const [error, setError] = useState('');
     const isMulti = capability === 'multi_patch';
+    const requestedImpact = request?.impactLevel || 'low';
+    const impactRank = { low: 0, medium: 1, high: 2 };
     const scopedDocuments = useMemo(() => {
         const chapterIds = request?.context?.chapterIds || [];
         const characterIds = request?.context?.characterIds || [];
         const worldItemIds = request?.context?.worldItemIds || [];
         const scopedChapters = chapterIds.length ? chapters.filter((item) => chapterIds.includes(item.id)) : (activeChapter ? [activeChapter] : chapters.slice(0, isMulti ? 12 : 1));
         const scopedCharacters = characterIds.length ? characters.filter((item) => characterIds.includes(item.id)) : characters.slice(0, isMulti ? 12 : 0);
-        const scopedWorldItems = worldItemIds.length ? worldItems.filter((item) => worldItemIds.includes(item.id)) : worldItems.slice(0, isMulti ? 12 : 0);
+        const baseWorldItems = worldItemIds.length ? worldItems.filter((item) => worldItemIds.includes(item.id)) : worldItems.slice(0, isMulti ? 12 : 0);
+        const masterDocs = ['system_core', 'system_estructura'];
+        const scopedWorldItems = impactRank[requestedImpact] >= impactRank.medium
+            ? [...baseWorldItems, ...worldItems.filter((item) => masterDocs.includes(item.id))].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+            : baseWorldItems;
         return { chapters: scopedChapters, characters: scopedCharacters, worldItems: scopedWorldItems };
-    }, [request, chapters, characters, worldItems, activeChapter, isMulti]);
+    }, [request, chapters, characters, worldItems, activeChapter, isMulti, requestedImpact]);
     const contextText = useMemo(() => [...scopedDocuments.chapters.map((item) => `[chapter:${item.id}] ${item.title}\n${item.content || ''}`), ...scopedDocuments.worldItems.map((item) => `[world:${item.id}] ${item.title}\n${item.content || ''}`), ...scopedDocuments.characters.map((item) => `[character:${item.id}] ${item.name}\n${item.description || ''}`)].join('\n\n'), [scopedDocuments]);
+
+    const analyzeImpact = useCallback(async () => {
+        setStatus('analyzing'); setError('');
+        try {
+            const key = getApiKey(profile);
+            if (!key) throw new Error('Configura una API Key de DeepSeek para analizar el impacto.');
+            const prompt = `Analiza el impacto narrativo de esta solicitud sin modificar documentos. Devuelve únicamente JSON con esta forma: {"summary":"...","impact":"low|medium|high","affectedDocuments":["..."],"risks":["..."],"recommendation":"..."}. Usa solo IDs y títulos presentes en los documentos. Solicitud: ${request.message}\n\nDocumentos disponibles:\n${contextText}`;
+            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.1, useJsonMode: true, enableTools: false, max_tokens: 2200 }));
+            const result = parseJson(raw);
+            const detectedImpact = ['low', 'medium', 'high'].includes(result.impact) ? result.impact : requestedImpact;
+            const impact = impactRank[detectedImpact] >= impactRank[requestedImpact] ? detectedImpact : requestedImpact;
+            setImpactAnalysis({
+                summary: String(result.summary || 'No se obtuvo un resumen del impacto.'),
+                impact,
+                affectedDocuments: Array.isArray(result.affectedDocuments) ? result.affectedDocuments : [],
+                risks: Array.isArray(result.risks) ? result.risks : [],
+                recommendation: String(result.recommendation || ''),
+            });
+            setStatus('idle');
+        } catch (requestError) { setError(requestError?.message || 'No se pudo analizar el impacto.'); setStatus('error'); }
+    }, [contextText, profile, request.message, requestedImpact]);
+
+    useEffect(() => {
+        if (requestedImpact !== 'low' && !impactAnalysis && status === 'idle') analyzeImpact();
+    }, [analyzeImpact, impactAnalysis, requestedImpact, status]);
 
     const generate = async () => {
         setStatus('loading'); setError('');
@@ -42,7 +74,7 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
             const key = getApiKey(profile);
             if (!key) throw new Error('Configura una API Key de DeepSeek para preparar cambios.');
             const limit = isMulti ? 'uno o más parches solo donde sean necesarios' : 'exactamente un parche';
-            const prompt = `Eres el Core de edición. Prepara ${limit}. Devuelve únicamente JSON: {"summary":"texto plano","patches":[{"docId":"ID exacto","title":"texto plano","original":"fragmento exacto","content":"reemplazo en texto plano"}]}. Está estrictamente prohibido usar HTML, Markdown, negritas, títulos especiales, listas con formato o cualquier markup. Usa solo texto plano y saltos de línea simples. No inventes IDs. El fragmento original debe copiarse literalmente del contexto y content debe conservar lo no afectado. Solicitud: ${request.message}\n\nDocumentos disponibles:\n${contextText}`;
+            const prompt = `Eres el Core de edición. Prepara ${limit}. Devuelve únicamente JSON: {"summary":"texto plano","patches":[{"docId":"ID exacto","title":"texto plano","original":"fragmento exacto","content":"reemplazo en texto plano"}]}. Está estrictamente prohibido usar HTML, Markdown, negritas, títulos especiales, listas con formato o cualquier markup. Usa solo texto plano y saltos de línea simples. No inventes IDs. El fragmento original debe copiarse literalmente del contexto y content debe conservar lo no afectado. Considera este análisis previo: ${JSON.stringify(impactAnalysis || {})}. Solicitud: ${request.message}\n\nDocumentos disponibles:\n${contextText}`;
             const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.2, useJsonMode: true, enableTools: false, max_tokens: 5000 }));
             const result = parseJson(raw);
             if (!Array.isArray(result.patches) || result.patches.length === 0) throw new Error('La IA no devolvió parches aplicables.');
@@ -78,10 +110,11 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
     };
 
     return <section className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
-        <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-black uppercase tracking-[0.16em] text-amber-600">Operación Core · {isMulti ? 'Multiparche' : 'Parche'}</p><p className="mt-1 text-sm font-black">{status === 'saved' ? 'Cambios guardados' : proposal ? 'Revisa antes de aprobar' : 'Preparar cambios seguros'}</p></div><button type="button" onClick={onClose} disabled={status === 'saving'} className="rounded-lg p-1 text-[var(--text-muted)] hover:text-red-500 disabled:opacity-40"><X size={15} /></button></div>
+        <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-black uppercase tracking-[0.16em] text-amber-600">{requestedImpact !== 'low' ? 'Análisis de impacto' : `Operación Core · ${isMulti ? 'Multiparche' : 'Parche'}`}</p><p className="mt-1 text-sm font-black">{status === 'saved' ? 'Cambios guardados' : proposal ? 'Revisa antes de aprobar' : status === 'analyzing' ? 'Determinando tamaño del impacto…' : impactAnalysis ? 'Impacto analizado · prepara los cambios' : 'Analiza antes de preparar cambios'}</p></div><button type="button" onClick={onClose} disabled={status === 'saving' || status === 'analyzing'} className="rounded-lg p-1 text-[var(--text-muted)] hover:text-red-500 disabled:opacity-40"><X size={15} /></button></div>
+        {impactAnalysis && <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-3 text-xs leading-relaxed"><p className="font-black text-indigo-600">Análisis de impacto · {impactAnalysis.impact === 'high' ? 'Alto' : impactAnalysis.impact === 'medium' ? 'Medio' : 'Bajo'}</p><p className="mt-1">{impactAnalysis.summary}</p>{impactAnalysis.affectedDocuments.length > 0 && <p className="mt-2 text-[var(--text-muted)]"><strong>Documentos afectados:</strong> {impactAnalysis.affectedDocuments.join(', ')}</p>}{impactAnalysis.risks.length > 0 && <p className="mt-1 text-[var(--text-muted)]"><strong>Riesgos:</strong> {impactAnalysis.risks.join(' · ')}</p>}{impactAnalysis.recommendation && <p className="mt-1 text-[var(--text-muted)]">{impactAnalysis.recommendation}</p>}{['medium', 'high'].includes(impactAnalysis.impact) && <button type="button" disabled className="mt-3 inline-flex items-center rounded-xl border border-dashed border-indigo-500/40 px-3 py-2 text-[10px] font-black text-indigo-600 opacity-70">Herramienta avanzada · Próximamente</button>}</div>}
         {proposal && <div className="mt-4 space-y-3">{proposal.patches.map((patch, index) => <div key={`${patch.docId}-${index}`} className="grid grid-cols-1 gap-2 lg:grid-cols-2"><div className="rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] p-3"><p className="text-[9px] font-black uppercase text-[var(--text-muted)]">Original · {patch.title || patch.docId}</p><div className="mt-2 max-h-36 overflow-auto"><SanitizedContentPreview content={patch.original} /></div></div><div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3"><p className="text-[9px] font-black uppercase text-emerald-600">Reemplazo</p><div className="mt-2 max-h-36 overflow-auto"><SanitizedContentPreview content={patch.content} /></div></div></div>)}</div>}
         {error && <p className="mt-3 rounded-xl border border-red-500/25 bg-red-500/5 p-3 text-xs text-red-600">{error}</p>}
-        <div className="mt-4 flex flex-wrap gap-2">{!proposal && <button type="button" onClick={generate} disabled={status === 'loading'} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{status === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} {status === 'loading' ? 'Preparando…' : 'Preparar diff'}</button>}{status === 'review' && <><button type="button" onClick={approve} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50"><Check size={14} /> {status === 'saving' ? 'Guardando…' : 'Aprobar y guardar'}</button><button type="button" onClick={() => { setProposal(null); setStatus('idle'); }} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><X size={14} /> Rechazar</button><button type="button" onClick={generate} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><RefreshCw size={14} /> Regenerar</button></>}{status === 'saved' && <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-600"><Check size={14} /> Operación completada</span>}</div>
+        <div className="mt-4 flex flex-wrap gap-2">{!impactAnalysis && !proposal && <button type="button" onClick={analyzeImpact} disabled={status === 'analyzing'} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{status === 'analyzing' ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} {status === 'analyzing' ? 'Analizando impacto…' : 'Analizar impacto'}</button>}{impactAnalysis && !proposal && <button type="button" onClick={generate} disabled={status === 'loading'} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{status === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} {status === 'loading' ? 'Preparando…' : 'Preparar diff'}</button>}{status === 'review' && <><button type="button" onClick={approve} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50"><Check size={14} /> {status === 'saving' ? 'Guardando…' : 'Aprobar y guardar'}</button><button type="button" onClick={() => { setProposal(null); setStatus('idle'); }} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><X size={14} /> Rechazar</button><button type="button" onClick={generate} disabled={status === 'saving'} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><RefreshCw size={14} /> Regenerar</button></>}{status === 'saved' && <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-600"><Check size={14} /> Operación completada</span>}</div>
     </section>;
 };
 

@@ -14,7 +14,7 @@ const ToolRoomsView = () => {
             description="Entra a una sala diseñada para resolver una tarea concreta de tu proyecto, con el contexto adecuado y cambios siempre revisables."
         >
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {TOOL_ROOMS.map((room) => {
+                {TOOL_ROOMS.filter((room) => room.visible !== false).map((room) => {
                     const Icon = room.icon;
                     const isAvailable = room.status === 'available';
                     return (
@@ -46,4 +46,3 @@ const ToolRoomsView = () => {
 };
 
 export default ToolRoomsView;
-

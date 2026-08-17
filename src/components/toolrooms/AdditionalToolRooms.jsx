@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, BookOpen, CheckCircle2, Clock3, FilePlus2, FileText, Headphones, History, Link2, Loader2, Network, PenLine, Play, RefreshCw, Search, ShieldCheck, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import { useIAStudioContext } from '../../context/IAStudioContext';
 import { useToolRooms } from '../../context/ToolRoomContext';
 import { getToolRoom } from './toolRoomCatalog';
 import ToolRoomShell from './ToolRoomShell';
@@ -16,9 +15,7 @@ import useToolRoomLaunch from './useToolRoomLaunch';
 import { buildCoherencePatches, requestCoherenceAnalysis, validateCoherenceFinding } from '../../services/ai-next/ToolRoomAIService';
 import { useNarrador } from '../narrador/useNarrador';
 import NarradorPanel from '../narrador/NarradorPanel';
-import { updateChapterContent } from '../../services/db';
 import { saveEntitySnapshot } from '../../services/db';
-import { saveLocalSnapshot } from '../../services/localDb';
 import { applyPlainTextPatch } from '../../services/ai-next/plainText';
 
 const RoomContextBanner = ({ children, status = 'ready' }) => (
@@ -46,58 +43,13 @@ const CoherenceHistoryModal = ({ entries, onClose, onResume, onDelete, isResumin
 
 const CoWriterRoom = () => {
     const room = getToolRoom('cowriter');
-    const { activeBook, chapters = [], characters = [], worldItems = [], activeChapter, selectChapter, createChapter, setActiveView, lazyLoadChapters, updateWorldItem, saveDocumentSnapshot } = useData();
-    const { onContextChange } = useIAStudioContext();
-    const { getRoomState, updateRoomState, startMission, saveProposal, dismissProposal, launchInIAStudio } = useToolRooms();
+    const { chapters = [], characters = [], worldItems = [], activeChapter, selectChapter, createChapter, setActiveView, lazyLoadChapters, updateWorldItem, saveDocumentSnapshot } = useData();
+    const { getRoomState, updateRoomState } = useToolRooms();
     const state = getRoomState('cowriter');
-    const launch = useToolRoomLaunch('cowriter');
-    const selectedChapter = chapters.find((chapter) => chapter.id === (state.chapterId || launch?.context?.chapterIds?.[0])) || activeChapter || null;
-    const selectedChapterId = selectedChapter?.id;
+    const selectedChapter = chapters.find((chapter) => chapter.id === state.chapterId) || activeChapter || null;
     const [flow, setFlow] = useState(null);
     const [newChapterTitle, setNewChapterTitle] = useState('');
-    const supportingContext = useMemo(() => {
-        if (!launch?.context) return '';
-        const chapterIds = launch.context.chapterIds || [];
-        const characterIds = launch.context.characterIds || [];
-        const worldItemIds = launch.context.worldItemIds || [];
-        return [
-            ...chapters.filter((chapter) => chapterIds.includes(chapter.id) && chapter.id !== selectedChapterId).map((chapter) => `Capítulo de apoyo: ${chapter.title}\n${chapter.content || ''}`),
-            ...characters.filter((character) => characterIds.includes(character.id)).map((character) => `Personaje de apoyo: ${character.name}\n${character.description || ''}`),
-            ...worldItems.filter((item) => worldItemIds.includes(item.id)).map((item) => `Mundo de apoyo: ${item.title}\n${item.content || ''}`),
-        ].join('\n\n');
-    }, [chapters, characters, launch, selectedChapterId, worldItems]);
-    const [objective, setObjective] = useState(state.objective || launch?.prompt || '');
 
-    const prepareWorkspace = () => {
-        if (!selectedChapter) return;
-        onContextChange({ chapterIds: [selectedChapter.id], worldItemIds: [], characterIds: [] });
-        updateRoomState('cowriter', { chapterId: selectedChapter.id, objective, lastVisitedAt: new Date().toISOString() });
-        launchInIAStudio({
-            roomId: 'cowriter',
-            action: 'escribir',
-            prompt: objective.trim(),
-            contextLabel: selectedChapter.title,
-        });
-    };
-
-    const createProposal = () => {
-        if (!selectedChapter || !objective.trim()) return;
-        startMission('cowriter', objective, { chapterId: selectedChapter.id });
-        saveProposal('cowriter', {
-            title: `Trabajar en ${selectedChapter.title}`,
-            summary: `Preparar una propuesta para: “${objective.trim()}”. El texto original permanecerá intacto hasta que revises y apruebes los cambios.`,
-            contextLabel: selectedChapter.title,
-            risk: 'medium',
-        });
-    };
-
-    const applyCowriterProposal = async (replacement, proposal) => {
-        await updateChapterContent(activeBook.id, selectedChapter.id, replacement);
-        await saveEntitySnapshot(activeBook.id, 'chapters', selectedChapter.id, replacement, 'toolroom-cowriter');
-        await saveLocalSnapshot(selectedChapter.id, replacement, 'toolroom-cowriter');
-        await selectChapter(selectedChapter.id);
-        updateRoomState('cowriter', { missionStatus: 'completed', lastProposalSummary: proposal.summary });
-    };
     const createBlankChapter = async () => {
         const title = newChapterTitle.trim();
         if (!title) return;
@@ -106,13 +58,6 @@ const CoWriterRoom = () => {
         await selectChapter(created.id);
         updateRoomState('cowriter', { chapterId: created.id, missionStatus: 'idle' });
         setActiveView('editor');
-    };
-    const restoreChapter = async (content) => {
-        await saveEntitySnapshot(activeBook.id, 'chapters', selectedChapter.id, selectedChapter.content || '', 'before-restore');
-        await updateChapterContent(activeBook.id, selectedChapter.id, content);
-        await saveEntitySnapshot(activeBook.id, 'chapters', selectedChapter.id, content, 'restore');
-        await saveLocalSnapshot(selectedChapter.id, content, 'toolroom-cowriter-restore');
-        await selectChapter(selectedChapter.id);
     };
     const startChapterWriting = ({ structure, plan }) => {
         updateRoomState('cowriter', { designer: { ...(state.designer || {}), writingStructure: structure, writingPlan: plan } });
@@ -124,8 +69,7 @@ const CoWriterRoom = () => {
     return <ToolRoomShell room={room} status={flow === 'mission' && selectedChapter ? 'ready' : flow === 'designer' || flow === 'writer' ? 'ready' : 'pending'} context={<RoomContextBanner status={flow ? 'ready' : 'pending'}>{flow === 'mission' && selectedChapter ? `Capítulo seleccionado: ${selectedChapter.title}` : flow === 'writer' ? 'Redactar desde Estructura' : flow === 'designer' ? 'Diseñar el próximo capítulo' : 'Elige un flujo para comenzar'}</RoomContextBanner>}>
         {!flow ? <main className="mx-auto max-w-4xl rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-6 lg:p-10">
             <div className="mx-auto max-w-2xl text-center"><p className="text-[9px] font-black uppercase tracking-[0.2em] text-indigo-500">Punto de partida</p><h2 className="mt-3 text-3xl font-serif font-black sm:text-4xl">¿Qué quieres hacer?</h2><p className="mt-3 text-sm leading-relaxed text-[var(--text-muted)]">Elige un solo flujo para mantener el espacio despejado y concentrarte en tu siguiente avance.</p></div>
-            <div className="mt-9 grid grid-cols-1 gap-4 md:grid-cols-3">
-                <button type="button" onClick={() => setFlow('mission')} className="group rounded-3xl border border-indigo-500/30 bg-indigo-500/5 p-6 text-left transition-all hover:-translate-y-1 hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-500/10"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-500"><PenLine size={24} /></div><h3 className="mt-6 text-xl font-serif font-black">Crear misión de escritura</h3><p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">Trabaja sobre un capítulo existente con un objetivo concreto: tensión, diálogo, continuidad o estilo.</p><span className="mt-6 inline-flex items-center gap-2 text-xs font-black text-indigo-500">Elegir este flujo <span aria-hidden="true">→</span></span></button>
+            <div className="mt-9 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <button type="button" onClick={() => setFlow('writer')} className="group rounded-3xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-left transition-all hover:-translate-y-1 hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-500/10"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-500"><FilePlus2 size={24} /></div><h3 className="mt-6 text-xl font-serif font-black">Redactar desde Estructura</h3><p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">Analiza los capítulos planeados, elige el siguiente pendiente y genera un borrador revisable.</p><span className="mt-6 inline-flex items-center gap-2 text-xs font-black text-emerald-600">Analizar estructura <span aria-hidden="true">→</span></span></button>
                 <button type="button" onClick={() => setFlow('designer')} className="group rounded-3xl border border-violet-500/30 bg-violet-500/5 p-6 text-left transition-all hover:-translate-y-1 hover:border-violet-500 hover:shadow-xl hover:shadow-violet-500/10"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-500"><Sparkles size={24} /></div><h3 className="mt-6 text-xl font-serif font-black">Diseñar próximo capítulo</h3><p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">Analiza Estructura, encuentra lo que falta o convierte una idea en escenas listas para redactar.</p><span className="mt-6 inline-flex items-center gap-2 text-xs font-black text-violet-600">Empezar a diseñar <span aria-hidden="true">→</span></span></button>
             </div>
@@ -134,14 +78,7 @@ const CoWriterRoom = () => {
             {flow === 'chapter' ? <main className="mx-auto max-w-2xl rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-6 lg:p-9"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-500"><FilePlus2 size={24} /></div><p className="mt-6 text-[9px] font-black uppercase tracking-[0.18em] text-emerald-600">Nuevo capítulo</p><h2 className="mt-2 text-3xl font-serif font-black">Empieza con una página en blanco</h2><p className="mt-3 text-sm leading-relaxed text-[var(--text-muted)]">Crea el capítulo vacío y continúa escribiendo en el editor, sin preparar una misión ni pedir una propuesta a la IA.</p>{state.designer?.writingStructure && <div className="mt-6 rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-violet-500">Estructura aprobada</p><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">{state.designer.writingStructure}</pre></div>}<label className="mt-8 block"><span className="text-sm font-black">Título del capítulo</span><input autoFocus value={newChapterTitle} onChange={(event) => setNewChapterTitle(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && createBlankChapter()} placeholder="Ej. La última señal" className="mt-2 w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] px-4 py-3 text-sm outline-none focus:border-emerald-500" /></label><button type="button" onClick={createBlankChapter} disabled={!newChapterTitle.trim()} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"><BookOpen size={17} /> Crear y abrir editor</button></main> : flow === 'designer' ? <ChapterDesigner state={state} updateRoomState={updateRoomState} worldItems={worldItems} chapters={chapters} characters={characters} activeChapter={activeChapter} lazyLoadChapters={lazyLoadChapters} updateWorldItem={updateWorldItem} saveDocumentSnapshot={saveDocumentSnapshot} onWriteChapter={startChapterWriting} /> : <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
                 <aside className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-4"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">Documento de trabajo</p><h2 className="mt-1 text-lg font-serif font-black">Capítulos</h2><div className="mt-4 max-h-[430px] space-y-1.5 overflow-y-auto pr-1">{chapters.filter((chapter) => !chapter.isVolume).map((chapter) => <button key={chapter.id} type="button" onClick={() => { selectChapter(chapter.id); updateRoomState('cowriter', { chapterId: chapter.id }); }} className={`w-full rounded-xl px-3 py-2.5 text-left transition-colors ${selectedChapter?.id === chapter.id ? 'bg-indigo-500/10 text-indigo-500' : 'hover:bg-[var(--accent-soft)]'}`}><span className="text-[10px] font-black uppercase tracking-wider opacity-60">Capítulo</span><span className="mt-0.5 block truncate text-sm font-bold">{chapter.title}</span></button>)}{chapters.length === 0 && <p className="text-sm text-[var(--text-muted)]">No hay capítulos disponibles.</p>}</div></aside>
                 <main className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7">{!selectedChapter ? <EmptyRoomState icon={BookOpen} title="Elige una escena para empezar" text="Selecciona un capítulo existente para definir la misión de escritura." /> : <>
-                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-500">Misión de escritura</p><h2 className="mt-2 text-3xl font-serif font-black">Trabajar en {selectedChapter.title}</h2>
-                    <label className="block mt-8"><span className="text-sm font-black">¿Qué quieres conseguir?</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Ej. Aumentar la tensión sin cambiar el desenlace…" rows={4} className="mt-2 w-full resize-none rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-4 text-sm outline-none focus:border-indigo-500" /></label>
-                    <div className="mt-5 flex flex-wrap gap-2">{['Aumentar tensión', 'Pulir diálogo', 'Continuar escena', 'Mantener estilo'].map((suggestion) => <button key={suggestion} type="button" onClick={() => setObjective(suggestion)} className="rounded-full border border-[var(--border-main)] px-3 py-1.5 text-xs font-bold hover:border-indigo-500 hover:text-indigo-500">{suggestion}</button>)}</div>
-                    <div className="mt-8 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 text-sm text-[var(--text-muted)]"><strong className="text-[var(--text-main)]">Flujo seguro:</strong> primero se crea una misión y una propuesta pendiente. IA Studio generará el contenido y mostrará la revisión antes de aplicar cualquier cambio.</div>
-                    <div className="mt-5 flex flex-wrap gap-3"><button type="button" disabled={!objective.trim()} onClick={createProposal} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"><Wand2 size={17} /> Crear propuesta</button>{state.pendingProposal && <button type="button" onClick={prepareWorkspace} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-4 py-3 text-sm font-black hover:border-indigo-500 hover:text-indigo-500"><BookOpen size={17} /> Abrir en IA Studio</button>}</div>
-                    <ToolRoomAIProposal roomName="Coescritor" instruction={objective || 'Mejora la escena preservando hechos, tono y desenlace.'} sourceContent={selectedChapter.content || ''} contextContent={supportingContext} onApply={applyCowriterProposal} />
-                    <ToolRoomHistoryPanel bookId={activeBook?.id} collectionName="chapters" entityId={selectedChapter.id} currentContent={selectedChapter.content || ''} onRestore={restoreChapter} />
-                    <div className="mt-6"><ToolRoomProposalCard proposal={state.pendingProposal} onReview={prepareWorkspace} onDismiss={() => dismissProposal('cowriter')} /></div>
+                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 text-sm leading-relaxed text-[var(--text-muted)]"><strong className="text-[var(--text-main)]">Este espacio está dedicado a la redacción guiada:</strong> selecciona “Redactar desde Estructura” o “Diseñar próximo capítulo”. Para crear misiones globales sobre canon, capítulos, personajes o documentos maestros, usa el Constructor Global.</div>
                 </>}
                 </main></div>}
         </>}
