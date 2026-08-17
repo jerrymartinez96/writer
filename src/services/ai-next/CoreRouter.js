@@ -7,22 +7,22 @@ const includesAny = (text, terms) => terms.some((term) => text.includes(term));
 
 const ROUTE_RULES = [
     {
-        toolId: 'characters',
+        toolId: 'creative-studio',
         terms: ['crear personaje', 'nuevo personaje', 'ficha de personaje', 'personalidad', 'psicologia', 'psicología', 'arco narrativo', 'miedo al abandono', 'motivacion', 'motivación'],
         capability: 'character_development',
         reason: 'La solicitud requiere una ficha, psicología o evolución estructurada de personaje.',
     },
     {
-        toolId: 'cowriter',
+        toolId: 'creative-studio',
         terms: ['reescribe el capitulo', 'reescribir el capitulo', 'reescribe la escena', 'escribe la escena', 'continua la escena', 'continúa la escena', 'trabaja el capitulo', 'trabaja el capítulo', 'coescribe'],
         capability: 'chapter_writing',
         reason: 'La solicitud requiere un proceso de escritura o edición con objetivo narrativo.',
     },
     {
-        toolId: 'world',
+        toolId: 'global-constructor',
         terms: ['construye el mundo', 'construir el mundo', 'crea una ciudad', 'crea una cultura', 'reglas del mundo', 'cronologia', 'cronología', 'faccion', 'facción', 'lore profundo'],
-        capability: 'world_development',
-        reason: 'La solicitud requiere entidades, reglas o relaciones estructuradas del mundo.',
+        capability: 'canon_change',
+        reason: 'La solicitud requiere modificar reglas, lore o relaciones importantes del canon.',
     },
     {
         toolId: 'narrator',
@@ -31,9 +31,9 @@ const ROUTE_RULES = [
         reason: 'La solicitud requiere preparar o reproducir audio narrativo.',
     },
     {
-        toolId: 'coherence',
-        terms: ['audita el lore', 'auditar el lore', 'revisa toda la continuidad', 'revisar toda la continuidad', 'contradicciones de toda la obra', 'auditoria completa', 'auditoría completa', 'conflictos entre documentos'],
-        capability: 'continuity_audit',
+        toolId: 'audit',
+        terms: ['audita ', 'auditar ', 'auditoria ', 'auditoría ', 'revisa toda la continuidad', 'revisar toda la continuidad', 'contradicciones de toda la obra', 'conflictos entre documentos'],
+        capability: 'work_audit',
         reason: 'La solicitud requiere una auditoría cruzada de varios documentos.',
     },
 ];
@@ -54,7 +54,7 @@ const hasPreservedConstraint = (text) => includesAny(text, [
     'conservar ',
 ]);
 
-const looksLikePatch = (text) => !hasPreservedConstraint(text) && includesAny(text, ['cambia ', 'cambiar ', 'corrige ', 'corregir ', 'reemplaza ', 'reemplazar ', 'actualiza ', 'actualizar ', 'modifica ', 'modificar ']);
+const looksLikePatch = (text) => !hasPreservedConstraint(text) && includesAny(text, ['cambia ', 'cambiar ', 'corrige ', 'corregir ', 'reemplaza ', 'reemplazar ', 'actualiza ', 'actualizar ', 'modifica ', 'modificar ', 'elimina ', 'eliminar ', 'quita ', 'quitar ', 'borra ', 'borrar ', 'retira ', 'retirar ']);
 const looksLikeAnalysis = (text) => includesAny(text, ['analiza', 'analizar', 'revisa', 'revisar', 'audita', 'auditar', 'detecta', 'detectar', 'evalua', 'evalúa']);
 const looksLikeSuggestion = (text) => includesAny(text, ['sugiere', 'sugerir', 'dame ideas', 'propone', 'proponer', 'que te parece', 'qué te parece', 'quizas', 'quizá']);
 const looksLikeNarrativeChange = (text) => includesAny(text, [
@@ -78,9 +78,9 @@ export const classifyCoreRequest = (envelope) => {
     const text = normalize(envelope?.userMessage);
     if (!text) return { route: 'core', capability: CORE_CAPABILITIES.CHAT, toolId: null, confidence: 1, needsConfirmation: false, reason: 'No hay una instrucción para clasificar.' };
 
-    const coherenceRule = ROUTE_RULES.find((rule) => rule.toolId === 'coherence');
-    const specialized = (coherenceRule && includesAny(text, coherenceRule.terms))
-        ? coherenceRule
+    const auditRule = ROUTE_RULES.find((rule) => rule.toolId === 'audit');
+    const specialized = (auditRule && includesAny(text, auditRule.terms))
+        ? auditRule
         : ROUTE_RULES.find((rule) => includesAny(text, rule.terms));
     if (specialized && !looksLikePatch(text)) {
         const tool = getToolDefinition(specialized.toolId);
@@ -105,7 +105,7 @@ export const classifyCoreRequest = (envelope) => {
             confidence: multi ? 0.9 : 0.86,
             needsConfirmation: true,
             impactLevel,
-            recommendedTool: impactLevel === 'high' ? 'coherence' : impactLevel === 'medium' ? 'consistency' : null,
+            recommendedTool: impactLevel === 'high' || impactLevel === 'medium' ? 'global-constructor' : null,
             reason: impactLevel === 'high'
                 ? 'El cambio parece afectar la continuidad global y varios documentos.'
                 : impactLevel === 'medium'

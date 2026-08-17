@@ -2,7 +2,6 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft, Bookmark } from 'lucide-react'
 import confetti from 'canvas-confetti'
-import { uploadImageToCloudinary } from '../services/cloudinary'
 import { mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
 import HistoryModal from './HistoryModal'
@@ -23,16 +22,13 @@ import InlineNoteModal from './editor/components/InlineNoteModal'
 import DetectionModal from './editor/components/DetectionModal'
 import ReadingSettingsModal from './editor/components/ReadingSettingsModal'
 import ChapterInfoModal from './editor/components/ChapterInfoModal'
-import Narrador from './narrador/Narrador'
 
 const Editor = () => {
     const {
         chapters, activeChapter, saveChapterContent, characters, updateChapter, saveReadingBookmark,
-        activeView, selectChapter, setActiveView,
-        finalizeChapterCleanup, chapterLock, claimLock, releaseLock, saveChapterSnapshot,
-        activeBook, profile,
-        worldItems, updateCharacter, createCharacter, deleteCharacter,
-        updateWorldItem, createWorldItem, deleteWorldItem,
+        selectChapter, setActiveView,
+        finalizeChapterCleanup, chapterLock, claimLock, saveChapterSnapshot,
+        activeBook,
         activeWorldDoc, saveWorldDocContent,
         setSharedEditor
     } = useData();
@@ -82,7 +78,6 @@ const Editor = () => {
     
     // Selection & Metrics
     const [selectionMetrics, setSelectionMetrics] = useState({ words: 0, chars: 0, show: false });
-    const [totalWordCount, setTotalWordCount] = useState(0);
 
     // Refs to avoid stale closures in editor callbacks
     const charactersRef = useRef(characters);
@@ -461,7 +456,7 @@ const Editor = () => {
                 origin: { y: 0.6 },
                 colors: ['#6366f1', '#a855f7', '#ec4899', '#3b82f6']
             });
-        } catch (error) {
+        } catch {
             toast.error("Error al finalizar el capítulo.");
         } finally {
             setIsFinalizeModalOpen(false);
@@ -623,9 +618,6 @@ const Editor = () => {
                 saveChapterContentRef.current(html);
             }
 
-            const text = editor.getText();
-            setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
-
             if (window.ghostDetectTimeout) clearTimeout(window.ghostDetectTimeout);
             window.ghostDetectTimeout = setTimeout(() => {
                 const currentCharacters = charactersRef.current;
@@ -699,18 +691,14 @@ const Editor = () => {
             const currentHtml = editor.getHTML();
             if (currentHtml !== activeWorldDoc.content) {
                 editor.commands.setContent(activeWorldDoc.content || '', false);
-                const text = editor.getText();
-                setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
             }
         } else if (activeChapter) {
             const currentHtml = editor.getHTML();
             if (currentHtml !== activeChapter.content) {
                 editor.commands.setContent(activeChapter.content || '', false);
-                const text = editor.getText();
-                setTotalWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
             }
         }
-    }, [activeChapter?.id, activeChapter?.content, activeChapter?.lastSyncToken, activeWorldDoc?.id, activeWorldDoc?.content, editor]);
+    }, [activeChapter, activeWorldDoc, isWorldDocMode, editor]);
 
     // Effect 1: scroll to top when the chapter changes (normal behavior)
     useEffect(() => {
@@ -763,7 +751,7 @@ const Editor = () => {
             const timer = setTimeout(doScroll, 400);
             return () => clearTimeout(timer);
         }
-    }, [isFocusMode]);
+    }, [isFocusMode, activeChapter?.readingBookmark]);
 
 
     useEffect(() => {
@@ -1000,6 +988,16 @@ const Editor = () => {
                                                     </div>
                                                 </button>
 
+                                                {!isWorldDocMode && activeChapter && <button onClick={() => { setActiveView('toolroom:narrator'); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left cursor-pointer">
+                                                    <div className="w-8 h-8 rounded-lg bg-violet-500/10 text-violet-600 flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition-all">
+                                                        <Volume2 size={16} />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[11px] font-black uppercase tracking-widest">Abrir en Narrador</span>
+                                                        <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tighter">Preparar audio y guion</span>
+                                                    </div>
+                                                </button>}
+
                                                 <button onClick={() => { setIsDetectionModeModalOpen(true); setIsDesktopMoreOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--accent-soft)] text-[var(--text-main)] rounded-xl transition-all group text-left cursor-pointer">
                                                     <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition-all">
                                                         <ScanSearch size={16} />
@@ -1211,18 +1209,6 @@ const Editor = () => {
                 isOpen={isFinalizeModalOpen}
                 onClose={() => setIsFinalizeModalOpen(false)}
                 onConfirm={confirmFinalize}
-            />
-
-            {/* Narrador — Módulo de narración con Gemini Live */}
-            <Narrador
-                editor={editor}
-                isFocusMode={isFocusMode}
-                activeBook={activeBook}
-                activeChapter={activeChapter}
-                nextChapter={nextChapter}
-                onSelectChapter={selectChapter}
-                profile={profile}
-                toast={toast}
             />
 
             {/* Mobile Menu Tools Drawer */}

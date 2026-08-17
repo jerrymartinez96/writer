@@ -27,15 +27,15 @@ export const CORE_CAPABILITY_CATALOG = Object.freeze([
     },
     {
         id: CORE_CAPABILITIES.PATCH,
-        label: 'Parche',
+        label: 'Edición directa',
         description: 'Corrección puntual en un documento con vista previa.',
         canModify: true,
         requiresApproval: true,
     },
     {
         id: CORE_CAPABILITIES.MULTI_PATCH,
-        label: 'Multiparche',
-        description: 'Cambios coordinados en varios documentos de forma atómica.',
+        label: 'Edición coordinada',
+        description: 'Cambios coordinados de bajo riesgo con vista previa.',
         canModify: true,
         requiresApproval: true,
     },

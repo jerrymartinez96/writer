@@ -140,9 +140,9 @@ export const summarizeForSpeech = async (text, apiKey, model = 'deepseek-v4-flas
         model,
         {
             temperature: 0.2,
-            enableTools: false,
+            responseMode: 'tool',
+            toolChoice: 'required',
             tools: [RESUMEN_HABLADO_SCHEMA],
-            tool_choice: { type: 'function', function: { name: 'resumen_hablado' } },
         }
     );
 
@@ -150,7 +150,7 @@ export const summarizeForSpeech = async (text, apiKey, model = 'deepseek-v4-flas
     try {
         const parsed = JSON.parse(response);
         if (parsed?.texto_condensado) return parsed.texto_condensado;
-    } catch (err) { /* No era JSON → usar la respuesta directa */ }
+    } catch { /* No era JSON → usar la respuesta directa */ }
 
     return response || text;
 };

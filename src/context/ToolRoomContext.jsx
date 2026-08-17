@@ -2,7 +2,10 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useData } from './DataContext';
 
 const ToolRoomContext = createContext(null);
-const STORAGE_PREFIX = 'verne-toolrooms-v1';
+// v2 intentionally starts a clean room state after the Tool Room consolidation;
+// the removed rooms and their local flows are not migrated into the new model.
+const STORAGE_PREFIX = 'verne-toolrooms-v2';
+const PROCESS_STATUSES = ['draft', 'analyzing', 'alternatives_ready', 'plan_ready', 'awaiting_approval', 'applying', 'verifying', 'completed', 'needs_review', 'failed', 'cancelled'];
 
 const getStorageKey = (bookId) => `${STORAGE_PREFIX}:${bookId || 'no-book'}`;
 
@@ -14,10 +17,11 @@ const defaultRoomState = {
     missionId: null,
     lastVisitedAt: null,
     designer: null,
+    process: null,
 };
 
 export const ToolRoomProvider = ({ children }) => {
-    const { activeBook, activeView, setActiveView } = useData();
+    const { activeBook, setActiveView } = useData();
     const [roomState, setRoomState] = useState({});
 
     useEffect(() => {
@@ -53,7 +57,7 @@ export const ToolRoomProvider = ({ children }) => {
             console.warn('No se pudo guardar el origen de la Tool Room:', error);
         }
         setActiveView(route);
-    }, [activeView, setActiveView]);
+    }, [setActiveView]);
 
     const returnToIAStudio = useCallback(() => {
         let returnView = 'ia-studio';
@@ -96,6 +100,36 @@ export const ToolRoomProvider = ({ children }) => {
         ...(roomState[roomId] || {}),
     }), [roomState]);
 
+    const updateProcess = useCallback((roomId, patch) => {
+        updateRoomState(roomId, (previous) => {
+            const currentProcess = previous.process || {};
+            const nextProcess = typeof patch === 'function' ? patch(currentProcess) : patch;
+            const nextStatus = nextProcess?.status || currentProcess.status || 'draft';
+            return {
+                process: {
+                    ...currentProcess,
+                    ...nextProcess,
+                    status: PROCESS_STATUSES.includes(nextStatus) ? nextStatus : 'draft',
+                    updatedAt: new Date().toISOString(),
+                },
+            };
+        });
+    }, [updateRoomState]);
+
+    const getProcess = useCallback((roomId) => getRoomState(roomId).process || {
+        id: null,
+        status: 'draft',
+        request: '',
+        context: {},
+        impact: null,
+        alternatives: [],
+        selectedAlternativeId: null,
+        operations: [],
+        approvedOperationIds: [],
+        verification: null,
+        error: null,
+    }, [getRoomState]);
+
     const startMission = useCallback((roomId, objective, context = {}) => {
         const missionId = `${roomId}-${Date.now()}`;
         updateRoomState(roomId, {
@@ -130,7 +164,9 @@ export const ToolRoomProvider = ({ children }) => {
     const value = useMemo(() => ({
         roomState,
         getRoomState,
+        getProcess,
         updateRoomState,
+        updateProcess,
         startMission,
         saveProposal,
         dismissProposal,
@@ -138,7 +174,7 @@ export const ToolRoomProvider = ({ children }) => {
         openToolRoom,
         returnToIAStudio,
         launchInIAStudio,
-    }), [roomState, getRoomState, updateRoomState, startMission, saveProposal, dismissProposal, completeMission, openToolRoom, returnToIAStudio, launchInIAStudio]);
+    }), [roomState, getRoomState, updateRoomState, getProcess, updateProcess, startMission, saveProposal, dismissProposal, completeMission, openToolRoom, returnToIAStudio, launchInIAStudio]);
 
     return <ToolRoomContext.Provider value={value}>{children}</ToolRoomContext.Provider>;
 };

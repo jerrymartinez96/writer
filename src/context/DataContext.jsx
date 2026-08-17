@@ -56,26 +56,68 @@ const detectSignificantChange = (oldHtml, newHtml) => {
 
 const DataContext = createContext();
 
+// Only for local UI review. It is opt-in, development-only and never enabled in production.
+const visualReviewMode = import.meta.env.DEV && import.meta.env.VITE_VISUAL_REVIEW === 'true';
+const VISUAL_REVIEW_USER = {
+    uid: 'visual-review-user',
+    displayName: 'Revisión visual',
+    email: 'visual-review@local.test',
+    photoURL: null,
+};
+const VISUAL_REVIEW_BOOK = {
+    id: 'visual-review-book',
+    title: 'La ciudad de las mareas',
+    description: 'Libro ficticio para validar la interfaz de Tool Room.',
+    userId: VISUAL_REVIEW_USER.uid,
+};
+const VISUAL_REVIEW_CHAPTERS = [
+    {
+        id: 'visual-chapter-1',
+        title: 'Capítulo 1 · La llegada',
+        content: '<h2>La llegada</h2><p>Elena llegó al puerto cuando la niebla todavía cubría las casas.</p><p>En su bolsillo llevaba una llave que nadie debía reconocer.</p>',
+        orderIndex: 0,
+        isLoaded: true,
+        isVolume: false,
+    },
+    {
+        id: 'visual-chapter-2',
+        title: 'Capítulo 2 · La señal',
+        content: '<h2>La señal</h2><p>La torre encendió una luz azul por tercera noche consecutiva.</p><p>Elena entendió que alguien estaba esperando su regreso.</p>',
+        orderIndex: 1,
+        isLoaded: true,
+        isVolume: false,
+    },
+];
+const VISUAL_REVIEW_CHARACTERS = [
+    { id: 'visual-character-elena', name: 'Elena Varga', description: '<p>Protagonista reservada, observadora y determinada a descubrir quién construyó la torre.</p>' },
+    { id: 'visual-character-tomas', name: 'Tomás Orbe', description: '<p>Antiguo cartógrafo del puerto. Conoce la historia que todos prefieren olvidar.</p>' },
+];
+const VISUAL_REVIEW_WORLD_ITEMS = [
+    { id: 'system_estructura', title: 'Estructura de Capítulos', content: '<p>La historia avanza desde la llegada de Elena hacia el descubrimiento de la torre.</p>', isCategory: false },
+    { id: 'system_core', title: 'Información General', content: '<p>La ciudad solo aparece durante la marea baja.</p>', isCategory: false },
+    { id: 'visual-world-tower', title: 'La torre azul', content: '<p>Una torre abandonada que emite una señal cada tres noches.</p>', isCategory: false },
+];
+
 export const useData = () => useContext(DataContext);
 
 export const DataProvider = ({ children }) => {
-    const [books, setBooks] = useState([]);
+    const [books, setBooks] = useState(() => visualReviewMode ? [VISUAL_REVIEW_BOOK] : []);
     const pendingSaves = useRef({});
-    const [activeBook, setActiveBook] = useState(null);
-    const [chapters, setChapters] = useState([]);
-    const [activeChapter, setActiveChapter] = useState(null);
+    const [activeBook, setActiveBook] = useState(() => visualReviewMode ? VISUAL_REVIEW_BOOK : null);
+    const [chapters, setChapters] = useState(() => visualReviewMode ? VISUAL_REVIEW_CHAPTERS : []);
+    const [activeChapter, setActiveChapter] = useState(() => visualReviewMode ? VISUAL_REVIEW_CHAPTERS[0] : null);
     const [activeWorldDoc, setActiveWorldDoc] = useState(null); // { id, title, content }
-    const [characters, setCharacters] = useState([]);
-    const [worldItems, setWorldItems] = useState([]);
+    const [characters, setCharacters] = useState(() => visualReviewMode ? VISUAL_REVIEW_CHARACTERS : []);
+    const [worldItems, setWorldItems] = useState(() => visualReviewMode ? VISUAL_REVIEW_WORLD_ITEMS : []);
     const [trashItems, setTrashItems] = useState([]);
     const [activeView, setActiveView] = useState('editor'); // 'editor', 'characters', 'world', 'settings'
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !visualReviewMode);
     const [lastSaved, setLastSaved] = useState(new Date());
     const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
     const lastCloudContentRef = useRef({}); // { chapterId: string }
-    const [user, setUser] = useState(null);
-    const [profile, setProfile] = useState(null);
-    const [authLoading, setAuthLoading] = useState(true);
+    const [user, setUser] = useState(() => visualReviewMode ? VISUAL_REVIEW_USER : null);
+    const [profile, setProfile] = useState(() => visualReviewMode ? { displayName: VISUAL_REVIEW_USER.displayName, email: VISUAL_REVIEW_USER.email, aiConfig: { reasoningMode: true, reasoningEffort: 'high' } } : null);
+    const [authLoading, setAuthLoading] = useState(() => !visualReviewMode);
     const [sessionId] = useState(() => {
         const stored = localStorage.getItem('writer_device_id');
         if (stored) return stored;
@@ -126,6 +168,7 @@ export const DataProvider = ({ children }) => {
 
     // Auth Listener
     useEffect(() => {
+        if (visualReviewMode) return undefined;
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
             if (currentUser) {
@@ -158,6 +201,7 @@ export const DataProvider = ({ children }) => {
 
     // Load all books initially
     useEffect(() => {
+        if (visualReviewMode) return undefined;
         const loadBooks = async () => {
             if (!user) {
                 setBooks([]);
@@ -188,6 +232,7 @@ export const DataProvider = ({ children }) => {
 
     // Real-time synchronization and Presence for active chapter
     useEffect(() => {
+        if (visualReviewMode) return undefined;
         if (!activeBook || !activeChapter || !activeChapter.id) return;
 
         const unsubscribe = subscribeToChapter(activeBook.id, activeChapter.id, (cloudData) => {
@@ -235,6 +280,17 @@ export const DataProvider = ({ children }) => {
             setCharacters([]);
             setWorldItems([]);
             setTrashItems([]);
+            setLoading(false);
+            return;
+        }
+
+        if (visualReviewMode) {
+            setChapters(VISUAL_REVIEW_CHAPTERS);
+            setActiveChapter(VISUAL_REVIEW_CHAPTERS[0]);
+            setCharacters(VISUAL_REVIEW_CHARACTERS);
+            setWorldItems(VISUAL_REVIEW_WORLD_ITEMS);
+            setTrashItems([]);
+            setActiveView('editor');
             setLoading(false);
             return;
         }
@@ -544,6 +600,13 @@ export const DataProvider = ({ children }) => {
             ? chapters.find((item) => item.id === chapter)
             : chapter;
         if (!chapterReference) return;
+
+        if (visualReviewMode) {
+            setActiveChapter({ ...chapterReference, isLoaded: true });
+            setActiveWorldDoc(null);
+            setActiveView('editor');
+            return;
+        }
 
         let chapterToActivate = chapterReference;
         const bookId = bookIdOverride || (activeBook ? activeBook.id : null);
@@ -923,6 +986,11 @@ export const DataProvider = ({ children }) => {
         // 1. Update In-Memory State Immediately for UI responsiveness
         setActiveChapter(prev => ({ ...prev, content }));
         setChapters(prev => prev.map(ch => ch.id === activeChapter.id ? { ...ch, content } : ch));
+
+        if (visualReviewMode) {
+            setLastSaved(new Date());
+            return;
+        }
 
         const saveKey = `chap_${activeChapter.id}`;
         

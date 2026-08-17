@@ -12,16 +12,14 @@ export const TOOL_CATALOG = Object.freeze(TOOL_ROOMS.map((room) => ({
     status: room.status,
     requiredContext: room.contextRequirements || [],
     capabilities: {
-        characters: ['create_character', 'develop_psychology', 'design_arc', 'analyze_relationships'],
-        cowriter: ['write_scene', 'rewrite_document', 'develop_chapter', 'compare_versions'],
-        world: ['develop_world', 'analyze_relationships', 'build_timeline', 'analyze_impact'],
+        'global-constructor': ['analyze_impact', 'propose_alternatives', 'build_change_plan', 'verify_change'],
+        'creative-studio': ['create_character', 'design_chapter', 'design_scene', 'write_chapter'],
         narrator: ['narrate_chapter', 'prepare_segments', 'review_audio'],
-        coherence: ['audit_continuity', 'detect_conflicts', 'prepare_resolution'],
+        audit: ['audit_continuity', 'audit_consistency', 'validate_evidence', 'prepare_resolution'],
     }[room.id] || [],
-    canModify: ['characters', 'cowriter', 'world'].includes(room.id),
-    requiresApproval: ['characters', 'cowriter', 'world'].includes(room.id),
-    riskLevel: room.id === 'coherence' || room.id === 'narrator' ? 'low' : 'medium',
+    canModify: ['global-constructor', 'creative-studio'].includes(room.id),
+    requiresApproval: ['global-constructor', 'creative-studio'].includes(room.id),
+    riskLevel: room.id === 'audit' || room.id === 'narrator' ? 'low' : 'high',
 })));
 
 export const getToolDefinition = (toolId) => TOOL_CATALOG.find((tool) => tool.id === toolId) || null;
-

@@ -6,6 +6,7 @@ import { applyPatchesAtomically } from '../../services/ai/OperationEngine';
 import { saveEntitySnapshot } from '../../services/db';
 import SanitizedContentPreview from '../toolrooms/SanitizedContentPreview';
 import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions';
+import { buildRegisteredPrompt } from '../../services/ai-next/PromptRegistry';
 
 const parseJson = (value) => {
     if (value && typeof value === 'object') return value;
@@ -18,6 +19,7 @@ const parseJson = (value) => {
 };
 
 const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
+const IMPACT_RANK = { low: 0, medium: 1, high: 2 };
 
 const CoreOperationPanel = ({ request, capability, onClose }) => {
     const { activeBook, activeChapter, chapters = [], characters = [], worldItems = [], profile, updateCharacter, updateWorldItem, selectChapter } = useData();
@@ -27,7 +29,6 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
     const [error, setError] = useState('');
     const isMulti = capability === 'multi_patch';
     const requestedImpact = request?.impactLevel || 'low';
-    const impactRank = { low: 0, medium: 1, high: 2 };
     const scopedDocuments = useMemo(() => {
         const chapterIds = request?.context?.chapterIds || [];
         const characterIds = request?.context?.characterIds || [];
@@ -36,7 +37,7 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
         const scopedCharacters = characterIds.length ? characters.filter((item) => characterIds.includes(item.id)) : characters.slice(0, isMulti ? 12 : 0);
         const baseWorldItems = worldItemIds.length ? worldItems.filter((item) => worldItemIds.includes(item.id)) : worldItems.slice(0, isMulti ? 12 : 0);
         const masterDocs = ['system_core', 'system_estructura'];
-        const scopedWorldItems = impactRank[requestedImpact] >= impactRank.medium
+        const scopedWorldItems = IMPACT_RANK[requestedImpact] >= IMPACT_RANK.medium
             ? [...baseWorldItems, ...worldItems.filter((item) => masterDocs.includes(item.id))].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
             : baseWorldItems;
         return { chapters: scopedChapters, characters: scopedCharacters, worldItems: scopedWorldItems };
@@ -48,11 +49,11 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
         try {
             const key = getApiKey(profile);
             if (!key) throw new Error('Configura una API Key de DeepSeek para analizar el impacto.');
-            const prompt = `Analiza el impacto narrativo de esta solicitud sin modificar documentos. Devuelve únicamente JSON con esta forma: {"summary":"...","impact":"low|medium|high","affectedDocuments":["..."],"risks":["..."],"recommendation":"..."}. Usa solo IDs y títulos presentes en los documentos. Solicitud: ${request.message}\n\nDocumentos disponibles:\n${contextText}`;
-            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.1, useJsonMode: true, enableTools: false, max_tokens: 2200 }));
+            const prompt = buildRegisteredPrompt('coreImpact', { request: request.message, contextText });
+            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.1, responseMode: 'json', max_tokens: 2200 }));
             const result = parseJson(raw);
             const detectedImpact = ['low', 'medium', 'high'].includes(result.impact) ? result.impact : requestedImpact;
-            const impact = impactRank[detectedImpact] >= impactRank[requestedImpact] ? detectedImpact : requestedImpact;
+            const impact = IMPACT_RANK[detectedImpact] >= IMPACT_RANK[requestedImpact] ? detectedImpact : requestedImpact;
             setImpactAnalysis({
                 summary: String(result.summary || 'No se obtuvo un resumen del impacto.'),
                 impact,
@@ -74,8 +75,8 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
             const key = getApiKey(profile);
             if (!key) throw new Error('Configura una API Key de DeepSeek para preparar cambios.');
             const limit = isMulti ? 'uno o más parches solo donde sean necesarios' : 'exactamente un parche';
-            const prompt = `Eres el Core de edición. Prepara ${limit}. Devuelve únicamente JSON: {"summary":"texto plano","patches":[{"docId":"ID exacto","title":"texto plano","original":"fragmento exacto","content":"reemplazo en texto plano"}]}. Está estrictamente prohibido usar HTML, Markdown, negritas, títulos especiales, listas con formato o cualquier markup. Usa solo texto plano y saltos de línea simples. No inventes IDs. El fragmento original debe copiarse literalmente del contexto y content debe conservar lo no afectado. Considera este análisis previo: ${JSON.stringify(impactAnalysis || {})}. Solicitud: ${request.message}\n\nDocumentos disponibles:\n${contextText}`;
-            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.2, useJsonMode: true, enableTools: false, max_tokens: 5000 }));
+            const prompt = buildRegisteredPrompt('corePatch', { limit, impactAnalysis: impactAnalysis || {}, request: request.message, contextText });
+            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.2, responseMode: 'json', max_tokens: 5000 }));
             const result = parseJson(raw);
             if (!Array.isArray(result.patches) || result.patches.length === 0) throw new Error('La IA no devolvió parches aplicables.');
             if (!isMulti && result.patches.length !== 1) throw new Error('El parche puntual debe contener exactamente un cambio.');

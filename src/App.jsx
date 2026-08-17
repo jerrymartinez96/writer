@@ -15,12 +15,10 @@ const ManuscriptView = lazy(() => import('./components/ManuscriptView'))
 const TrashView = lazy(() => import('./components/TrashView'))
 const LibraryView = lazy(() => import('./components/LibraryView'))
 const IAStudioNext = lazy(() => import('./components/ia-studio-next/IAStudioNext'))
-const CharacterToolRoom = lazy(() => import('./components/toolrooms/CharacterToolRoom'))
-const ConsistencyToolRoom = lazy(() => import('./components/toolrooms/ConsistencyToolRoom'))
+const AuditToolRoom = lazy(() => import('./components/toolrooms/AuditToolRoom'))
 const ConstructorGlobal = lazy(() => import('./components/toolrooms/ConstructorGlobal'))
 const CoWriterRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoWriterRoom: Component }) => ({ default: Component })))
 const NarratorRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ NarratorRoom: Component }) => ({ default: Component })))
-const CoherenceRoom = lazy(() => import('./components/toolrooms/AdditionalToolRooms').then(({ CoherenceRoom: Component }) => ({ default: Component })))
 
 const LoadingScreen = () => (
   <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-editor)] text-[var(--text-muted)] p-12 animate-in fade-in duration-500">
@@ -33,7 +31,7 @@ const LoadingScreen = () => (
 );
 
 function AppContent() {
-  const { activeBook, activeChapter, activeWorldDoc, loading, createBook, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
+  const { activeBook, activeChapter, activeWorldDoc, loading, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
   const [timeSinceSave, setTimeSinceSave] = useState('Recién');
 
   useEffect(() => {
@@ -55,8 +53,6 @@ function AppContent() {
     const interval = setInterval(updateRelativeTime, 30000); // 30s update
     return () => clearInterval(interval);
   }, [lastSaved]);
-  const [isBookModalOpen, setIsBookModalOpen] = useState(false);
-  const [newBookTitle, setNewBookTitle] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -199,20 +195,14 @@ function AppContent() {
       case 'ia-studio':
       case 'ia-studio-next':
         return <IAStudioNext />;
-      case 'toolroom:characters':
-        return <CharacterToolRoom />;
-      case 'toolroom:cowriter':
+      case 'toolroom:creative-studio':
         return <CoWriterRoom />;
-      case 'toolroom:world':
-        return <ConstructorGlobal />;
       case 'toolroom:global-constructor':
         return <ConstructorGlobal />;
       case 'toolroom:narrator':
         return <NarratorRoom />;
-      case 'toolroom:coherence':
-        return <CoherenceRoom />;
-      case 'toolroom:consistency':
-        return <ConsistencyToolRoom />;
+      case 'toolroom:audit':
+        return <AuditToolRoom />;
       case 'world':
         return <WorldView />;
       case 'settings':
@@ -259,7 +249,7 @@ function AppContent() {
               <p className="text-[10px] text-[var(--text-muted)] truncate uppercase tracking-widest font-black opacity-70">
                 {activeView === 'editor'
                   ? (activeWorldDoc?.title || activeChapter?.title || "Sin capítulo seleccionado")
-                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'ia-studio' || activeView === 'ia-studio-next' ? 'IA Studio' : activeView === 'toolrooms' ? 'Tool Rooms' : activeView === 'toolroom:characters' ? 'Diseñador de personajes' : activeView === 'trash' ? 'Papelera' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
+                  : (activeView === 'world' ? 'Master Doc Central' : activeView === 'ia-studio' || activeView === 'ia-studio-next' ? 'IA Studio' : activeView === 'toolrooms' ? 'Tool Rooms' : activeView === 'toolroom:global-constructor' ? 'Constructor Global' : activeView === 'toolroom:audit' ? 'Auditoría de obra' : activeView === 'toolroom:creative-studio' ? 'Estudio creativo' : activeView === 'toolroom:narrator' ? 'Narrador' : activeView === 'trash' ? 'Papelera' : activeView === 'manuscript' ? 'Vista General' : 'Ajustes del libro')}
               </p>
             </div>
             {/* Mobile title fallback */}

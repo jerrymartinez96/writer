@@ -1,45 +1,8 @@
 import AIService, { COHERENCE_AUDIT_SCHEMA } from '../AIService';
 import { formatDraftText, toPlainText } from './plainText';
 import { getConfiguredAIOptions } from './AIRequestOptions';
-
-const parseJson = (value) => {
-    if (value && typeof value === 'object') return value;
-    const raw = String(value || '').trim();
-    if (!raw) throw new Error('La IA devolvió una respuesta vacía. Intenta nuevamente el análisis.');
-    const candidates = [raw];
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fenced?.[1]) candidates.unshift(fenced[1].trim());
-    const objectIndex = raw.indexOf('{');
-    const arrayIndex = raw.indexOf('[');
-    const firstObject = objectIndex === -1 ? arrayIndex : arrayIndex === -1 ? objectIndex : Math.min(objectIndex, arrayIndex);
-    if (firstObject >= 0) {
-        let depth = 0;
-        let quoted = false;
-        let escaped = false;
-        for (let index = firstObject; index < raw.length; index += 1) {
-            const character = raw[index];
-            if (quoted) {
-                if (escaped) escaped = false;
-                else if (character === '\\') escaped = true;
-                else if (character === '"') quoted = false;
-                continue;
-            }
-            if (character === '"') quoted = true;
-            else if (character === '{' || character === '[') depth += 1;
-            else if (character === '}' || character === ']') {
-                depth -= 1;
-                if (depth === 0) {
-                    candidates.push(raw.slice(firstObject, index + 1));
-                    break;
-                }
-            }
-        }
-    }
-    for (const candidate of candidates) {
-        try { return JSON.parse(candidate); } catch { /* intenta el siguiente formato */ }
-    }
-    throw new Error('La IA devolvió una respuesta que no es JSON válido. Intenta de nuevo.');
-};
+import { parseStructuredResponse, validateStructuredResponse } from './StructuredResponse';
+import { buildRegisteredPrompt } from './PromptRegistry';
 
 const COHERENCE_MIN_CONFIDENCE = 0.75;
 
@@ -178,61 +141,81 @@ const CHAPTER_FORMAT_TOOL = {
     },
 };
 
-const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000 }) => {
+const TOOL_ROOM_PROPOSAL_TOOL = {
+    type: 'function',
+    function: {
+        name: 'proponer_reemplazo_revisable',
+        description: 'Devuelve una propuesta de texto plano sin aplicar cambios al documento.',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                replacement: { type: 'string' },
+                risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+            },
+            required: ['summary', 'replacement', 'risk'],
+        },
+    },
+};
+
+const TOOL_ROOM_INSIGHT_TOOL = {
+    type: 'function',
+    function: {
+        name: 'reportar_insight_de_tool_room',
+        description: 'Devuelve un análisis de solo lectura con resumen y elementos accionables.',
+        parameters: { type: 'object', properties: { result: { type: 'string' }, summary: { type: 'string' }, items: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, detail: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] } }, required: ['title', 'detail'] } } }, required: ['result', 'summary', 'items'] },
+    },
+};
+
+export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const requestOptions = {
         temperature: 0.1,
-        useJsonMode: false,
-        enableTools: true,
+        responseMode: 'tool',
         tools: [schema],
-        toolChoice: 'auto',
-        reasoningMode: true,
+        toolChoice: 'required',
         max_tokens,
     };
     try {
         const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, requestOptions));
-        return parseJson(raw);
+        const parsed = parseStructuredResponse(raw, 'respuesta de Tool Room');
+        return validateStructuredResponse(parsed, schema, 'respuesta de Tool Room');
     } catch (error) {
         const errorMessage = String(error?.message || '');
-        const canRecover = errorMessage.includes('respuesta vacía') || errorMessage.includes('JSON válido');
+        const canRecover = errorMessage.includes('respuesta vacía') || errorMessage.includes('respuesta de Tool Room inválida') || errorMessage.includes('JSON válido');
         if (!canRecover) throw error;
-        // DeepSeek puede terminar el razonamiento sin emitir una tool o producir
-        // argumentos truncados. El segundo intento obliga una llamada limpia.
+        // El segundo intento conserva la configuración de razonamiento y solo
+        // vuelve a exigir el contrato estructurado.
         const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDebes llamar obligatoriamente a la herramienta disponible. Devuelve todos sus argumentos como JSON válido y completo; no escribas texto fuera de la herramienta.`, apiKey, getConfiguredAIOptions(profile, {
             ...requestOptions,
-            reasoningMode: false,
             toolChoice: 'required',
             max_tokens: Math.max(6000, Math.min(max_tokens, 12000)),
         }));
-        return parseJson(recoveryRaw);
+        const parsed = parseStructuredResponse(recoveryRaw, 'respuesta de Tool Room');
+        return validateStructuredResponse(parsed, schema, 'respuesta de Tool Room');
     }
 };
 
-const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000, reasoningMode = true }) => {
+const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const requestOptions = getConfiguredAIOptions(profile, {
         temperature: 0.35,
-        useJsonMode: true,
-        enableTools: false,
-        reasoningMode,
+        responseMode: 'json',
         max_tokens,
     });
     try {
         const raw = await AIService.sendMessage(prompt, apiKey, requestOptions);
-        return parseJson(raw);
+        return parseStructuredResponse(raw, 'respuesta narrativa');
     } catch (error) {
         if (!String(error?.message || '').includes('respuesta vacía')) throw error;
-        // Algunos modelos consumen el turno en razonamiento y no emiten el JSON.
-        // Reintentamos como una respuesta JSON directa para no perder la auditoría.
+        // Reintentamos con el mismo modo y configuración de razonamiento.
         const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDevuelve ahora únicamente el objeto JSON solicitado, sin razonamiento previo ni texto adicional.`, apiKey, {
             ...requestOptions,
             temperature: 0.15,
-            reasoningMode: false,
-            reasoningEffort: 'disabled',
         });
-        return parseJson(recoveryRaw);
+        return parseStructuredResponse(recoveryRaw, 'respuesta narrativa');
     }
 };
 
@@ -275,42 +258,13 @@ export const requestChapterStructureAnalysis = async ({ profile, structureConten
         title: String(chapter.title || ''),
         content: toPlainText(chapter.content || ''),
     })).filter((chapter) => chapter.id);
-    const prompt = [
-        'ROL: Eres el editor principal de continuidad de una novela. Esta tarea es de diagnóstico, no de escritura.',
-        'OBJETIVO: interpretar el documento Estructura completo, compararlo con el manuscrito y recomendar qué capítulo debe redactarse después.',
-        '',
-        'JERARQUÍA DE FUENTES:',
-        '1. El documento de Estructura define el plan previsto y sus títulos, posiciones, propósitos, conflictos y escenas.',
-        '2. El manuscrito define lo que realmente está escrito; nunca supongas que una intención de Estructura ya ocurrió.',
-        '3. Mundo, personajes y último capítulo sirven para comprobar continuidad, no para inventar capítulos ausentes.',
-        '',
-        'REGLAS DE ANÁLISIS:',
-        '- Extrae todos los capítulos identificables en Estructura, incluso si el texto usa formato libre.',
-        '- Conserva el orden y posición narrativa. No fusiones capítulos distintos.',
-        '- Marca written solo con evidencia clara en el manuscrito; marca empty solo si existe un capítulo equivalente sin contenido.',
-        '- Usa uncertain cuando título, hechos o contenido sugieren una coincidencia pero no permiten confirmarla.',
-        '- Una coincidencia debe comparar hechos, personajes, eventos y posición, no solo títulos parecidos.',
-        '- No marques automáticamente nada como confirmado: matches son sugerencias para revisión humana.',
-        '- Detecta cabos abiertos únicamente cuando estén respaldados por Estructura o manuscrito.',
-        '- Si Estructura está vacía o no contiene capítulos, devuelve chapters vacío y explica que debe diseñarse el siguiente capítulo.',
-        '',
-        'CONTRATO: llama a la herramienta analizar_estructura_capitulos. No escribas prosa ni devuelvas texto fuera de la herramienta.',
-        '',
-        'DOCUMENTO DE ESTRUCTURA (fuente de plan):',
-        toPlainText(structureContent) || '(vacío)',
-        '',
-        'CAPÍTULOS DEL MANUSCRITO (fuente de hechos escritos):',
-        JSON.stringify(normalizedChapters),
-        '',
-        'ÚLTIMO CAPÍTULO DISPONIBLE:',
-        JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null),
-        '',
-        'INFORMACIÓN GENERAL DEL MUNDO:',
-        toPlainText(worldContent) || '(sin información general)',
-        '',
-        'PERSONAJES:',
-        JSON.stringify(characters.map((character) => ({ name: character.name, description: toPlainText(character.description || '') }))),
-    ].join('\n');
+    const prompt = buildRegisteredPrompt('chapterStructureAnalysis', {
+        structureContent: toPlainText(structureContent),
+        normalizedChapters,
+        lastChapter: lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null,
+        worldContent: toPlainText(worldContent),
+        characters: characters.map((character) => ({ name: character.name, description: toPlainText(character.description || '') })),
+    });
     const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_STRUCTURE_ANALYSIS_TOOL, max_tokens: 12000 });
     const structureChapters = Array.isArray(parsed.chapters) ? parsed.chapters.map(normalizeStructureChapter) : [];
     const validIds = new Set(structureChapters.map((chapter) => chapter.id));
@@ -331,47 +285,14 @@ export const requestChapterStructureAnalysis = async ({ profile, structureConten
 };
 
 export const requestChapterDraft = async ({ profile, title = '', plan = null, structure = '', sizeLabel = '', contextContent = '', lastChapter = null }) => {
-    const prompt = [
-        'ROL: Eres el novelista responsable de redactar un capítulo completo y el editor de continuidad que debe impedir contradicciones.',
-        'TAREA: escribe el capítulo indicado por la estructura aprobada. No entregues un resumen, esquema, muestra, explicación ni comentario editorial.',
-        '',
-        'ORDEN DE PRIORIDAD:',
-        '1. Estructura aprobada y escenas aprobadas: son la fuente de verdad del capítulo.',
-        '2. Continuidad del manuscrito y último capítulo: determina hechos, relaciones, tono y punto de partida.',
-        '3. Mundo y personajes: completan detalles compatibles, pero no autorizan inventar giros que contradigan el plan.',
-        '4. Instrucciones de estilo: se aplican siempre que no contradigan una fuente superior.',
-        '',
-        'PLANIFICACIÓN OBLIGATORIA:',
-        '- Desarrolla todas las escenas aprobadas en el orden recibido; no las omitas, fusiones ni sustituyas.',
-        '- Cada escena debe tener objetivo, acción, conflicto y consecuencia visible.',
-        '- Usa transiciones claras entre escenas y evita saltos temporales sin señal narrativa.',
-        '- El final debe dejar exactamente la consecuencia prevista por la estructura, no resolver cabos reservados para capítulos posteriores.',
-        '',
-        'CONTINUIDAD Y ESTILO:',
-        '- Conserva el punto de vista, persona narrativa, tiempo verbal, tono, registro y tratamiento de los diálogos del manuscrito.',
-        '- No introduzcas personajes, lugares, poderes, relaciones, fechas o hechos que no estén autorizados por el contexto.',
-        '- Si falta un detalle, elige la opción más conservadora y compatible; no rellenes el vacío con una revelación nueva.',
-        '- No repitas información que el último capítulo ya mostró salvo que sea necesario desde otro punto de vista.',
-        '',
-        'FORMATO Y COMPLETITUD:',
-        '- Devuelve prosa narrativa completa en texto plano.',
-        '- Separa cada párrafo con una línea en blanco; separa también los bloques de diálogo para que el editor pueda leerlos.',
-        '- No uses HTML, Markdown, encabezados técnicos, notas del autor, etiquetas de escena ni texto fuera del capítulo.',
-        '- No termines con una frase incompleta, una elipsis terminal, "[…]", "[...]", "continuará" o un resumen del resto.',
-        `- Tamaño objetivo: ${sizeLabel}. Permanece dentro del rango sin recortar escenas ni sustituirlas por un resumen.`,
-        '',
-        '',
-        `Título: ${title}`,
-        `Plan estructurado: ${JSON.stringify(plan || {})}`,
-        'Estructura aprobada completa:',
-        toPlainText(structure) || '(no disponible; usa el plan estructurado)',
-        '',
-        'Último capítulo:',
-        JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null),
-        '',
-        'Contexto completo de continuidad:',
-        toPlainText(contextContent) || '(sin contexto adicional)',
-    ].join('\n');
+    const prompt = buildRegisteredPrompt('chapterDraft', {
+        title,
+        plan,
+        structure: toPlainText(structure),
+        sizeLabel,
+        lastChapter: lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null,
+        contextContent: toPlainText(contextContent),
+    });
     const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_DRAFT_TOOL, max_tokens: 14000 });
     const replacement = formatDraftText(parsed.replacement || '');
     if (!replacement) throw new Error('La IA no devolvió un capítulo completo.');
@@ -400,18 +321,7 @@ export const requestChapterDraft = async ({ profile, title = '', plan = null, st
 export const requestChapterFormatting = async ({ profile, text = '' }) => {
     const original = toPlainText(text);
     if (!original) throw new Error('No hay texto para formatear.');
-    const prompt = [
-        'ROL: Eres un corrector de formato de lectura.',
-        'TAREA: organiza el texto completo para que sea legible en un editor narrativo.',
-        'REGLA ABSOLUTA: no cambies, elimines, añadas ni reordenes ninguna palabra, signo, diálogo o fragmento.',
-        'Solo puedes insertar saltos de línea dobles entre párrafos, bloques de diálogo y cambios claros de escena.',
-        'Conserva exactamente la ortografía, puntuación, comillas, guiones, nombres y orden original.',
-        'No resumas, no corrijas estilo, no reescribas y no agregues títulos.',
-        'Devuelve únicamente la respuesta de la herramienta aplicar_formateo_lectura.',
-        '',
-        'TEXTO ORIGINAL COMPLETO:',
-        original,
-    ].join('\n\n');
+    const prompt = buildRegisteredPrompt('chapterFormatting', { original });
     const parsed = await createStructuredRequest({ profile, prompt, schema: CHAPTER_FORMAT_TOOL, max_tokens: 14000 });
     const formattedText = formatDraftText(parsed.formattedText || '');
     const normalize = (value) => toPlainText(value).replace(/\s+/g, ' ').trim();
@@ -434,23 +344,13 @@ const normalizeDirection = (direction, index) => ({
 });
 
 export const requestChapterDirections = async ({ profile, idea = '', chapterPlan = null, lastChapter = null, openThreads = [], contextContent = '' }) => {
-    const prompt = [
-        'ROL: Eres un editor de desarrollo narrativo. Diseña posibilidades, pero no redactes prosa.',
-        'TAREA: propone exactamente tres direcciones realmente distintas para el próximo capítulo.',
-        'Las tres opciones deben conservar los hechos establecidos y responder a la idea del usuario.',
-        'Opción 1: conservadora, continúa el plan con el menor riesgo de continuidad.',
-        'Opción 2: aumenta la tensión o el costo emocional sin resolver prematuramente los conflictos.',
-        'Opción 3: más arriesgada, pero compatible con los hechos y con consecuencias narrativas claras.',
-        'Cada dirección debe explicar propósito, conflicto central, revelaciones posibles, consecuencias, riesgos y compatibilidad tonal.',
-        'No inventes una solución definitiva si la estructura indica que el conflicto debe continuar.',
-        'Devuelve únicamente el JSON solicitado; no incluyas comentarios fuera de él.',
-        '',
-        `IDEA DEL USUARIO:\n${idea || '(sin idea adicional)'}`,
-        `PLAN DETECTADO:\n${JSON.stringify(chapterPlan || {})}`,
-        `ÚLTIMO CAPÍTULO:\n${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}`,
-        `CABOS ABIERTOS:\n${JSON.stringify(openThreads)}`,
-        `CONTEXTO DE APOYO:\n${toPlainText(contextContent) || '(sin contexto adicional)'}`,
-    ].join('\n\n');
+    const prompt = buildRegisteredPrompt('chapterDirections', {
+        idea,
+        chapterPlan,
+        lastChapter: lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null,
+        openThreads,
+        contextContent: toPlainText(contextContent),
+    });
     const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 6500 });
     return { directions: Array.isArray(parsed.directions) ? parsed.directions.slice(0, 3).map(normalizeDirection) : [] };
 };
@@ -472,34 +372,29 @@ const normalizeScene = (scene, index) => ({
 
 export const requestChapterScene = async ({ profile, chapterPlan = null, direction = null, scenes = [], size = 'standard', lastChapter = null, contextContent = '', instruction = '' }) => {
     const nextNumber = scenes.length + 1;
-    const prompt = [
-        'ROL: Eres un diseñador de escenas, no un redactor de prosa.',
-        `TAREA: propone únicamente la escena ${nextNumber} del capítulo en el formato solicitado.`,
-        'La escena debe continuar lo aprobado, avanzar el conflicto y dejar una transición clara hacia la siguiente.',
-        'No repitas una escena aprobada, no resuelvas antes de tiempo el conflicto principal y no introduzcas personajes o hechos no autorizados.',
-        'Si una revelación está reservada para después, conviértela en indicio o tensión, no la reveles completa.',
-        'Cada campo debe ser concreto y accionable para un escritor: objetivo, lugar/momento, personajes, conflicto, acción, revelación, cambio emocional y transición.',
-        'Devuelve únicamente el objeto scene; no incluyas prosa narrativa ni explicaciones.',
-        '',
-        `TAMAÑO OBJETIVO: ${size}`,
-        `PLAN: ${JSON.stringify(chapterPlan || {})}`,
-        `DIRECCIÓN ELEGIDA: ${JSON.stringify(direction || {})}`,
-        `ESCENAS APROBADAS: ${JSON.stringify(scenes)}`,
-        `ÚLTIMO CAPÍTULO: ${JSON.stringify(lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null)}`,
-        `CONTEXTO: ${toPlainText(contextContent) || '(sin contexto adicional)'}`,
-        `INSTRUCCIÓN ADICIONAL: ${instruction || '(ninguna)'}`,
-    ].join('\n\n');
+    const prompt = buildRegisteredPrompt('chapterScene', {
+        nextNumber,
+        size,
+        chapterPlan,
+        direction,
+        scenes,
+        lastChapter: lastChapter ? { title: lastChapter.title, content: toPlainText(lastChapter.content || '') } : null,
+        contextContent: toPlainText(contextContent),
+        instruction,
+    });
     const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 4500 });
     if (!parsed.scene) throw new Error('La IA no devolvió una escena válida.');
     return normalizeScene(parsed.scene, nextNumber - 1);
 };
 
 const normalizeConsistencyFinding = (finding, index, allowedIds) => {
-    const documentId = String(finding?.documentId || '');
+    const documentIds = Array.isArray(finding?.documentIds) ? finding.documentIds.map(String).filter((id) => allowedIds.has(id)) : [];
+    const documentId = String(finding?.documentId || documentIds[0] || '');
     if (!allowedIds.has(documentId)) return null;
     return {
         id: String(finding?.id || `consistency-${Date.now()}-${index}`),
         documentId,
+        documentIds: documentIds.length ? documentIds : [documentId],
         title: String(finding?.title || 'Detalle para revisar'),
         excerpt: String(finding?.excerpt || finding?.context || ''),
         originalText: String(finding?.originalText || ''),
@@ -513,6 +408,24 @@ const normalizeConsistencyFinding = (finding, index, allowedIds) => {
     };
 };
 
+const CONSISTENCY_AUDIT_TOOL = {
+    type: 'function',
+    function: {
+        name: 'reportar_hallazgos_de_auditoria',
+        description: 'Reporta inconsistencias verificables, sin modificar documentos.',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                findings: { type: 'array', items: { type: 'object', properties: {
+                    id: { type: 'string' }, documentId: { type: 'string' }, documentIds: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, title: { type: 'string' }, excerpt: { type: 'string' }, originalText: { type: 'string' }, replacementText: { type: 'string' }, reason: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] }, confidence: { type: 'number' }, evidence: { type: 'array', items: { type: 'object', properties: { documentId: { type: 'string' }, quote: { type: 'string' } }, required: ['documentId', 'quote'] } },
+                }, required: ['title', 'category', 'reason', 'severity', 'confidence'] } },
+            },
+            required: ['summary', 'findings'],
+        },
+    },
+};
+
 export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'custom', query = '', canonical = '', documents = [], instruction = '' }) => {
     const normalizedDocuments = documents.map((document) => ({
         id: String(document.id || ''),
@@ -522,25 +435,8 @@ export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'c
     })).filter((document) => document.id && document.content);
     if (!normalizedDocuments.length) return { summary: 'No hay documentos con contenido suficiente para analizar.', findings: [] };
     const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
-    const prompt = `Eres un editor de continuidad y estilo para una obra narrativa. Busca detalles repetidos, desactualizados o variables entre documentos. No modifiques nada y no conviertas una coincidencia legítima en un error sin evidencia. Devuelve únicamente JSON válido con esta forma:
-{"summary":"...","findings":[{"id":"...","documentId":"...","category":"mulettilla|character|world|terminology|timeline|custom","title":"...","excerpt":"fragmento breve con contexto","originalText":"texto exacto que puede reemplazarse","replacementText":"reemplazo sugerido","reason":"por qué debe revisarse","severity":"low|medium|high","confidence":0.0}]}
-
-Reglas:
-- Cada finding debe apuntar a un documentId válido.
-- originalText debe contener el fragmento mínimo necesario para aplicar un cambio seguro y debe aparecer literalmente en el documento. Si quitar solo la frase dejaría una oración rota, incluye la oración completa en originalText y devuelve una versión reescrita completa en replacementText.
-- replacementText debe conservar una oración gramatical, su puntuación y el sentido narrativo. Para muletillas no devuelvas replacementText vacío: reescribe el fragmento o la oración de forma natural. Solo deja replacementText vacío cuando eliminar todo originalText sea claramente correcto y la oración siga siendo válida.
-- No propongas cambiar hechos solo porque aparecen una vez.
-- Para muletillas, revisa si pertenecen al personaje indicado y conserva usos intencionales. Si el usuario pide eliminar una muletilla, elimina también conectores, comas o construcciones que queden sobrantes.
-- Para detalles globales, compara la fuente de verdad con las apariciones y marca las dudosas con confianza baja.
-
-Tipo de auditoría: ${auditType}
-Elemento o búsqueda: ${query || '(detectar automáticamente)'}
-Versión correcta o fuente de verdad: ${canonical || '(no definida; solo detectar)'}
-Instrucción adicional: ${instruction || '(ninguna)'}
-
-Documentos:
-${JSON.stringify(normalizedDocuments)}`;
-    const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 9000 });
+    const prompt = buildRegisteredPrompt('consistencyAudit', { auditType, query, canonical, instruction, normalizedDocuments });
+    const parsed = await createStructuredRequest({ profile, prompt, schema: CONSISTENCY_AUDIT_TOOL, max_tokens: 9000 });
     const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds)).filter(Boolean).filter((finding) => finding.originalText || !finding.replacementText) : [];
     return { summary: String(parsed.summary || ''), findings };
 };
@@ -549,13 +445,7 @@ export const requestCoherenceAnalysis = async ({ profile, documents = [] }) => {
     const normalizedDocuments = normalizeDocuments(documents);
     if (normalizedDocuments.length < 2) return { summary: 'Se necesitan al menos dos documentos con contenido.', items: [] };
     const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
-    const prompt = `Eres un auditor de continuidad narrativa. Analiza exclusivamente los documentos JSON entregados y detecta contradicciones objetivas. No propongas soluciones todavía. No reportes diferencias de estilo, omisiones, dudas o hechos compatibles. Cada hallazgo debe tener evidencia textual de dos documentos y solo puede usar IDs presentes en la entrada.
-
-Devuelve únicamente JSON válido con esta forma. Usa los IDs solo en documentIds y en documentId de las evidencias; en títulos, afirmaciones, explicaciones y summary utiliza el nombre del documento, nunca su ID:
-{"summary":"...","findings":[{"documentIds":["id-a","id-b"],"category":"timeline|character|location|rule|fact|reference","title":"...","severity":"low|medium|high","confidence":0.0,"claimA":"...","claimB":"...","evidenceA":{"documentId":"...","quote":"..."},"evidenceB":{"documentId":"...","quote":"..."},"explanation":"..."}]}
-
-Documentos:
-${JSON.stringify(normalizedDocuments)}`;
+    const prompt = buildRegisteredPrompt('coherenceAnalysis', { normalizedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_DETECT_TOOL, max_tokens: 9000 });
     const items = (Array.isArray(parsed.findings) ? parsed.findings : []).map((item) => {
         const documentIds = Array.isArray(item?.documentIds) ? item.documentIds.map(String).slice(0, 2) : [];
@@ -583,13 +473,7 @@ ${JSON.stringify(normalizedDocuments)}`;
 
 export const validateCoherenceFinding = async ({ profile, finding, documents = [] }) => {
     const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
-    const prompt = `Verifica si el hallazgo siguiente es una contradicción objetiva. Responde únicamente JSON válido: {"status":"confirmed|rejected","confidence":0.0,"reason":"..."}. Confirma solo si las dos afirmaciones no pueden ser verdaderas al mismo tiempo y las citas respaldan el hallazgo.
-
-Hallazgo:
-${JSON.stringify(finding)}
-
-Documentos afectados:
-${JSON.stringify(affectedDocuments)}`;
+    const prompt = buildRegisteredPrompt('coherenceValidation', { finding, affectedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_VALIDATE_TOOL, max_tokens: 1800 });
     const status = parsed.status === 'confirmed' && Number(parsed.confidence) >= COHERENCE_MIN_CONFIDENCE ? 'confirmed' : 'rejected';
     return { ...finding, status, validationConfidence: Number(parsed.confidence) || 0, validationReason: String(parsed.reason || '') };
@@ -598,14 +482,7 @@ ${JSON.stringify(affectedDocuments)}`;
 export const requestCoherenceResolutionOptions = async ({ profile, finding, documents = [], force = false }) => {
     const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
     if (finding.status !== 'confirmed' && !force) throw new Error('Solo se pueden generar soluciones para una inconsistencia confirmada.');
-    const prompt = `Genera exactamente tres opciones distintas para resolver la inconsistencia confirmada. No modifiques documentos. Una opción debe minimizar cambios, otra puede cambiar el canon y otra puede introducir una explicación narrativa. Devuelve solo JSON válido:
-{"options":[{"id":"option-a","title":"...","description":"...","risk":"low|medium|high","impact":"...","preserves":["..."],"changes":["..."],"documentIds":["..."],"patchPlans":[{"documentId":"...","originalText":"...","replacementText":"...","reason":"..."}]}]}
-
-Hallazgo:
-${JSON.stringify(finding)}
-
-Documentos afectados:
-${JSON.stringify(affectedDocuments)}`;
+    const prompt = buildRegisteredPrompt('coherenceOptions', { finding, affectedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_OPTIONS_TOOL, max_tokens: 5000 });
     const options = Array.isArray(parsed.options) ? parsed.options.slice(0, 3).map((option, index) => ({
         id: String(option.id || `option-${index + 1}`),
@@ -625,16 +502,7 @@ ${JSON.stringify(affectedDocuments)}`;
 export const requestCoherenceCustomResolution = async ({ profile, finding, documents = [], instruction }) => {
     const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
     if (!String(instruction || '').trim()) throw new Error('Describe la solución alternativa que quieres trabajar.');
-    const prompt = `Convierte la idea del usuario en una única solución alternativa para la inconsistencia. Respeta la intención del usuario, señala sus consecuencias y no apliques cambios. Devuelve la solución mediante la herramienta disponible.
-
-Idea del usuario:
-${instruction}
-
-Hallazgo:
-${JSON.stringify(finding)}
-
-Documentos afectados:
-${JSON.stringify(affectedDocuments)}`;
+    const prompt = buildRegisteredPrompt('coherenceCustomResolution', { instruction, finding, affectedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_CUSTOM_OPTION_TOOL, max_tokens: 3500 });
     const option = parsed.option || parsed.options?.[0];
     if (!option) throw new Error('La IA no devolvió una versión alternativa válida.');
@@ -654,16 +522,7 @@ ${JSON.stringify(affectedDocuments)}`;
 
 export const buildCoherencePatches = async ({ profile, finding, option, documents = [] }) => {
     const affectedDocuments = normalizeDocuments(documents).filter((document) => option.documentIds.includes(document.id));
-    const prompt = `Construye parches exactos para aplicar la opción elegida. Modifica únicamente lo necesario. Devuelve solo JSON válido: {"patches":[{"documentId":"...","baseVersion":"...","originalText":"...","replacementText":"...","reason":"..."}]}. originalText debe existir literalmente en el documento; nunca devuelvas un reemplazo de documento completo ni HTML nuevo si no estaba en el original.
-
-Hallazgo:
-${JSON.stringify(finding)}
-
-Opción elegida:
-${JSON.stringify(option)}
-
-Documentos actuales:
-${JSON.stringify(affectedDocuments)}`;
+    const prompt = buildRegisteredPrompt('coherencePatches', { finding, option, affectedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_PATCHES_TOOL, max_tokens: 5000 });
     const allowedIds = new Set(option.documentIds);
     const patches = Array.isArray(parsed.patches) ? parsed.patches.map((patch) => ({
@@ -678,11 +537,14 @@ ${JSON.stringify(affectedDocuments)}`;
 };
 
 export const requestToolRoomProposal = async ({ profile, instruction, sourceContent, contextContent = '', roomName }) => {
-    const apiKey = getToolRoomApiKey(profile);
-    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
-    const prompt = `Eres la herramienta especializada ${roomName}. Devuelve únicamente JSON válido con esta forma exacta: {"summary":"resumen breve","replacement":"texto plano","risk":"low|medium|high"}. Está estrictamente prohibido usar HTML, Markdown, etiquetas, negritas, títulos especiales, listas con formato o cualquier markup. Usa solo texto plano y saltos de línea simples. No agregues explicaciones fuera del JSON. Conserva toda la información no afectada y trabaja solo sobre el contenido original. Usa el contexto de apoyo únicamente para mantener continuidad y no lo modifiques.\n\nObjetivo: ${instruction}\n\nContenido original editable:\n${toPlainText(sourceContent) || '(vacío)'}\n\nContexto de apoyo no editable:\n${toPlainText(contextContent) || '(sin contexto adicional)'}`;
-    const raw = await AIService.sendMessage(prompt, getToolRoomApiKey(profile), getConfiguredAIOptions(profile, { temperature: 0.35, useJsonMode: true, enableTools: false, max_tokens: 5000 }));
-    const result = parseJson(raw);
+    const prompt = buildRegisteredPrompt('toolRoomProposal', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent) });
+    let result;
+    try {
+        result = await createStructuredRequest({ profile, prompt, schema: TOOL_ROOM_PROPOSAL_TOOL, max_tokens: 5000, });
+    } catch (error) {
+        if (String(error?.message || '').includes('replacement')) throw new Error('La propuesta no contiene un replacement válido.');
+        throw error;
+    }
     if (!result.replacement || typeof result.replacement !== 'string') throw new Error('La propuesta no contiene un replacement válido.');
     return {
         summary: String(result.summary || 'Propuesta generada por la IA.'),
@@ -695,18 +557,15 @@ export const requestToolRoomInsight = async ({ profile, instruction, sourceConte
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const allowedIds = new Set(documentIds.map(String));
-    const prompt = `Eres la herramienta especializada ${roomName}. Debes comparar hechos entre documentos y reportar solo contradicciones objetivas. Usa exclusivamente la función reportar_incoherencias. No modifiques documentos.\n\nCriterio obligatorio: un hallazgo solo es válido si la afirmación del documento A y la afirmación del documento B no pueden ser verdaderas al mismo tiempo. No reportes dudas, omisiones, diferencias de estilo, mejoras narrativas, posibilidades interpretativas ni hechos compatibles. Cada hallazgo debe contener evidencia concreta de ambos documentos y explicar el conflicto. Si no existe una contradicción real, devuelve findings vacío.\n\nIDs válidos: ${JSON.stringify([...allowedIds])}\n\nObjetivo: ${instruction}\n\nDocumentos analizados. Cada bloque comienza con un ID válido y contiene texto plano:\n${toPlainText(sourceContent) || '(vacío)'}\n\nContexto de apoyo no analizable:\n${toPlainText(contextContent) || '(sin contexto adicional)'}`;
+    const prompt = buildRegisteredPrompt('toolRoomInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent), documentIds: [...allowedIds] });
     const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, {
         temperature: 0.15,
-        useJsonMode: false,
-        enableTools: true,
+        responseMode: 'tool',
         tools: [COHERENCE_AUDIT_SCHEMA],
-        // DeepSeek Thinking no admite tool_choice forzado. Como solo enviamos
-        // esta herramienta, `auto` sigue siendo determinista en este Room.
-        toolChoice: 'auto',
+        toolChoice: 'required',
         max_tokens: 8000,
     }));
-    const parsed = parseJson(raw);
+    const parsed = parseStructuredResponse(raw, 'auditoría de Tool Room');
     const candidates = Array.isArray(parsed.findings) ? parsed.findings : (Array.isArray(parsed.items) ? parsed.items : []);
     let rejected = 0;
     const items = candidates.map((item) => {
@@ -730,6 +589,12 @@ export const requestToolRoomInsight = async ({ profile, instruction, sourceConte
     }));
     console.info('[CoherenceAudit] Resultado:', { candidateCount: candidates.length, acceptedCount: items.length, rejectedCount: rejected, allowedDocumentCount: allowedIds.size });
     return { summary: String(parsed.summary || ''), items };
+};
+
+export const requestNarrativeInsight = async ({ profile, instruction, sourceContent, contextContent = '', roomName }) => {
+    const prompt = buildRegisteredPrompt('narrativeInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent) });
+    const parsed = await createStructuredRequest({ profile, prompt, schema: TOOL_ROOM_INSIGHT_TOOL, max_tokens: 5000 });
+    return { result: String(parsed.result || ''), summary: String(parsed.summary || ''), items: Array.isArray(parsed.items) ? parsed.items : [] };
 };
 
 export default requestToolRoomProposal;

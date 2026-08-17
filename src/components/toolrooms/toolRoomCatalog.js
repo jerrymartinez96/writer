@@ -1,55 +1,39 @@
-import { BookOpen, Globe2, Headphones, Network, ScanSearch, UsersRound } from 'lucide-react';
+import { BookOpen, ClipboardCheck, Globe2, Headphones } from 'lucide-react';
 
-/**
- * Catálogo único de Tool Rooms.
- * La navegación y las tarjetas consumen esta definición para evitar nombres
- * y rutas duplicadas entre componentes.
- */
+/** Catálogo único de los cuatro espacios especializados visibles en IA Studio. */
 export const TOOL_ROOMS = [
     {
         id: 'global-constructor',
         route: 'toolroom:global-constructor',
         title: 'Constructor Global',
         eyebrow: 'Canon y continuidad',
-        description: 'Crea, modifica y sincroniza el canon global de tu obra con impacto visible.',
+        description: 'Analiza, propone y aplica cambios importantes del canon con revisión completa.',
         icon: Globe2,
         accent: 'indigo',
         status: 'available',
         contextRequirements: ['document'],
     },
     {
-        id: 'characters',
-        route: 'toolroom:characters',
-        title: 'Diseñador de personajes',
-        eyebrow: 'Laboratorio narrativo',
-        description: 'Construye personajes consistentes, profundos y conectados con tu historia.',
-        icon: UsersRound,
-        accent: 'amber',
-        status: 'available',
-        contextRequirements: ['character'],
-    },
-    {
-        id: 'cowriter',
-        route: 'toolroom:cowriter',
-        title: 'Coescritor',
-        eyebrow: 'Escritura colaborativa',
-        description: 'Trabaja escenas y documentos con propuestas revisables de la IA.',
-        icon: BookOpen,
-        accent: 'indigo',
+        id: 'audit',
+        route: 'toolroom:audit',
+        title: 'Auditoría de obra',
+        eyebrow: 'Control de calidad',
+        description: 'Detecta contradicciones, inconsistencias y detalles que necesitan revisión.',
+        icon: ClipboardCheck,
+        accent: 'cyan',
         status: 'available',
         contextRequirements: ['document'],
     },
     {
-        id: 'world',
-        route: 'toolroom:world',
-        title: 'Constructor de mundo',
-        eyebrow: 'Lore y continuidad',
-        description: 'Explora relaciones, cronologías y reglas de tu universo narrativo.',
-        icon: Network,
-        accent: 'emerald',
+        id: 'creative-studio',
+        route: 'toolroom:creative-studio',
+        title: 'Estudio creativo',
+        eyebrow: 'Creación narrativa',
+        description: 'Diseña personajes, capítulos y escenas antes de convertirlos en texto.',
+        icon: BookOpen,
+        accent: 'violet',
         status: 'available',
-        contextRequirements: ['world'],
-        visible: false,
+        contextRequirements: ['document'],
     },
     {
         id: 'narrator',
@@ -61,28 +45,6 @@ export const TOOL_ROOMS = [
         accent: 'violet',
         status: 'available',
         contextRequirements: ['chapter'],
-    },
-    {
-        id: 'coherence',
-        route: 'toolroom:coherence',
-        title: 'Editor de coherencia',
-        eyebrow: 'Control de calidad',
-        description: 'Detecta contradicciones de personajes, tiempo, lugares y continuidad.',
-        icon: Globe2,
-        accent: 'cyan',
-        status: 'available',
-        contextRequirements: ['document'],
-    },
-    {
-        id: 'consistency',
-        route: 'toolroom:consistency',
-        title: 'Consistencia global',
-        eyebrow: 'Control transversal',
-        description: 'Encuentra muletillas, detalles variables y referencias desactualizadas en toda la obra.',
-        icon: ScanSearch,
-        accent: 'amber',
-        status: 'available',
-        contextRequirements: ['document'],
     },
 ];
 

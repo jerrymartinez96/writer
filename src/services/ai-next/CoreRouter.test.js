@@ -11,9 +11,9 @@ describe('CoreRouter', () => {
         ['multiparche', 'Actualiza el nombre de Elena por Elisa en todos los capítulos y documentos donde aparezca.', 'core', 'multi_patch'],
         ['personajes', 'Crea un personaje con miedo al abandono y diseña su arco narrativo.', 'toolroom', 'character_development'],
         ['coescritor', 'Reescribe la escena para aumentar la tensión sin cambiar el desenlace.', 'toolroom', 'chapter_writing'],
-        ['mundo', 'Construye una ciudad con reglas, facciones y una cronología propia.', 'toolroom', 'world_development'],
+        ['mundo', 'Construye una ciudad con reglas, facciones y una cronología propia.', 'toolroom', 'canon_change'],
         ['narrador', 'Narra el capítulo con una voz íntima y pausas dramáticas.', 'toolroom', 'narration'],
-        ['auditoría', 'Audita el lore y busca contradicciones de toda la obra.', 'toolroom', 'continuity_audit'],
+        ['auditoría', 'Audita el lore y busca contradicciones de toda la obra.', 'toolroom', 'work_audit'],
     ])('clasifica %s correctamente', (_name, message, expectedRoute, expectedCapability) => {
         const result = route(message);
         expect(result.route).toBe(expectedRoute);
@@ -22,7 +22,7 @@ describe('CoreRouter', () => {
 
     it('no convierte una restricción narrativa en un parche', () => {
         const result = route('Reescribe el capítulo manteniendo intacto el desenlace y sin modificar el protagonista.');
-        expect(result.toolId).toBe('cowriter');
+        expect(result.toolId).toBe('creative-studio');
         expect(result.capability).toBe('chapter_writing');
     });
 
@@ -42,7 +42,7 @@ describe('CoreRouter', () => {
 
     it('normaliza acentos al clasificar herramientas', () => {
         const result = route('Audita la cronología y busca contradicciones de toda la obra.');
-        expect(result.toolId).toBe('coherence');
+        expect(result.toolId).toBe('audit');
         expect(result.route).toBe('toolroom');
     });
 

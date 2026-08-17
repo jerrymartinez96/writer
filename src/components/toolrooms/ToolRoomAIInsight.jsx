@@ -1,19 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import { getToolRoomApiKey } from '../../services/ai-next/ToolRoomAIService';
-import AIService from '../../services/AIService';
-import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions';
-
-const parseJson = (value) => {
-    if (value && typeof value === 'object') return value;
-    const raw = String(value || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    try { return JSON.parse(raw); } catch {
-        const match = raw.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error('La IA no devolvió un resultado JSON válido.');
-        return JSON.parse(match[0]);
-    }
-};
+import { requestNarrativeInsight } from '../../services/ai-next/ToolRoomAIService';
 
 const ToolRoomAIInsight = ({ roomName, instruction, sourceContent = '', contextContent = '', buttonLabel = 'Consultar IA' }) => {
     const { profile } = useData();
@@ -25,11 +13,7 @@ const ToolRoomAIInsight = ({ roomName, instruction, sourceContent = '', contextC
         setStatus('loading');
         setError('');
         try {
-            const key = getToolRoomApiKey(profile);
-            if (!key) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
-            const prompt = `Eres la herramienta especializada ${roomName}. Devuelve únicamente JSON válido con las claves result, summary y items. Todos los valores deben ser texto plano: no uses HTML, Markdown, negritas, títulos especiales, listas con formato ni etiquetas. result debe ser un texto claro; items debe ser un arreglo de objetos con title, detail y severity cuando aplique. No modifiques documentos. Usa el contexto de apoyo solo para mantener continuidad.\n\nObjetivo: ${instruction}\n\nContenido principal:\n${sourceContent || '(vacío)'}\n\nContexto de apoyo:\n${contextContent || '(sin contexto adicional)'}`;
-            const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.25, useJsonMode: true, enableTools: false, max_tokens: 5000 }));
-            setResult(parseJson(raw));
+            setResult(await requestNarrativeInsight({ profile, roomName, instruction, sourceContent, contextContent }));
             setStatus('ready');
         } catch (requestError) {
             setError(requestError?.message || 'No se pudo completar la consulta.');

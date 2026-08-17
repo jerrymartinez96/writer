@@ -10,7 +10,7 @@ vi.mock('../AIService', () => ({
 const profile = { deepseekApiKey: 'test-key', aiConfig: { defaultModel: 'deepseek-v4', reasoningMode: true, reasoningEffort: 'max' } };
 
 describe('ToolRoomAIService', () => {
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => vi.resetAllMocks());
 
     it('separa el contenido editable del contexto de apoyo al construir la propuesta', async () => {
         AIService.sendMessage.mockResolvedValue('{"summary":"Mejora aplicada","replacement":"<p>Nuevo texto</p>","risk":"low"}');
@@ -32,6 +32,23 @@ describe('ToolRoomAIService', () => {
         expect(prompt).toContain('Personaje de apoyo: Elena');
     });
 
+    it('respeta el razonamiento desactivado en una solicitud estructurada', async () => {
+        AIService.sendMessage.mockResolvedValue('{"summary":"Sin cambios","replacement":"Texto revisado","risk":"low"}');
+
+        await requestToolRoomProposal({
+            profile: { ...profile, aiConfig: { ...profile.aiConfig, reasoningMode: false } },
+            roomName: 'Estudio creativo',
+            instruction: 'Revisa el tono',
+            sourceContent: 'Texto original',
+        });
+
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({
+            reasoningMode: false,
+            responseMode: 'tool',
+            toolChoice: 'required',
+        }));
+    });
+
     it('rechaza una propuesta sin replacement válido', async () => {
         AIService.sendMessage.mockResolvedValue('{"summary":"Sin cambio","risk":"low"}');
 
@@ -47,12 +64,12 @@ describe('ToolRoomAIService', () => {
         AIService.sendMessage.mockResolvedValue(JSON.stringify({
             summary: 'Hay un capítulo pendiente.',
             chapters: [
-                { id: 'chapter-1', title: 'La llegada', position: 1, status: 'written', summary: 'Llega al pueblo.' },
-                { id: 'chapter-2', title: 'La pista', position: 2, status: 'pending', summary: 'Encuentra una pista.' },
+                { id: 'chapter-1', title: 'La llegada', position: 1, status: 'written', summary: 'Llega al pueblo.', purpose: 'Presentar la llegada.', conflict: 'No conoce el lugar.', characters: ['Elena'] },
+                { id: 'chapter-2', title: 'La pista', position: 2, status: 'pending', summary: 'Encuentra una pista.', purpose: 'Revelar una pista.', conflict: 'La pista está incompleta.', characters: ['Elena'] },
             ],
             matches: [
                 { structureChapterId: 'chapter-1', manuscriptChapterId: 'manuscript-1', confidence: 0.95, reason: 'Título y hechos coinciden.' },
-                { structureChapterId: 'fake', manuscriptChapterId: 'manuscript-1', confidence: 0.99 },
+                { structureChapterId: 'fake', manuscriptChapterId: 'manuscript-1', confidence: 0.99, reason: 'ID no válido para el análisis.' },
             ],
             openThreads: ['La identidad del informante'],
             recommendedNextChapterId: 'chapter-2',
@@ -107,7 +124,7 @@ describe('ToolRoomAIService', () => {
     it('recupera el análisis de estructura cuando la respuesta inicial llega vacía', async () => {
         AIService.sendMessage
             .mockResolvedValueOnce('')
-            .mockResolvedValueOnce(JSON.stringify({ summary: 'Estructura recuperada', chapters: [], matches: [], openThreads: [], recommendation: '' }));
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Estructura recuperada', chapters: [], matches: [], openThreads: [], recommendedNextChapterId: '', recommendation: '' }));
 
         const result = await requestChapterStructureAnalysis({
             profile,
@@ -117,19 +134,19 @@ describe('ToolRoomAIService', () => {
 
         expect(result.summary).toBe('Estructura recuperada');
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, enableTools: true, toolChoice: 'auto' }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
     });
 
     it('reintenta el análisis estructurado cuando los argumentos de la tool no son JSON válido', async () => {
         AIService.sendMessage
             .mockResolvedValueOnce('{"summary":"incompleto"')
-            .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis reparado', chapters: [], matches: [], openThreads: [], recommendation: '' }));
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis reparado', chapters: [], matches: [], openThreads: [], recommendedNextChapterId: '', recommendation: '' }));
 
         const result = await requestChapterStructureAnalysis({ profile, structureContent: 'Capítulo 1', chapters: [] });
 
         expect(result.summary).toBe('Análisis reparado');
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, toolChoice: 'required' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
     });
 
     it('permite puntos suspensivos dentro del capítulo pero rechaza un marcador de truncamiento al final', async () => {
@@ -151,7 +168,7 @@ describe('ToolRoomAIService', () => {
             summary: 'Se encontraron dos apariciones para revisar.',
             findings: [
                 { id: 'f-1', documentId: 'chapter-1', category: 'mulettilla', title: 'Muletilla repetida', excerpt: 'Elena dijo: ya sabes…', originalText: 'ya sabes', replacementText: '', reason: 'Aparece varias veces.', confidence: 0.94, severity: 'medium' },
-                { id: 'invalid', documentId: 'missing', originalText: 'x', replacementText: 'y', confidence: 1 },
+                { id: 'invalid', documentId: 'missing', category: 'detail', title: 'Inválido', reason: 'No existe el documento.', severity: 'high', originalText: 'x', replacementText: 'y', confidence: 1 },
             ],
         }));
 
@@ -160,7 +177,7 @@ describe('ToolRoomAIService', () => {
         expect(result.findings[0]).toMatchObject({ documentId: 'chapter-1', originalText: 'ya sabes', confidence: 0.94 });
     });
 
-    it('reintenta el análisis de consistencia sin razonamiento cuando la primera respuesta llega vacía', async () => {
+    it('reintenta el análisis de consistencia conservando la configuración de razonamiento', async () => {
         AIService.sendMessage
             .mockResolvedValueOnce('')
             .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis recuperado', findings: [] }));
@@ -174,7 +191,7 @@ describe('ToolRoomAIService', () => {
 
         expect(result).toEqual({ summary: 'Análisis recuperado', findings: [] });
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, useJsonMode: true, enableTools: false }));
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
     });
 
     it('normaliza hallazgos de auditoría y conserva el contexto auxiliar', async () => {
@@ -192,7 +209,7 @@ describe('ToolRoomAIService', () => {
         expect(result.items).toHaveLength(1);
         expect(result.items[0].severity).toBe('medium');
         expect(result.items[0].documentIds).toEqual(['chapter-1', 'world-1']);
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ enableTools: true, max_tokens: 8000 }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ responseMode: 'tool', max_tokens: 8000 }));
         expect(AIService.sendMessage.mock.calls[0][0]).toContain('Contexto de apoyo no analizable:');
         expect(AIService.sendMessage.mock.calls[0][0]).toContain('Lore de apoyo');
     });
@@ -214,7 +231,7 @@ describe('ToolRoomAIService', () => {
     it('detecta solo hallazgos estructurados con evidencia e IDs válidos', async () => {
         AIService.sendMessage.mockResolvedValue(JSON.stringify({ summary: 'Conflicto entre chapter-1 y world-1', findings: [
             { documentIds: ['chapter-1', 'world-1'], title: 'Fecha incompatible', category: 'timeline', severity: 'high', confidence: 0.92, claimA: 'chapter-1 indica Día 1', claimB: 'world-1 indica Día 3', evidenceA: { documentId: 'chapter-1', quote: 'Día 1' }, evidenceB: { documentId: 'world-1', quote: 'Día 3' }, explanation: 'Mismo evento en chapter-1 y world-1 con fechas incompatibles.' },
-            { documentIds: ['fake', 'world-1'], title: 'Inválido', confidence: 0.99, claimA: 'A', claimB: 'B', evidenceA: { documentId: 'fake', quote: 'A' }, evidenceB: { documentId: 'world-1', quote: 'B' }, explanation: 'No debe aceptarse.' },
+            { documentIds: ['fake', 'world-1'], title: 'Inválido', category: 'fact', severity: 'high', confidence: 0.99, claimA: 'A', claimB: 'B', evidenceA: { documentId: 'fake', quote: 'A' }, evidenceB: { documentId: 'world-1', quote: 'B' }, explanation: 'No debe aceptarse.' },
         ] }));
         const result = await requestCoherenceAnalysis({ profile, documents: [
             { id: 'chapter-1', type: 'chapter', title: 'Capítulo', content: '<p>Día 1</p>' },
@@ -225,7 +242,7 @@ describe('ToolRoomAIService', () => {
         expect(result.items[0].evidenceA.quote).toBe('Día 1');
         expect(result.summary).toBe('Conflicto entre Capítulo y Mundo');
         expect(result.items[0].claimA).toBe('Capítulo indica Día 1');
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ enableTools: true, reasoningMode: true, useJsonMode: false }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
     });
 
     it('exige confirmar una inconsistencia antes de generar tres soluciones', async () => {
@@ -238,9 +255,9 @@ describe('ToolRoomAIService', () => {
         ] });
         expect(validated.status).toBe('confirmed');
         AIService.sendMessage.mockResolvedValue(JSON.stringify({ options: [
-            { id: 'a', title: 'A', documentIds: ['chapter-1'] },
-            { id: 'b', title: 'B', documentIds: ['world-1'] },
-            { id: 'c', title: 'C', documentIds: ['chapter-1', 'world-1'] },
+            { id: 'a', title: 'A', description: 'Conserva el texto.', risk: 'low', impact: 'Bajo.', preserves: ['La continuidad'], changes: ['Una fecha'], documentIds: ['chapter-1'] },
+            { id: 'b', title: 'B', description: 'Ajusta el canon.', risk: 'medium', impact: 'Medio.', preserves: ['El conflicto'], changes: ['La fecha de referencia'], documentIds: ['world-1'] },
+            { id: 'c', title: 'C', description: 'Añade una explicación.', risk: 'high', impact: 'Alto.', preserves: ['Ambas versiones'], changes: ['La explicación narrativa'], documentIds: ['chapter-1', 'world-1'] },
         ] }));
         const options = await requestCoherenceResolutionOptions({ profile, finding: validated, documents: [
             { id: 'chapter-1', content: 'Día 1' },

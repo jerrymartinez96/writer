@@ -118,7 +118,7 @@ Devuelve exclusivamente JSON con esta forma:
             [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
             apiKey,
             modelId,
-            { temperature: 0, max_tokens: 600, enableTools: false }
+            { temperature: 0, responseMode: 'text', max_tokens: 600 }
         );
         return normalizePlan(extractJson(response), forcedAction, actions.map(a => a.id).filter(Boolean));
     } catch (error) {

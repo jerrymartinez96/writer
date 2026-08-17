@@ -36,8 +36,23 @@ export const validateOperations = (operations = [], documents = []) => operation
 }));
 
 export const executeOperationsWithRollback = async ({ operations = [], documents = [], approvedOperationIds = new Set(), apply, rollback }) => {
-    const approved = operations.filter((operation) => ['patch', 'replace'].includes(operation.action) && (operation.status === 'approved' || approvedOperationIds.has(operation.id)));
-    const checks = validateOperations(approved, documents);
+    const approved = operations.filter((operation) => ['patch', 'replace', 'delete'].includes(operation.action) && (operation.status === 'approved' || approvedOperationIds.has(operation.id)));
+    // Validate sequentially against a working copy so multiple operations on the
+    // same document compose instead of overwriting one another.
+    const workingDocuments = documents.map((document) => ({ ...document }));
+    const checks = [];
+    const validatedDocuments = new Set();
+    for (const operation of approved) {
+        const document = workingDocuments.find((item) => item.id === operation.documentId);
+        const check = validateOperationAgainstDocument(validatedDocuments.has(operation.documentId) ? { ...operation, baseFingerprint: '' } : operation, document);
+        if (!check.valid) {
+            checks.push({ operation, ...check });
+            break;
+        }
+        checks.push({ operation, ...check });
+        validatedDocuments.add(operation.documentId);
+        if (document && typeof check.nextContent === 'string') document.content = check.nextContent;
+    }
     const invalid = checks.find((check) => !check.valid);
     if (invalid) throw new Error(invalid.reason || 'Una operación ya no es aplicable.');
     const applied = [];

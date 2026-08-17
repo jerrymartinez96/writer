@@ -58,4 +58,29 @@ describe('MissionExecutionService', () => {
         expect(calls).toBe(0);
         expect(result.applied).toEqual([]);
     });
+
+    it('compone dos operaciones sobre el mismo documento sin perder la primera', async () => {
+        const documents = [{ id: 'a', title: 'A', content: 'uno dos' }];
+        const operations = prepareOperations([
+            { id: 'op-1', documentId: 'a', action: 'patch', originalText: 'uno', replacementText: 'uno nuevo' },
+            { id: 'op-2', documentId: 'a', action: 'patch', originalText: 'dos', replacementText: 'dos nuevo' },
+        ], documents);
+        const contents = [];
+        await executeOperationsWithRollback({
+            operations,
+            approvedOperationIds: new Set(operations.map((operation) => operation.id)),
+            documents,
+            apply: async (_operation, nextContent) => { contents.push(nextContent); },
+            rollback: async () => {},
+        });
+        expect(contents).toEqual(['uno nuevo dos', 'uno nuevo dos nuevo']);
+    });
+
+    it('permite representar una eliminación como operación delete', () => {
+        const document = { id: 'a', title: 'A', content: 'Antes. Escena eliminada. Después.' };
+        const [operation] = prepareOperations([{ id: 'delete-1', documentId: 'a', action: 'delete', originalText: 'Escena eliminada. ', replacementText: '' }], [document]);
+        const result = validateOperationAgainstDocument(operation, document);
+        expect(result.valid).toBe(true);
+        expect(result.nextContent).toBe('Antes. Después.');
+    });
 });

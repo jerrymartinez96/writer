@@ -11,6 +11,7 @@ import { classifyCoreRequest } from '../../services/ai-next/CoreRouter';
 import { classifyRequestIntent } from '../../services/ai-next/RequestIntentService';
 import CoreOperationPanel from './CoreOperationPanel';
 import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions';
+import { buildRegisteredPrompt } from '../../services/ai-next/PromptRegistry';
 
 const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
 
@@ -201,6 +202,12 @@ const IAStudioNextChat = ({ onBack }) => {
             return;
         }
         if (route.capability === 'patch' || route.capability === 'multi_patch') {
+            if (route.recommendedTool === 'global-constructor') {
+                setLoading(false);
+                try { window.sessionStorage.setItem('verne-ia-studio-launch', JSON.stringify({ roomId: 'global-constructor', prompt: message, context: envelope.context, contextLabel: activeChapter?.title || '', createdAt: new Date().toISOString() })); } catch { /* navigation continues */ }
+                openToolRoom('toolroom:global-constructor');
+                return;
+            }
             setLoading(false);
             setOperation({ request: { message, context: envelope.context, impactLevel: route.impactLevel, recommendedTool: route.recommendedTool }, capability: route.capability });
             return;
@@ -217,8 +224,8 @@ const IAStudioNextChat = ({ onBack }) => {
         try {
             const key = getApiKey(profile);
             if (!key) throw new Error('Configura una API Key de DeepSeek para usar el Core.');
-            const prompt = `${route.capability === 'analyze' ? 'Analiza con claridad y estructura.' : 'Responde de forma útil y concreta.'}\n\nSolicitud: ${message}\n\nContexto controlado:\n${context}`;
-            const response = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.35, enableTools: false, max_tokens: 3000, signal: abortController.signal }));
+            const prompt = buildRegisteredPrompt('coreChat', { capability: route.capability, message, context });
+            const response = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.35, responseMode: 'text', max_tokens: 3000, signal: abortController.signal }));
             appendMessage({ role: 'assistant', content: response, route });
         } catch (requestError) {
             if (requestError?.name !== 'AbortError') setError(requestError?.message || 'No se pudo completar la respuesta.');

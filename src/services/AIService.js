@@ -328,7 +328,7 @@ export const AIService = {
     /**
      * Returns models for a given provider (always returns all DeepSeek models now)
      */
-    getModelsForProvider(provider) {
+    getModelsForProvider() {
         return this.MODELS;
     },
 
@@ -378,24 +378,27 @@ export const AIService = {
                 temperature: temperature,
                 max_tokens: options.max_tokens || 8192,
             };
+            const responseMode = options.responseMode || (options.enableTools ? 'tool' : options.useJsonMode ? 'json' : 'text');
+            const shouldUseTools = responseMode === 'tool' || options.enableTools === true;
             console.info('[AIService] Request no-stream:', {
                 model,
                 messageCount: messagesList.length,
-                enableTools: !!options.enableTools,
-                useJsonMode: !!options.useJsonMode,
+                responseMode,
+                enableTools: shouldUseTools,
+                useJsonMode: responseMode === 'json' || !!options.useJsonMode,
                 reasoningMode: options.reasoningMode ?? false,
                 reasoningEffort: options.reasoningMode ? (options.reasoningEffort || 'default') : 'disabled',
                 maxTokens: options.max_tokens || 8192,
             });
 
             // Enable schemas for tool calling if requested
-            if (options.enableTools || (typeof model === 'string' && model.startsWith('deepseek') && options.enableTools !== false)) {
+            if (shouldUseTools) {
                 body.tools = options.tools || DEEPSEEK_SCHEMAS;
-                body.tool_choice = options.toolChoice || "auto";
+                body.tool_choice = options.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
             }
 
-            // Enable JSON mode if requested (only if tools are not active)
-            if (options.useJsonMode && !body.tools) {
+            // JSON mode and tool calling are intentionally mutually exclusive.
+            if ((responseMode === 'json' || options.useJsonMode) && !body.tools) {
                 body.response_format = { type: "json_object" };
             }
 
@@ -452,7 +455,7 @@ export const AIService = {
     async generateStream(messages, settings, onChunk, onUsage) {
         const modelId = settings?.selectedAiModel || "deepseek-v4-flash";
         const temperature = settings?.temperature ?? 0.7;
-        const useJsonMode = settings?.useJsonMode ?? false;
+        const responseMode = settings?.responseMode || (settings?.enableTools ? 'tool' : settings?.useJsonMode ? 'json' : 'text');
 
 
 
@@ -478,19 +481,20 @@ export const AIService = {
         console.info('[AIService] Request stream:', {
             model: modelId,
             messageCount: messages.length,
-            enableTools: !!settings?.enableTools,
+            responseMode,
+            enableTools: responseMode === 'tool',
             lastRole: messages[messages.length - 1]?.role,
             lastMessage: String(messages[messages.length - 1]?.content || '').slice(0, 160),
         });
 
         // Inject schemas for DeepSeek tool calling if requested
-        if (settings?.enableTools) {
+        if (responseMode === 'tool' || settings?.enableTools) {
             body.tools = DEEPSEEK_SCHEMAS;
-            body.tool_choice = settings.toolChoice || "auto";
+            body.tool_choice = settings.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
         }
 
         // Enable JSON mode if requested (only if tools are not being called)
-        if (useJsonMode && !settings?.enableTools) {
+        if ((responseMode === 'json' || settings?.useJsonMode) && !settings?.enableTools && !body.tools) {
             body.response_format = { type: "json_object" };
         }
 
