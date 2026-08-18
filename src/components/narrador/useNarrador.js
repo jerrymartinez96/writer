@@ -10,8 +10,8 @@
  *   del texto que se está leyendo (el propio texto del segmento).
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
-import GeminiLiveService from '../../services/GeminiLiveService';
-import { prepareSegments } from '../../services/NarradorSegmenter';
+import GeminiLiveService, { GeminiLiveService as GeminiLiveSession } from '../../services/GeminiLiveService';
+import { fnv1a, prepareSegments } from '../../services/NarradorSegmenter';
 import { getCachedSegment, saveCachedSegment, savePermanentSegment, saveSegmentToNarradorDirectory, getNarradorStorageSettings, invalidateCachedSegment, getNarradorCacheSize } from '../../services/NarradorCache';
 
 const PROGRESS_PREFIX = 'narrador_progress_';
@@ -50,7 +50,8 @@ export const useNarrador = ({
     nextChapter,
     onSelectChapter,
     profileData,
-    toast
+    toast,
+    narrationSegments = null,
 }) => {
     const [status, setStatus] = useState('idle'); // idle | connecting | speaking | paused | stopped
     const [segments, setSegments] = useState([]);
@@ -68,7 +69,8 @@ export const useNarrador = ({
     const [isSegmentSyncReady, setIsSegmentSyncReady] = useState(false);
     const [cachedSegmentIndexes, setCachedSegmentIndexes] = useState(() => new Set());
     const [isPreparing, setIsPreparing] = useState(false);
-    const [preparationProgress, setPreparationProgress] = useState({ completed: 0, total: 0, etaSeconds: null });
+    const [isPreparationPaused, setIsPreparationPaused] = useState(false);
+    const [preparationProgress, setPreparationProgress] = useState({ completed: 0, total: 0, etaSeconds: null, currentIndex: null });
 
     const segmentsRef = useRef([]);
     const currentIndexRef = useRef(0);
@@ -76,11 +78,13 @@ export const useNarrador = ({
     const speedRef = useRef(1.0);
     const activeChapterRef = useRef(activeChapter);
     const activeBookRef = useRef(activeBook);
+    const narrationSegmentsRef = useRef(narrationSegments);
     const editorRef = useRef(editor);
     const nextChapterRef = useRef(nextChapter);
     const profileRef = useRef(profileData);
     const onSelectChapterRef = useRef(onSelectChapter);
     const isFocusModeRef = useRef(isFocusMode);
+    const previousFocusModeRef = useRef(isFocusMode);
     const motorRef = useRef('none');
     const sentSegmentsRef = useRef(new Set());
     const utteranceRef = useRef(null);
@@ -98,6 +102,11 @@ export const useNarrador = ({
     const syncWarmupUntilRef = useRef(0);
     const preparationRunRef = useRef(0);
     const isPreparingRef = useRef(false);
+    const preparationServiceRef = useRef(null);
+    const preparationSessionTurnsRef = useRef(0);
+    const preparationRejectRef = useRef(null);
+    const isPreparationPausedRef = useRef(false);
+    const startNarrationRef = useRef(null);
     const wakeLockRef = useRef(null);
 
     useEffect(() => { statusRef.current = status; }, [status]);
@@ -111,6 +120,7 @@ export const useNarrador = ({
     }, [profileData?.aiConfig?.narradorSpeed]);
     useEffect(() => { activeChapterRef.current = activeChapter; }, [activeChapter]);
     useEffect(() => { activeBookRef.current = activeBook; }, [activeBook]);
+    useEffect(() => { narrationSegmentsRef.current = narrationSegments; }, [narrationSegments]);
     useEffect(() => { editorRef.current = editor; }, [editor]);
     useEffect(() => { nextChapterRef.current = nextChapter; }, [nextChapter]);
     useEffect(() => { profileRef.current = profileData; }, [profileData]);
@@ -255,11 +265,24 @@ export const useNarrador = ({
         if (storage.keepPermanent) {
             await savePermanentSegment(bookId, chapterId, segmentIndex, segment.hash, pcmData, variantKey);
         }
-        if (storage.directoryHandle) {
+        if (storage.directoryHandle && storage.keepPermanent) {
             await saveSegmentToNarradorDirectory(bookId, chapterId, segmentIndex, pcmData);
         }
         markSegmentCached(segmentIndex);
     }, [buildAudioVariant, markSegmentCached]);
+
+    const stopPreparationSession = useCallback(() => {
+        preparationRejectRef.current?.(new Error('Preparación cancelada.'));
+        preparationRejectRef.current = null;
+
+        const session = preparationServiceRef.current;
+        preparationServiceRef.current = null;
+        preparationSessionTurnsRef.current = 0;
+        if (session) {
+            session.setOutputMuted(false);
+            session.stop();
+        }
+    }, []);
 
     const stopWebSpeech = useCallback(() => {
         try {
@@ -290,6 +313,23 @@ export const useNarrador = ({
 
     const prepareChapterSegments = useCallback(() => {
         if (!activeChapterRef.current) return [];
+        const scriptedSegments = narrationSegmentsRef.current;
+        if (Array.isArray(scriptedSegments) && scriptedSegments.length > 0) {
+            const prepared = scriptedSegments.map((segment, index) => {
+                const text = String(segment?.text || '').trim();
+                return {
+                    ...segment,
+                    index,
+                    text,
+                    hash: String(segment?.hash || fnv1a(text)),
+                    paragraphOffset: { start: index, end: index },
+                    paragraphTexts: [text],
+                };
+            }).filter((segment) => segment.text);
+            segmentsRef.current = prepared;
+            setSegments(prepared);
+            return prepared;
+        }
         const content = activeChapterRef.current.content || '';
         const prepared = prepareSegments(content);
         segmentsRef.current = prepared;
@@ -297,8 +337,12 @@ export const useNarrador = ({
         return prepared;
     }, []);
 
-    const prepareAudio = useCallback(async (mode = 'chapter', amount = 1) => {
+    const prepareAudio = useCallback(async (mode = 'chapter') => {
         if (isPreparing || !activeChapterRef.current) return;
+        if (statusRef.current === 'speaking' || statusRef.current === 'connecting' || statusRef.current === 'paused') {
+            toastRef.current?.warning('Detén la narración antes de preparar audio.');
+            return;
+        }
 
         const cfg = profileRef.current?.aiConfig || {};
         if (!cfg.geminiApiKey) {
@@ -315,96 +359,181 @@ export const useNarrador = ({
         const cached = await Promise.all(prepared.map((segment, index) =>
             getCachedSegment(activeBookRef.current?.id, activeChapterRef.current?.id, index, segment.hash, buildAudioVariant())
         ));
+        const cachedBeforeRun = cached.filter(Boolean).length;
         const pending = prepared.map((_, index) => index).filter(index => !cached[index]);
-        const currentIndex = Math.max(0, Math.min(currentIndexRef.current, prepared.length - 1));
-        let targetIndexes;
-        if (mode === 'fromHere') {
-            targetIndexes = pending.filter(index => index >= currentIndex);
+        const targetIndexes = pending;
+        let initialIndexes;
+        if (mode === 'start') {
+            initialIndexes = targetIndexes.filter(index => index < 3);
         } else if (mode === 'half') {
-            targetIndexes = pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
-        } else if (mode === 'count') {
-            targetIndexes = pending.slice(0, Math.max(1, Math.min(Number(amount) || 1, pending.length)));
+            initialIndexes = targetIndexes.slice(0, Math.max(1, Math.ceil(targetIndexes.length / 2)));
         } else {
-            targetIndexes = pending;
+            initialIndexes = targetIndexes;
         }
+        const initialSet = new Set(initialIndexes);
+        const backgroundIndexes = targetIndexes.filter(index => !initialSet.has(index));
 
         if (targetIndexes.length === 0) {
             setCachedSegmentIndexes(new Set(prepared.map((_, index) => index)));
-            toastRef.current?.info('Los fragmentos seleccionados ya están preparados.');
+            toastRef.current?.info('El capítulo ya está preparado.');
+            setTimeout(() => startNarrationRef.current?.(0), 0);
             return;
         }
 
         const runId = ++preparationRunRef.current;
-        const startedAt = Date.now();
         setIsPreparing(true);
+        isPreparationPausedRef.current = false;
+        setIsPreparationPaused(false);
         isPreparingRef.current = true;
-        setPreparationProgress({ completed: 0, total: targetIndexes.length, etaSeconds: null });
+        setPreparationProgress({
+            completed: 0,
+            total: initialIndexes.length > 0 ? initialIndexes.length : targetIndexes.length,
+            etaSeconds: null,
+            currentIndex: initialIndexes[0] ?? backgroundIndexes[0] ?? null
+        });
         stopAllAudio();
 
-        try {
-            const ctx = buildGeminiContext();
-            await GeminiLiveService.connect(ctx.apiKey, {
-                model: ctx.model,
-                voice: ctx.voice,
-                systemInstruction: ctx.systemInstruction
+        const ctx = buildGeminiContext();
+        let completed = 0;
+        let initialCompleted = 0;
+        let initialPhase = initialIndexes.length > 0;
+        let playbackStarted = false;
+        let generatedElapsedMs = 0;
+
+        const generateSegment = async (index) => {
+            if (runId !== preparationRunRef.current) throw new Error('Preparación cancelada.');
+            setPreparationProgress(previous => ({ ...previous, currentIndex: index }));
+            while (isPreparationPausedRef.current && runId === preparationRunRef.current) {
+                await new Promise(resolve => window.setTimeout(resolve, 250));
+            }
+            if (runId !== preparationRunRef.current) throw new Error('Preparación cancelada.');
+            const segmentStartedAt = Date.now();
+
+            if (!preparationServiceRef.current || !preparationServiceRef.current.connected || preparationSessionTurnsRef.current >= 3) {
+                stopPreparationSession();
+                const session = new GeminiLiveSession();
+                preparationServiceRef.current = session;
+                preparationSessionTurnsRef.current = 0;
+                await session.connect(ctx.apiKey, {
+                    model: ctx.model,
+                    voice: ctx.voice,
+                    systemInstruction: ctx.systemInstruction
+                });
+                session.setOutputMuted(true);
+            }
+
+            const session = preparationServiceRef.current;
+            const segment = prepared[index];
+            preparationSessionTurnsRef.current += 1;
+
+            await new Promise((resolve, reject) => {
+                const timeout = window.setTimeout(() => reject(new Error('Tiempo de espera agotado al preparar un fragmento.')), 120000);
+                preparationRejectRef.current = reject;
+                const finish = (callback, value) => {
+                    window.clearTimeout(timeout);
+                    if (preparationRejectRef.current === reject) preparationRejectRef.current = null;
+                    callback(value);
+                };
+
+                try {
+                    session.sendText(segment.text, index, async (pcmData) => {
+                        try {
+                            await persistGeneratedAudio(index, segment, pcmData);
+                            finish(resolve);
+                        } catch (error) {
+                            finish(reject, error);
+                        }
+                    });
+                } catch (error) {
+                    finish(reject, error);
+                }
             });
-            GeminiLiveService.setOutputMuted(true);
 
-            for (let position = 0; position < targetIndexes.length; position += 1) {
-                if (runId !== preparationRunRef.current) break;
-                const index = targetIndexes[position];
-                const segment = prepared[index];
-                await new Promise((resolve, reject) => {
-                    const timeout = window.setTimeout(() => reject(new Error('Tiempo de espera agotado al preparar un fragmento.')), 120000);
-                    try {
-                        GeminiLiveService.sendText(segment.text, index, async (pcmData) => {
-                            try {
-                                await persistGeneratedAudio(index, segment, pcmData);
-                                window.clearTimeout(timeout);
-                                resolve();
-                            } catch (error) {
-                                window.clearTimeout(timeout);
-                                reject(error);
-                            }
-                        });
-                    } catch (error) {
-                        window.clearTimeout(timeout);
-                        reject(error);
-                    }
-                });
+            completed += 1;
+            if (initialPhase) initialCompleted += 1;
+            generatedElapsedMs += Date.now() - segmentStartedAt;
+            const average = generatedElapsedMs / completed;
+            const progressTotal = initialPhase ? initialIndexes.length : prepared.length;
+            const progressCompleted = initialPhase ? initialCompleted : cachedBeforeRun + completed;
+            const remainingSegments = initialPhase
+                ? Math.max(0, initialIndexes.length - initialCompleted)
+                : Math.max(0, targetIndexes.length - completed);
+            setPreparationProgress({
+                completed: progressCompleted,
+                total: progressTotal,
+                etaSeconds: Math.ceil((remainingSegments * average) / 1000),
+                currentIndex: index
+            });
+        };
 
-                const elapsed = Date.now() - startedAt;
-                const average = elapsed / (position + 1);
-                const remaining = Math.max(0, targetIndexes.length - position - 1);
-                setPreparationProgress({
-                    completed: position + 1,
-                    total: targetIndexes.length,
-                    etaSeconds: Math.ceil((remaining * average) / 1000)
-                });
-            }
+        const startPlayback = async () => {
+            if (playbackStarted || runId !== preparationRunRef.current) return;
+            playbackStarted = true;
+            await startNarrationRef.current?.(0);
+        };
 
-            if (runId === preparationRunRef.current) {
-                await refreshSegmentCacheStatus();
-                toastRef.current?.success(`Preparación terminada: ${targetIndexes.length} fragmento(s) listo(s).`);
+        const runPreparation = async () => {
+            try {
+                for (const index of initialIndexes) await generateSegment(index);
+
+                if (runId !== preparationRunRef.current) return;
+                initialPhase = false;
+                const readyCount = cachedBeforeRun + completed;
+                const remainingSegments = Math.max(0, targetIndexes.length - completed);
+                const average = generatedElapsedMs / Math.max(1, completed);
+                setPreparationProgress(previous => ({
+                    ...previous,
+                    completed: readyCount,
+                    total: prepared.length,
+                    etaSeconds: Math.ceil((remainingSegments * average) / 1000),
+                    currentIndex: backgroundIndexes[0] ?? null
+                }));
+                await startPlayback();
+
+                for (const index of backgroundIndexes) await generateSegment(index);
+
+                if (runId === preparationRunRef.current) {
+                    await refreshSegmentCacheStatus();
+                    toastRef.current?.success(`Preparación terminada: ${targetIndexes.length} fragmento(s) listo(s).`);
+                }
+            } catch (error) {
+                if (runId === preparationRunRef.current && error.message !== 'Preparación cancelada.') {
+                    toastRef.current?.error(error.message || 'No se pudo preparar el audio.');
+                }
+            } finally {
+                if (runId === preparationRunRef.current) {
+                    stopPreparationSession();
+                    isPreparingRef.current = false;
+                    isPreparationPausedRef.current = false;
+                    setIsPreparationPaused(false);
+                    setPreparationProgress(previous => ({ ...previous, currentIndex: null }));
+                    setIsPreparing(false);
+                }
             }
-        } catch (error) {
-            if (runId === preparationRunRef.current) toastRef.current?.error(error.message || 'No se pudo preparar el audio.');
-        } finally {
-            GeminiLiveService.setOutputMuted(false);
-            GeminiLiveService.stop();
-            if (runId === preparationRunRef.current) {
-                isPreparingRef.current = false;
-                setIsPreparing(false);
-            }
-        }
-    }, [buildGeminiContext, buildAudioVariant, isPreparing, persistGeneratedAudio, prepareChapterSegments, refreshSegmentCacheStatus, stopAllAudio]);
+        };
+
+        void runPreparation();
+    }, [buildGeminiContext, buildAudioVariant, isPreparing, persistGeneratedAudio, prepareChapterSegments, refreshSegmentCacheStatus, stopAllAudio, stopPreparationSession]);
 
     const cancelPreparation = useCallback(() => {
         preparationRunRef.current += 1;
         isPreparingRef.current = false;
-        GeminiLiveService.setOutputMuted(false);
-        GeminiLiveService.stop();
+        isPreparationPausedRef.current = false;
+        setIsPreparationPaused(false);
+        stopPreparationSession();
         setIsPreparing(false);
+    }, [stopPreparationSession]);
+
+    const pausePreparation = useCallback(() => {
+        if (!isPreparingRef.current) return;
+        isPreparationPausedRef.current = true;
+        setIsPreparationPaused(true);
+    }, []);
+
+    const resumePreparation = useCallback(() => {
+        if (!isPreparingRef.current) return;
+        isPreparationPausedRef.current = false;
+        setIsPreparationPaused(false);
     }, []);
 
     useEffect(() => {
@@ -426,7 +555,9 @@ export const useNarrador = ({
     const speakWithWebSpeech = useCallback((text, onEnd) => {
         if (!('speechSynthesis' in window)) {
             if (toastRef.current) toastRef.current.error('Tu navegador no soporta narración por voz.');
-            onEnd?.();
+            statusRef.current = 'stopped';
+            setStatus('stopped');
+            clearTranscript();
             return;
         }
 
@@ -441,11 +572,14 @@ export const useNarrador = ({
         utterance.onend = onEnd;
         utterance.onerror = (event) => {
             if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+            statusRef.current = 'stopped';
+            setStatus('stopped');
+            clearTranscript();
             toastRef.current?.error('La voz del navegador no pudo reproducir este fragmento.');
         };
         utteranceRef.current = utterance;
         window.speechSynthesis.speak(utterance);
-    }, [getSpanishVoice]);
+    }, [clearTranscript, getSpanishVoice]);
 
     const playCachedSegment = useCallback(async (segmentIndex, runId = playbackRunRef.current) => {
         const segment = segmentsRef.current[segmentIndex];
@@ -504,6 +638,15 @@ export const useNarrador = ({
         }
     }, [buildAudioVariant, setCurrentTranscriptForSegment]);
 
+    const waitForCachedSegment = useCallback(async (segmentIndex, runId) => {
+        const deadline = Date.now() + 120000;
+        while (runId === playbackRunRef.current && isPreparingRef.current && !isPreparationPausedRef.current && Date.now() < deadline) {
+            if (await playCachedSegment(segmentIndex, runId)) return true;
+            await new Promise(resolve => window.setTimeout(resolve, 500));
+        }
+        return false;
+    }, [playCachedSegment]);
+
     const handleSegmentComplete = useCallback((completedIndex, runId = playbackRunRef.current) => {
         if (runId !== playbackRunRef.current) return;
         if (statusRef.current === 'stopped' || statusRef.current === 'paused') return;
@@ -514,7 +657,10 @@ export const useNarrador = ({
             setCurrentSegmentIndex(next);
             saveProgress(next);
 
-            playCachedSegment(next, runId).then(async (played) => {
+            const playNext = isPreparingRef.current
+                ? waitForCachedSegment(next, runId)
+                : playCachedSegment(next, runId);
+            playNext.then(async (played) => {
                 if (runId !== playbackRunRef.current) return;
                 if (!played && motorRef.current === 'gemini') {
                     try {
@@ -586,7 +732,7 @@ export const useNarrador = ({
                 if (toastRef.current) toastRef.current.success('¡Capítulo narrado completamente! 🎉');
             }
         }
-    }, [buildGeminiContext, clearProgress, clearTranscript, persistGeneratedAudio, playCachedSegment, saveProgress]);
+    }, [buildGeminiContext, clearProgress, clearTranscript, persistGeneratedAudio, playCachedSegment, saveProgress, waitForCachedSegment]);
 
     useEffect(() => {
         handleSegmentCompleteRef.current = handleSegmentComplete;
@@ -635,7 +781,7 @@ export const useNarrador = ({
         };
     }, [clearTranscript, handleSegmentComplete, setCurrentTranscriptForSegment]);
 
-    const startNarration = useCallback(async (startIndex = 0, forceMotor = null, forceRegenerate = false) => {
+    const startNarration = useCallback(async (startIndex = 0, forceMotor = null, forceRegenerate = false, cacheOnly = false) => {
         if (!activeChapterRef.current) return;
         if (statusRef.current === 'speaking' || statusRef.current === 'connecting') return;
 
@@ -665,8 +811,6 @@ export const useNarrador = ({
             if (toastRef.current) toastRef.current.info('Usando voz del navegador. Configura tu API key de Gemini en Ajustes → Mi Cuenta para una narración más natural.', 5000);
         }
 
-        setStatus('connecting');
-
         try {
             if (motor === 'gemini') {
                 if (forceRegenerate) {
@@ -685,7 +829,16 @@ export const useNarrador = ({
                     return;
                 }
 
+                if (cacheOnly || isPreparingRef.current) {
+                    statusRef.current = 'idle';
+                    setStatus('idle');
+                    clearTranscript();
+                    toastRef.current?.info(`No se pudo leer el audio cacheado del fragmento ${startIndex + 1}. No se abrirá una conexión nueva.`);
+                    return;
+                }
+
                 const ctx = buildGeminiContext();
+                setStatus('connecting');
                 await GeminiLiveService.connect(ctx.apiKey, {
                     model: ctx.model,
                     voice: ctx.voice,
@@ -729,11 +882,14 @@ export const useNarrador = ({
                 speakSegment(startIndex);
             }
         } catch (err) {
+            if (runId !== playbackRunRef.current) return;
             setStatus('stopped');
             clearTranscript();
             if (toastRef.current) toastRef.current.error(err.message || 'No se pudo iniciar la narración.');
         }
     }, [buildGeminiContext, clearTranscript, handleSegmentComplete, markSegmentCached, persistGeneratedAudio, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
+
+    startNarrationRef.current = startNarration;
 
     const regenerateSegment = useCallback((segmentIndex = currentIndexRef.current) => {
         const clamped = Math.max(0, Math.min(segmentsRef.current.length - 1, segmentIndex));
@@ -800,6 +956,7 @@ export const useNarrador = ({
 
     const skipToSegment = useCallback((index) => {
         const clamped = Math.max(0, Math.min(segmentsRef.current.length - 1, index));
+        const cacheOnly = isPreparingRef.current || cachedSegmentIndexes.has(clamped);
         stopAllAudio();
         playbackRunRef.current += 1;
 
@@ -807,8 +964,8 @@ export const useNarrador = ({
         setStatus('idle');
 
         sentSegmentsRef.current.clear();
-        startNarration(clamped);
-    }, [startNarration, stopAllAudio]);
+        startNarration(clamped, null, false, cacheOnly);
+    }, [cachedSegmentIndexes, startNarration, stopAllAudio]);
 
     const toggleNarratorMode = useCallback(() => {
         setIsNarratorMode(prev => !prev);
@@ -842,15 +999,23 @@ export const useNarrador = ({
 
     useEffect(() => {
         if (!activeChapterRef.current) return;
-        if (!isFocusModeRef.current) return;
 
+        preparationRunRef.current += 1;
+        isPreparingRef.current = false;
+        isPreparationPausedRef.current = false;
+        setIsPreparationPaused(false);
+        stopPreparationSession();
         stopAllAudio();
         sentSegmentsRef.current.clear();
         segmentsRef.current = [];
         setSegments([]);
         currentIndexRef.current = 0;
         setCurrentSegmentIndex(0);
+        setMotorUsado('none');
+        motorRef.current = 'none';
+        statusRef.current = 'idle';
         setStatus('idle');
+        setIsNarratorMode(false);
         setShowResumePrompt(false);
         setResumeInfo(null);
         clearTranscript();
@@ -858,15 +1023,17 @@ export const useNarrador = ({
         const prepared = prepareChapterSegments();
         if (prepared.length === 0) return;
 
-        checkSavedProgress();
+        if (isFocusModeRef.current) checkSavedProgress();
         if (autoContinueRef.current) {
             autoContinueRef.current = false;
             setTimeout(() => startNarration(0), 0);
         }
-    }, [activeChapter?.id, checkSavedProgress, clearTranscript, prepareChapterSegments, startNarration, stopAllAudio]);
+    }, [activeChapter?.id, checkSavedProgress, clearTranscript, narrationSegments, prepareChapterSegments, startNarration, stopAllAudio, stopPreparationSession]);
 
     useEffect(() => {
-        if (!isFocusMode && statusRef.current !== 'idle' && statusRef.current !== 'stopped') {
+        const wasFocusMode = previousFocusModeRef.current;
+        previousFocusModeRef.current = isFocusMode;
+        if (wasFocusMode && !isFocusMode && statusRef.current !== 'idle' && statusRef.current !== 'stopped') {
             stopNarration();
             setStatus('idle');
         }
@@ -883,9 +1050,13 @@ export const useNarrador = ({
 
     useEffect(() => {
         return () => {
+            preparationRunRef.current += 1;
+            isPreparingRef.current = false;
+            isPreparationPausedRef.current = false;
+            stopPreparationSession();
             stopAllAudio();
         };
-    }, [stopAllAudio]);
+    }, [stopAllAudio, stopPreparationSession]);
 
     useEffect(() => {
         const mediaSession = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
@@ -963,6 +1134,7 @@ export const useNarrador = ({
         isSegmentSyncReady,
         cachedSegmentIndexes,
         isPreparing,
+        isPreparationPaused,
         preparationProgress,
         refreshSegmentCacheStatus,
 
@@ -983,6 +1155,8 @@ export const useNarrador = ({
         prepareChapterSegments,
         prepareAudio,
         cancelPreparation,
+        pausePreparation,
+        resumePreparation,
         saveProgress,
         hasGeminiKey: !!profileData?.aiConfig?.geminiApiKey,
         hasWebSpeech: webVoicesAvailable

@@ -394,7 +394,12 @@ export const AIService = {
             // Enable schemas for tool calling if requested
             if (shouldUseTools) {
                 body.tools = options.tools || DEEPSEEK_SCHEMAS;
-                body.tool_choice = options.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
+                // DeepSeek Thinking rechaza el parámetro tool_choice completo,
+                // incluso cuando su valor es "auto". Con Thinking activo basta
+                // enviar los schemas y dejar la selección implícita de la API.
+                if (!options.reasoningMode) {
+                    body.tool_choice = options.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
+                }
             }
 
             // JSON mode and tool calling are intentionally mutually exclusive.
@@ -490,7 +495,9 @@ export const AIService = {
         // Inject schemas for DeepSeek tool calling if requested
         if (responseMode === 'tool' || settings?.enableTools) {
             body.tools = DEEPSEEK_SCHEMAS;
-            body.tool_choice = settings.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
+            if (!settings?.reasoningMode) {
+                body.tool_choice = settings.toolChoice || (responseMode === 'tool' ? 'required' : 'auto');
+            }
         }
 
         // Enable JSON mode if requested (only if tools are not being called)

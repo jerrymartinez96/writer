@@ -1,16 +1,18 @@
-import React, { useMemo, useState } from 'react';
-import { ArrowLeft, FilePlus2, Headphones, Play, Sparkles, UsersRound } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ArrowLeft, ChevronDown, FilePlus2, Headphones, Play, Sparkles, UsersRound } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useToolRooms } from '../../context/ToolRoomContext';
 import { getToolRoom } from './toolRoomCatalog';
 import ToolRoomShell from './ToolRoomShell';
-import ToolRoomAIInsight from './ToolRoomAIInsight';
 import ChapterDesigner from './ChapterDesigner';
 import ChapterWriter from './ChapterWriter';
 import CharacterToolRoom from './CharacterToolRoom';
 import useToolRoomLaunch from './useToolRoomLaunch';
 import { useNarrador } from '../narrador/useNarrador';
 import NarradorPanel from '../narrador/NarradorPanel';
+import NarradorScriptStudio from '../narrador/NarradorScriptStudio';
+import NarradorExportPanel from '../narrador/NarradorExportPanel';
+import { useToast } from '../Toast';
 
 const RoomContextBanner = ({ children, status = 'ready' }) => <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-4"><div className="min-w-0"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">Contexto activo</p><p className="mt-1 truncate text-sm font-bold">{children}</p></div><span className={`shrink-0 text-[10px] font-black uppercase tracking-wider ${status === 'pending' ? 'text-amber-500' : 'text-emerald-500'}`}>{status === 'pending' ? 'Requiere selección' : 'Controlado'}</span></div>;
 
@@ -39,11 +41,115 @@ const NarratorRoom = () => {
     const { getRoomState, updateRoomState } = useToolRooms();
     const state = getRoomState('narrator');
     const launch = useToolRoomLaunch('narrator');
-    const selectedChapter = chapters.find((chapter) => chapter.id === (state.chapterId || launch?.context?.chapterIds?.[0])) || activeChapter || null;
-    const nextChapter = selectedChapter ? chapters[chapters.findIndex((chapter) => chapter.id === selectedChapter.id) + 1] || null : null;
-    const supportingContext = useMemo(() => [...characters.map((character) => `Personaje: ${character.name}\n${character.description || ''}`), ...worldItems.map((item) => `Mundo: ${item.title}\n${item.content || ''}`)].join('\n\n'), [characters, worldItems]);
-    const narrador = useNarrador({ editor: null, isFocusMode: false, activeBook, activeChapter: selectedChapter, nextChapter, onSelectChapter: selectChapter, profileData: profile, toast: null });
-    return <ToolRoomShell room={room} status={selectedChapter ? 'ready' : 'pending'} context={<RoomContextBanner status={selectedChapter ? 'ready' : 'pending'}>{selectedChapter ? `Contenido aprobado: ${selectedChapter.title}` : 'Selecciona un capítulo para preparar la narración'}</RoomContextBanner>}><div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)]"><aside className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-4"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">Biblioteca de audio</p><h2 className="mt-1 text-lg font-serif font-black">Capítulos</h2><div className="mt-4 space-y-1.5">{chapters.filter((chapter) => !chapter.isVolume).map((chapter) => <button key={chapter.id} type="button" onClick={() => { selectChapter(chapter.id); updateRoomState('narrator', { chapterId: chapter.id }); }} className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left ${selectedChapter?.id === chapter.id ? 'bg-violet-500/10 text-violet-500' : 'hover:bg-[var(--accent-soft)]'}`}><Headphones size={15} /><span className="truncate text-sm font-bold">{chapter.title}</span></button>)}</div></aside><main className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7">{!selectedChapter ? <EmptyRoomState icon={Headphones} title="Prepara una narración" text="Selecciona un capítulo aprobado para generar el guion y sus segmentos." /> : <><NarradorPanel narrador={narrador} activeChapter={selectedChapter} onClose={narrador.stopNarration} /><ToolRoomAIInsight roomName="Narrador" instruction="Convierte el capítulo en un guion de narración con voz, pausas dramáticas y segmentos claros. No cambies el texto original." sourceContent={selectedChapter.content || ''} contextContent={supportingContext} buttonLabel="Generar guion" /><div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={() => setActiveView('editor')} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-4 py-3 text-sm font-black hover:border-violet-500"><Play size={16} /> Abrir capítulo</button></div></>}</main></div></ToolRoomShell>;
+    const toast = useToast();
+    const [isPlayerOpen, setIsPlayerOpen] = useState(true);
+    const [scriptState, setScriptState] = useState({ chapterId: null, script: null });
+    const [isChapterPickerOpen, setIsChapterPickerOpen] = useState(false);
+    const playableChapters = useMemo(() => chapters.filter((chapter) => !chapter.isVolume), [chapters]);
+    const selectedChapter = playableChapters.find((chapter) => chapter.id === (state.chapterId || launch?.context?.chapterIds?.[0])) || activeChapter || null;
+    const selectedChapterIndex = selectedChapter ? playableChapters.findIndex((chapter) => chapter.id === selectedChapter.id) : -1;
+    const nextChapter = selectedChapter ? playableChapters[playableChapters.findIndex((chapter) => chapter.id === selectedChapter.id) + 1] || null : null;
+    const supportingContext = useMemo(() => [...characters.map((character) => `Personaje: ${character.name}\n${character.description || ''}`), ...worldItems.map((item) => `Mundo: ${item.title}\n${item.content || ''}`)].join('\n\n').slice(0, 18000), [characters, worldItems]);
+    const script = scriptState.chapterId === selectedChapter?.id ? scriptState.script : null;
+    const handleSelectChapter = useCallback((chapter) => {
+        const chapterId = typeof chapter === 'string' ? chapter : chapter?.id;
+        if (!chapterId) return;
+        updateRoomState('narrator', { chapterId });
+        return selectChapter(chapter);
+    }, [selectChapter, updateRoomState]);
+    const handleChapterPickerChange = (event) => {
+        const chapter = playableChapters.find((item) => item.id === event.target.value);
+        if (!chapter) return;
+        setIsPlayerOpen(true);
+        setIsChapterPickerOpen(false);
+        handleSelectChapter(chapter);
+    };
+    const narrador = useNarrador({ editor: null, isFocusMode: false, activeBook, activeChapter: selectedChapter, nextChapter, onSelectChapter: handleSelectChapter, profileData: profile, toast, narrationSegments: script?.segments });
+    const currentSegments = narrador.segments || [];
+    const variantKey = [
+        profile?.aiConfig?.geminiLiveModel || 'gemini-3.1-flash-live-preview',
+        profile?.aiConfig?.narradorVoice || 'Puck',
+        profile?.aiConfig?.narradorTone || 'auto',
+        'prompt-v2'
+    ].join('|');
+    const closePlayer = useCallback(() => {
+        narrador.stopNarration();
+        if (narrador.isNarratorMode) narrador.toggleNarratorMode();
+        setIsPlayerOpen(false);
+    }, [narrador, setIsPlayerOpen]);
+    const openPreparation = () => {
+        setIsPlayerOpen(true);
+        narrador.prepareAudio('chapter');
+    };
+
+    return (
+        <ToolRoomShell
+            room={room}
+            status={selectedChapter ? 'ready' : 'pending'}
+        >
+            <main className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7">
+                    {!selectedChapter ? (
+                        <EmptyRoomState icon={Headphones} title="Prepara una narración" text="Selecciona un capítulo para preparar su audio sin modificar el manuscrito." />
+                    ) : (
+                        <>
+                            <div className="relative mb-5 flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">Fuente de audio</p>
+                                    <p className="mt-1 text-xs text-[var(--text-muted)]">Selecciona el capítulo que quieres preparar</p>
+                                </div>
+                                {playableChapters.length > 0 && <div className="relative w-full sm:w-auto sm:min-w-[280px]">
+                                    <button
+                                        type="button"
+                                        aria-haspopup="listbox"
+                                        aria-expanded={isChapterPickerOpen}
+                                        onClick={() => setIsChapterPickerOpen((value) => !value)}
+                                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] px-3 py-3 text-left text-sm font-bold outline-none transition-colors hover:border-violet-500 focus:border-violet-500"
+                                    >
+                                        <span className="min-w-0 truncate">{selectedChapterIndex + 1}. {selectedChapter.title}</span>
+                                        <ChevronDown size={15} className={`shrink-0 text-[var(--text-muted)] transition-transform ${isChapterPickerOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+                                    {isChapterPickerOpen && <>
+                                        <button type="button" aria-label="Cerrar selector de capítulos" className="fixed inset-0 z-40 cursor-default" onClick={() => setIsChapterPickerOpen(false)} />
+                                        <div role="listbox" aria-label="Seleccionar capítulo" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-1.5 shadow-2xl">
+                                            {playableChapters.map((chapter, index) => <button key={chapter.id} type="button" role="option" aria-selected={selectedChapter.id === chapter.id} onClick={() => handleChapterPickerChange({ target: { value: chapter.id } })} className={`w-full rounded-xl px-3 py-2.5 text-left text-xs font-bold transition-colors ${selectedChapter.id === chapter.id ? 'bg-violet-500/10 text-violet-600' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}><span className="block truncate">{index + 1}. {chapter.title}</span></button>)}
+                                        </div>
+                                    </>}
+                                </div>}
+                            </div>
+                            <section className="space-y-5" aria-label="Reproductor de narración">
+                                {isPlayerOpen ? <NarradorPanel narrador={narrador} activeChapter={selectedChapter} onClose={closePlayer} embedded /> : <button type="button" onClick={() => setIsPlayerOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-violet-500/30 px-4 py-3 text-sm font-black text-violet-600 hover:bg-violet-500/10"><Headphones size={16} /> Abrir reproductor</button>}
+                                <div className="rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-4 text-xs leading-relaxed text-[var(--text-muted)]"><strong className="text-[var(--text-main)]">Modo automático: </strong>reproduce el capítulo con la segmentación normal. Usa “Preparar” dentro del reproductor si quieres generar el audio en caché antes de escucharlo.</div>
+                            </section>
+
+                            <section className="mt-8 space-y-3" aria-label="Guion avanzado de narración">
+                                <div>
+                                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-600">Opcional · Experiencia avanzada</p>
+                                    <h2 className="mt-1 text-xl font-serif font-black">Personalizar el guion de voz</h2>
+                                    <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">Usa IA para añadir pausas, énfasis y dirección sin alterar el texto del capítulo.</p>
+                                </div>
+                                <NarradorScriptStudio chapter={selectedChapter} contextContent={supportingContext} onScriptReady={(nextScript) => setScriptState({ chapterId: selectedChapter.id, script: nextScript })} />
+                            </section>
+
+                            <section className="mt-8" aria-label="Exportación de narración">
+                                <NarradorExportPanel
+                                    bookId={activeBook?.id}
+                                    chapterId={selectedChapter.id}
+                                    chapterTitle={selectedChapter.title}
+                                    segments={currentSegments}
+                                    variantKey={variantKey}
+                                    onPrepare={openPreparation}
+                                    onOpenPlayer={() => setIsPlayerOpen(true)}
+                                />
+                            </section>
+
+                            <div className="mt-5 flex flex-wrap gap-3">
+                                <button type="button" onClick={() => setActiveView('editor')} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-4 py-3 text-sm font-black hover:border-violet-500"><Play size={16} /> Abrir capítulo</button>
+                            </div>
+                        </>
+                    )}
+            </main>
+        </ToolRoomShell>
+    );
 };
 
 export { CoWriterRoom, NarratorRoom };

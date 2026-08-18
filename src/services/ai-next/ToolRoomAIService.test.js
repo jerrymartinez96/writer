@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AIService from '../AIService';
-import { buildCoherencePatches, getStructureSourceHash, requestChapterDirections, requestChapterDraft, requestChapterFormatting, requestChapterScene, requestChapterStructureAnalysis, requestCoherenceAnalysis, requestCoherenceResolutionOptions, requestGlobalConsistencyAnalysis, requestToolRoomInsight, requestToolRoomProposal, validateCoherenceFinding } from './ToolRoomAIService';
+import { getStructureSourceHash, requestChapterDirections, requestChapterDraft, requestChapterFormatting, requestChapterScene, requestChapterStructureAnalysis, requestGlobalConsistencyAnalysis, requestToolRoomInsight, requestToolRoomProposal } from './ToolRoomAIService';
 
 vi.mock('../AIService', () => ({
     default: { sendMessage: vi.fn() },
@@ -134,7 +134,8 @@ describe('ToolRoomAIService', () => {
 
         expect(result.summary).toBe('Estructura recuperada');
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
+        expect(AIService.sendMessage.mock.calls[0][2]).not.toHaveProperty('toolChoice');
     });
 
     it('reintenta el análisis estructurado cuando los argumentos de la tool no son JSON válido', async () => {
@@ -146,7 +147,8 @@ describe('ToolRoomAIService', () => {
 
         expect(result.summary).toBe('Análisis reparado');
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('toolChoice');
     });
 
     it('permite puntos suspensivos dentro del capítulo pero rechaza un marcador de truncamiento al final', async () => {
@@ -191,7 +193,8 @@ describe('ToolRoomAIService', () => {
 
         expect(result).toEqual({ summary: 'Análisis recuperado', findings: [] });
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('toolChoice');
     });
 
     it('normaliza hallazgos de auditoría y conserva el contexto auxiliar', async () => {
@@ -209,7 +212,8 @@ describe('ToolRoomAIService', () => {
         expect(result.items).toHaveLength(1);
         expect(result.items[0].severity).toBe('medium');
         expect(result.items[0].documentIds).toEqual(['chapter-1', 'world-1']);
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ responseMode: 'tool', max_tokens: 8000 }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', max_tokens: 8000 }));
+        expect(AIService.sendMessage.mock.calls[0][2]).not.toHaveProperty('toolChoice');
         expect(AIService.sendMessage.mock.calls[0][0]).toContain('Contexto de apoyo no analizable:');
         expect(AIService.sendMessage.mock.calls[0][0]).toContain('Lore de apoyo');
     });
@@ -228,47 +232,4 @@ describe('ToolRoomAIService', () => {
         expect(result.items).toEqual([]);
     });
 
-    it('detecta solo hallazgos estructurados con evidencia e IDs válidos', async () => {
-        AIService.sendMessage.mockResolvedValue(JSON.stringify({ summary: 'Conflicto entre chapter-1 y world-1', findings: [
-            { documentIds: ['chapter-1', 'world-1'], title: 'Fecha incompatible', category: 'timeline', severity: 'high', confidence: 0.92, claimA: 'chapter-1 indica Día 1', claimB: 'world-1 indica Día 3', evidenceA: { documentId: 'chapter-1', quote: 'Día 1' }, evidenceB: { documentId: 'world-1', quote: 'Día 3' }, explanation: 'Mismo evento en chapter-1 y world-1 con fechas incompatibles.' },
-            { documentIds: ['fake', 'world-1'], title: 'Inválido', category: 'fact', severity: 'high', confidence: 0.99, claimA: 'A', claimB: 'B', evidenceA: { documentId: 'fake', quote: 'A' }, evidenceB: { documentId: 'world-1', quote: 'B' }, explanation: 'No debe aceptarse.' },
-        ] }));
-        const result = await requestCoherenceAnalysis({ profile, documents: [
-            { id: 'chapter-1', type: 'chapter', title: 'Capítulo', content: '<p>Día 1</p>' },
-            { id: 'world-1', type: 'worldItem', title: 'Mundo', content: '<p>Día 3</p>' },
-        ] });
-        expect(result.items).toHaveLength(1);
-        expect(result.items[0].documentIds).toEqual(['chapter-1', 'world-1']);
-        expect(result.items[0].evidenceA.quote).toBe('Día 1');
-        expect(result.summary).toBe('Conflicto entre Capítulo y Mundo');
-        expect(result.items[0].claimA).toBe('Capítulo indica Día 1');
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool', toolChoice: 'required' }));
-    });
-
-    it('exige confirmar una inconsistencia antes de generar tres soluciones', async () => {
-        const finding = { id: 'finding-1', status: 'detected', documentIds: ['chapter-1', 'world-1'] };
-        await expect(requestCoherenceResolutionOptions({ profile, finding, documents: [] })).rejects.toThrow('confirmada');
-        AIService.sendMessage.mockResolvedValue(JSON.stringify({ status: 'confirmed', confidence: 0.9, reason: 'Confirmada.' }));
-        const validated = await validateCoherenceFinding({ profile, finding, documents: [
-            { id: 'chapter-1', content: 'Día 1' },
-            { id: 'world-1', content: 'Día 3' },
-        ] });
-        expect(validated.status).toBe('confirmed');
-        AIService.sendMessage.mockResolvedValue(JSON.stringify({ options: [
-            { id: 'a', title: 'A', description: 'Conserva el texto.', risk: 'low', impact: 'Bajo.', preserves: ['La continuidad'], changes: ['Una fecha'], documentIds: ['chapter-1'] },
-            { id: 'b', title: 'B', description: 'Ajusta el canon.', risk: 'medium', impact: 'Medio.', preserves: ['El conflicto'], changes: ['La fecha de referencia'], documentIds: ['world-1'] },
-            { id: 'c', title: 'C', description: 'Añade una explicación.', risk: 'high', impact: 'Alto.', preserves: ['Ambas versiones'], changes: ['La explicación narrativa'], documentIds: ['chapter-1', 'world-1'] },
-        ] }));
-        const options = await requestCoherenceResolutionOptions({ profile, finding: validated, documents: [
-            { id: 'chapter-1', content: 'Día 1' },
-            { id: 'world-1', content: 'Día 3' },
-        ] });
-        expect(options).toHaveLength(3);
-    });
-
-    it('devuelve parches exactos y nunca un reemplazo de documento completo', async () => {
-        AIService.sendMessage.mockResolvedValue(JSON.stringify({ patches: [{ documentId: 'chapter-1', baseVersion: 'v1', originalText: 'Día 1', replacementText: 'Día 3', reason: 'Alinear cronología.' }] }));
-        const patches = await buildCoherencePatches({ profile, finding: { documentIds: ['chapter-1', 'world-1'] }, option: { documentIds: ['chapter-1'] }, documents: [{ id: 'chapter-1', content: '<p>Día 1</p>', version: 'v1' }] });
-        expect(patches[0]).toEqual(expect.objectContaining({ documentId: 'chapter-1', originalText: 'Día 1', replacementText: 'Día 3' }));
-    });
 });

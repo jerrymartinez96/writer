@@ -9,9 +9,13 @@ import {
 } from 'lucide-react';
 import NarradorSettingsModal from './NarradorSettingsModal';
 
-const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, skipToSegment, regenerateSegment }) => (
+const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment }) => (
     <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
         {segments.map((segment, index) => (
+            (() => {
+                const preparing = isPreparing && preparationIndex === index && !cachedSegmentIndexes.has(index);
+                const generating = preparing || (status === 'connecting' && index === currentSegmentIndex);
+                return (
             <div key={`${segment.index}-${segment.hash}`} className={`flex items-center gap-1 rounded-lg ${index === currentSegmentIndex ? 'bg-indigo-500/10' : ''}`}>
                 <button
                     onClick={() => skipToSegment(index)}
@@ -22,21 +26,23 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
                     {segment.text}
                 </button>
                 <span
-                    className={`flex shrink-0 items-center gap-1 text-[8px] font-bold uppercase tracking-wide ${cachedSegmentIndexes.has(index) ? 'text-emerald-500' : status === 'connecting' && index === currentSegmentIndex ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}
-                    title={cachedSegmentIndexes.has(index) ? 'Audio disponible en caché' : status === 'connecting' && index === currentSegmentIndex ? 'Generando audio...' : 'Audio aún no generado'}
+                    className={`flex shrink-0 items-center gap-1 text-[8px] font-bold uppercase tracking-wide ${cachedSegmentIndexes.has(index) ? 'text-emerald-500' : generating ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}
+                    title={cachedSegmentIndexes.has(index) ? 'Audio disponible en caché' : generating ? 'Preparando audio...' : 'Audio aún no generado'}
                 >
-                    {cachedSegmentIndexes.has(index) ? <CheckCircle2 size={12} /> : status === 'connecting' && index === currentSegmentIndex ? <Loader2 size={12} className="animate-spin" /> : <CircleDashed size={12} />}
-                    <span className="hidden sm:inline">{cachedSegmentIndexes.has(index) ? 'Caché' : status === 'connecting' && index === currentSegmentIndex ? 'Generando' : 'Pendiente'}</span>
+                    {cachedSegmentIndexes.has(index) ? <CheckCircle2 size={12} /> : generating ? <Loader2 size={12} className="animate-spin" /> : <CircleDashed size={12} />}
+                    <span className="hidden sm:inline">{cachedSegmentIndexes.has(index) ? 'Caché' : generating ? 'Preparando' : 'Pendiente'}</span>
                 </span>
                 <button
                     onClick={() => regenerateSegment(index)}
-                    disabled={status === 'connecting'}
+                    disabled={status === 'connecting' || isPreparing}
                     className="p-1.5 text-[var(--text-muted)] hover:text-purple-500 disabled:opacity-30 cursor-pointer"
-                    title="Regenerar este fragmento"
+                    title={isPreparing ? 'No disponible mientras se prepara el capítulo' : 'Regenerar este fragmento'}
                 >
                     <RefreshCw size={12} />
                 </button>
             </div>
+                );
+            })()
         ))}
     </div>
 );
@@ -91,15 +97,28 @@ const KaraokeTranscript = ({ text, progress, isPlaying, isSyncReady }) => {
     );
 };
 
+const formatPreparationEta = (seconds) => {
+    const value = Math.max(0, Math.ceil(Number(seconds) || 0));
+    if (value <= 0) return '';
+    if (value < 60) return `${value}s`;
+
+    const minutes = Math.ceil(value / 60);
+    if (minutes < 60) return `${minutes} min`;
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+};
+
 const NarradorPanel = ({
     narrador,
     activeChapter,
-    onClose
+    onClose,
+    embedded = false,
 }) => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
     const [isPrepareMenuOpen, setIsPrepareMenuOpen] = useState(false);
-    const [prepareCount, setPrepareCount] = useState(5);
 
     const {
         status,
@@ -124,17 +143,25 @@ const NarradorPanel = ({
         isSegmentSyncReady,
         cachedSegmentIndexes,
         isPreparing,
+        isPreparationPaused,
         preparationProgress,
         prepareAudio,
-        cancelPreparation
+        cancelPreparation,
+        pausePreparation,
+        resumePreparation
     } = narrador;
 
-    const isPlaying = status === 'speaking' || status === 'connecting';
+    const isPlaying = status === 'speaking';
+    const isConnecting = status === 'connecting';
     const isPaused = status === 'paused';
 
     const chapterTitle = activeChapter?.title || 'Capítulo';
+    const preparationEta = formatPreparationEta(preparationProgress.etaSeconds);
+    const preparationSegmentLabel = Number.isInteger(preparationProgress.currentIndex)
+        ? `Preparando fragmento ${preparationProgress.currentIndex + 1}`
+        : 'Preparando audio';
     const preparationLabel = preparationProgress.total > 0
-        ? `${preparationProgress.completed}/${preparationProgress.total}${preparationProgress.etaSeconds ? ` · ~${preparationProgress.etaSeconds}s` : ''}`
+        ? `${isPreparationPaused ? 'Pausado · ' : ''}${preparationSegmentLabel} · ${preparationProgress.completed}/${preparationProgress.total}${preparationEta ? ` · ~${preparationEta}` : ''}`
         : 'Preparar';
 
     const renderPreparationControls = () => (
@@ -142,18 +169,23 @@ const NarradorPanel = ({
             <div className="flex items-center gap-2">
                 <button
                     onClick={() => { if (!isPreparing) setIsPrepareMenuOpen(previous => !previous); }}
-                    disabled={!hasGeminiKey}
+                    disabled={!hasGeminiKey || isPlaying || isConnecting || isPaused}
                     className={`min-w-0 flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-app)] border text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer ${isPreparing ? 'border-emerald-500/40 text-[var(--text-main)]' : 'border-[var(--border-main)] text-[var(--text-muted)] hover:border-emerald-500/50'}`}
                     title={hasGeminiKey ? 'Preparar audio en caché' : 'Requiere una API key de Gemini'}
                 >
-                    {isPreparing ? <Loader2 size={12} className="shrink-0 animate-spin text-emerald-500" /> : <Download size={12} />}
+                    {isPreparing ? (isPreparationPaused ? <Play size={12} className="shrink-0 text-amber-500" /> : <Loader2 size={12} className="shrink-0 animate-spin text-emerald-500" />) : <Download size={12} />}
                     <span className="truncate">{isPreparing ? preparationLabel : 'Preparar'}</span>
                     {!isPreparing && <ChevronDown size={12} />}
                 </button>
                 {isPreparing && (
-                    <button onClick={cancelPreparation} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/50 text-red-500 hover:bg-red-500/10" title="Cancelar preparación">
-                        <StopCircle size={13} />
-                    </button>
+                    <>
+                        <button onClick={isPreparationPaused ? resumePreparation : pausePreparation} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-500/50 text-amber-600 hover:bg-amber-500/10" title={isPreparationPaused ? 'Reanudar preparación' : 'Pausar preparación'}>
+                            {isPreparationPaused ? <Play size={13} /> : <Pause size={13} />}
+                        </button>
+                        <button onClick={cancelPreparation} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/50 text-red-500 hover:bg-red-500/10" title="Cancelar preparación">
+                            <StopCircle size={13} />
+                        </button>
+                    </>
                 )}
             </div>
             {!isPreparing && isPrepareMenuOpen && (
@@ -161,18 +193,14 @@ const NarradorPanel = ({
                     <div className="fixed inset-0 z-40" onClick={() => setIsPrepareMenuOpen(false)}></div>
                     <div className="absolute bottom-full left-0 mb-1 w-52 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-2xl z-50 overflow-hidden p-1">
                         {[
-                            ['chapter', 'Preparar capítulo'],
-                            ['fromHere', 'Preparar desde aquí'],
-                            ['half', 'Preparar la mitad']
+                            ['chapter', 'Completo'],
+                            ['half', 'Mitad y reproducir'],
+                            ['start', 'Inicio (3 fragmentos)']
                         ].map(([mode, label]) => (
                             <button key={mode} onClick={() => { setIsPrepareMenuOpen(false); prepareAudio(mode); }} className="w-full text-left px-3 py-2 rounded-lg text-[10px] font-black text-[var(--text-main)] hover:bg-emerald-500/10 hover:text-emerald-500 cursor-pointer">
                                 {label}
                             </button>
                         ))}
-                        <div className="flex items-center gap-2 px-2 py-2 border-t border-[var(--border-main)] mt-1">
-                            <input type="number" min="1" max={totalSegments || 1} value={prepareCount} onChange={event => setPrepareCount(event.target.value)} className="w-14 px-2 py-1.5 rounded-lg bg-[var(--bg-editor)] border border-[var(--border-main)] text-xs text-center text-[var(--text-main)]" />
-                            <button onClick={() => { setIsPrepareMenuOpen(false); prepareAudio('count', prepareCount); }} className="flex-1 text-left text-[10px] font-black text-[var(--text-main)] hover:text-emerald-500 cursor-pointer">Preparar N fragmentos</button>
-                        </div>
                     </div>
                 </>
             )}
@@ -190,8 +218,9 @@ const NarradorPanel = ({
     };
 
     const progressPct = totalSegments > 0
-        ? Math.round((currentSegmentIndex / totalSegments) * 100)
+        ? Math.min(100, Math.round(((currentSegmentIndex + segmentProgress) / totalSegments) * 100))
         : 0;
+    const motorLabel = motorUsado === 'gemini' ? '✨ Gemini' : motorUsado === 'web-speech' ? '🌐 Navegador' : 'Sin iniciar';
 
     /* ============ MODO NARRADOR: ventana modal inmersiva a todo el ancho ============ */
     if (isNarratorMode) {
@@ -297,7 +326,11 @@ const NarradorPanel = ({
                                     <SkipBack size={18} />
                                 </button>
 
-                                {isPlaying ? (
+                        {isConnecting ? (
+                            <button disabled className="w-14 h-14 rounded-2xl bg-[var(--accent-main)] text-white shadow-lg shadow-indigo-500/30 flex items-center justify-center opacity-80" title="Conectando">
+                                <Loader2 size={22} className="animate-spin" />
+                            </button>
+                        ) : isPlaying ? (
                                     <button
                                         onClick={pauseNarration}
                                         className="w-14 h-14 rounded-2xl bg-[var(--accent-main)] text-white shadow-lg shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
@@ -348,6 +381,8 @@ const NarradorPanel = ({
                                     currentSegmentIndex={currentSegmentIndex}
                                     status={status}
                                     cachedSegmentIndexes={cachedSegmentIndexes}
+                                    isPreparing={isPreparing}
+                                    preparationIndex={preparationProgress.currentIndex}
                                     skipToSegment={skipToSegment}
                                     regenerateSegment={regenerateSegment}
                                 />
@@ -405,7 +440,7 @@ const NarradorPanel = ({
     /* ============ MODO NORMAL: panel flotante ============ */
     return (
         <>
-            <div className="fixed bottom-20 right-6 z-[60] w-80 bg-[var(--bg-app)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-3xl shadow-2xl shadow-black/20 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-200">
+            <div className={`${embedded ? 'w-full' : 'fixed bottom-20 right-6 z-[60] w-80'} bg-[var(--bg-app)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-3xl shadow-2xl shadow-black/20 overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-200`}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-main)] bg-[var(--bg-editor)]/50">
                     <div className="flex items-center gap-2 min-w-0">
@@ -423,7 +458,7 @@ const NarradorPanel = ({
                         <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
                             motorUsado === 'gemini' ? 'bg-purple-500/10 text-purple-500' : 'bg-blue-500/10 text-blue-500'
                         }`}>
-                            {motorUsado === 'gemini' ? '✨ Gemini' : '🌐 Navegador'}
+                            {motorLabel}
                         </span>
                         <button
                             onClick={() => setIsSettingsOpen(true)}
@@ -434,6 +469,7 @@ const NarradorPanel = ({
                         </button>
                         <button
                             onClick={onClose}
+                            aria-label="Cerrar reproductor"
                             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-all cursor-pointer"
                         >
                             <X size={14} />
@@ -472,7 +508,11 @@ const NarradorPanel = ({
                             <SkipBack size={16} />
                         </button>
 
-                        {isPlaying ? (
+                        {isConnecting ? (
+                            <button disabled className="w-12 h-12 rounded-2xl bg-[var(--accent-main)] text-white shadow-lg shadow-indigo-500/30 flex items-center justify-center opacity-80" title="Conectando">
+                                <Loader2 size={20} className="animate-spin" />
+                            </button>
+                        ) : isPlaying ? (
                             <button
                                 onClick={pauseNarration}
                                 className="w-12 h-12 rounded-2xl bg-[var(--accent-main)] text-white shadow-lg shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
@@ -523,6 +563,8 @@ const NarradorPanel = ({
                             currentSegmentIndex={currentSegmentIndex}
                             status={status}
                             cachedSegmentIndexes={cachedSegmentIndexes}
+                            isPreparing={isPreparing}
+                            preparationIndex={preparationProgress.currentIndex}
                             skipToSegment={skipToSegment}
                             regenerateSegment={regenerateSegment}
                         />

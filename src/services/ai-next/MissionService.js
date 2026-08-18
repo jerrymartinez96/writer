@@ -1,5 +1,5 @@
 import AIService from '../AIService';
-import { getConfiguredAIOptions } from './AIRequestOptions';
+import { getStructuredAIOptions } from './AIRequestOptions';
 import { toPlainText } from './plainText';
 export const MISSION_TYPES = [
     { id: 'develop_canon', label: 'Modificar canon', description: 'Crea, elimina o transforma hechos, reglas y relaciones importantes.' },
@@ -24,11 +24,8 @@ const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.dee
 const structuredCall = async ({ profile, prompt, schema, temperature = 0.1, max_tokens = 7000 }) => {
     const apiKey = getApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de analizar la misión.');
-    const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, {
+    const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, schema, {
         temperature,
-        responseMode: 'tool',
-        tools: [schema],
-        toolChoice: 'required',
         max_tokens,
     }));
     return parseAndValidate(raw, schema, 'respuesta del Constructor Global');

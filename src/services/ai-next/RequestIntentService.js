@@ -1,6 +1,6 @@
 import AIService from '../AIService';
-import { getConfiguredAIOptions } from './AIRequestOptions';
-import { buildRegisteredPrompt, INTENT_RESPONSE_SCHEMA } from './PromptRegistry';
+import { getStructuredAIOptions } from './AIRequestOptions';
+import { buildRegisteredPrompt, INTENT_RESPONSE_SCHEMA, INTENT_RESPONSE_TOOL } from './PromptRegistry';
 import { parseAndValidate } from './StructuredResponse';
 
 const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
@@ -9,9 +9,8 @@ export const classifyRequestIntent = async ({ profile, message, context = '' }) 
     const apiKey = getApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek para analizar la intención.');
     const prompt = buildRegisteredPrompt('classifyRequestIntent', { message, context });
-    const options = getConfiguredAIOptions(profile, {
+    const options = getStructuredAIOptions(profile, INTENT_RESPONSE_TOOL, {
         temperature: 0.05,
-        responseMode: 'json',
         max_tokens: 900,
     });
     let result;

@@ -2,9 +2,10 @@
  * NarradorSettingsModal — Configuración avanzada del Narrador.
  * Incluye: API key, voz por defecto con preview, velocidad, tono, auto-continuar y limpieza de caché.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Play, Square, Sparkles, Globe, Trash2, Volume2, Loader2, Check } from 'lucide-react';
 import Modal from '../Modal';
+import ConfirmModal from '../ConfirmModal';
 import GeminiLiveService, { GEMINI_LIVE_VOICES, GEMINI_LIVE_MODELS } from '../../services/GeminiLiveService';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../Toast';
@@ -40,6 +41,13 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     const [showApiKey, setShowApiKey] = useState(false);
     const [keepPermanent, setKeepPermanent] = useState(false);
     const [folderName, setFolderName] = useState('');
+    const [isClearCacheConfirmOpen, setIsClearCacheConfirmOpen] = useState(false);
+    const profileRef = useRef(profile);
+    const updateProfileRef = useRef(updateProfile);
+    const lastSavedConfigRef = useRef('');
+
+    useEffect(() => { profileRef.current = profile; }, [profile]);
+    useEffect(() => { updateProfileRef.current = updateProfile; }, [updateProfile]);
 
     // Sync with profile when opened
     useEffect(() => {
@@ -51,6 +59,14 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             setTone(cfg.narradorTone || 'auto');
             setModel(cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview');
             setAutoContinue(cfg.narradorAutoContinue || false);
+            lastSavedConfigRef.current = JSON.stringify({
+                geminiApiKey: cfg.geminiApiKey || '',
+                narradorVoice: cfg.narradorVoice || 'Puck',
+                narradorSpeed: cfg.narradorSpeed || 1.0,
+                narradorTone: cfg.narradorTone || 'auto',
+                geminiLiveModel: cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview',
+                narradorAutoContinue: cfg.narradorAutoContinue || false,
+            });
             getNarradorStorageSettings().then(storage => {
                 setKeepPermanent(!!storage.keepPermanent);
                 setFolderName(storage.folderName || '');
@@ -61,20 +77,26 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     // Auto-save when any field changes
     useEffect(() => {
         if (!isOpen || !profile) return;
+        const nextConfig = {
+            geminiApiKey: apiKey,
+            narradorVoice: voice,
+            narradorSpeed: speed,
+            narradorTone: tone,
+            geminiLiveModel: model,
+            narradorAutoContinue: autoContinue,
+        };
+        const serializedConfig = JSON.stringify(nextConfig);
+        if (serializedConfig === lastSavedConfigRef.current) return;
         const timer = setTimeout(async () => {
             setIsSaving(true);
             try {
-                await updateProfile({
+                await updateProfileRef.current({
                     aiConfig: {
-                        ...profile.aiConfig,
-                        geminiApiKey: apiKey,
-                        narradorVoice: voice,
-                        narradorSpeed: speed,
-                        narradorTone: tone,
-                        geminiLiveModel: model,
-                        narradorAutoContinue: autoContinue
+                        ...(profileRef.current?.aiConfig || {}),
+                        ...nextConfig,
                     }
                 });
+                lastSavedConfigRef.current = serializedConfig;
             } catch (err) {
                 console.error('Error saving narrador settings:', err);
             } finally {
@@ -82,7 +104,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             }
         }, 800);
         return () => clearTimeout(timer);
-    }, [apiKey, voice, speed, tone, model, autoContinue, isOpen, profile, updateProfile]);
+    }, [apiKey, voice, speed, tone, model, autoContinue, isOpen, profile]);
 
     // Load cache stats
     useEffect(() => {
@@ -180,7 +202,8 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Configuración del Narrador" size="lg">
+        <>
+            <Modal isOpen={isOpen} onClose={onClose} title="Configuración del Narrador" size="lg">
             <div className="p-6 space-y-6 font-sans max-h-[70vh] overflow-y-auto scrollbar-hide">
                 {/* Header info */}
                 <p className="text-[11px] text-[var(--text-muted)] font-medium leading-relaxed">
@@ -355,7 +378,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                             </p>
                         </div>
                         <button
-                            onClick={handleClearCache}
+                            onClick={() => setIsClearCacheConfirmOpen(true)}
                             disabled={isClearingCache || !cacheInfo?.entries}
                             className="px-4 py-2 rounded-xl bg-orange-500/10 text-orange-500 border border-orange-500/30 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
                         >
@@ -400,7 +423,16 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                     </p>
                 </div>
             </div>
-        </Modal>
+            </Modal>
+            <ConfirmModal
+                isOpen={isClearCacheConfirmOpen}
+                onClose={() => setIsClearCacheConfirmOpen(false)}
+                onConfirm={handleClearCache}
+                title="¿Limpiar la caché de narración?"
+                message="Se eliminarán los audios temporales y permanentes guardados localmente para todas las obras. Esta acción no modifica ningún manuscrito."
+                confirmText="Limpiar caché"
+            />
+        </>
     );
 };
 

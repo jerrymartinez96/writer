@@ -27,10 +27,19 @@ export const INTENT_RESPONSE_SCHEMA = {
     required: ['intent', 'changeType', 'scope', 'confidence', 'reason', 'recommendedTool'],
 };
 
+export const INTENT_RESPONSE_TOOL = {
+    type: 'function',
+    function: {
+        name: 'clasificar_intencion',
+        description: 'Clasifica la intención del escritor para decidir si debe continuar en Core o abrir una Tool Room.',
+        parameters: INTENT_RESPONSE_SCHEMA,
+    },
+};
+
 export const PROMPT_REGISTRY = Object.freeze({
     classifyRequestIntent: {
         version: PROMPT_VERSION,
-        responseMode: 'json',
+        responseMode: 'tool',
         schema: INTENT_RESPONSE_SCHEMA,
         build: ({ message, context }) => [
             'Clasifica la intención real de la solicitud del escritor.',
@@ -146,6 +155,24 @@ export const PROMPT_REGISTRY = Object.freeze({
             asContext('Objetivo', instruction),
             asContext('Contenido principal', sourceContent),
             asContext('Contexto de apoyo no editable', contextContent),
+        ].join('\n\n'),
+    },
+    narrationScript: {
+        version: PROMPT_VERSION,
+        responseMode: 'tool',
+        build: ({ chapterId, sourceContent, contextContent, instruction }) => [
+            'Eres un director de narración y diseño sonoro para audiolibros.',
+            'Diseña un guion de producción sobre el texto recibido. No modifiques el manuscrito ni inventes contenido narrativo.',
+            'Conserva literalmente el texto de cada segmento. Solo puedes añadir dirección de voz, pausas, énfasis y pronunciaciones.',
+            'Divide el texto en segmentos ordenados y completos. No omitas, combines ni reescribas frases.',
+            'Usa pausas y énfasis con moderación. Si no hay una indicación clara, utiliza tono neutro y pausas naturales.',
+            'El resultado será revisado por el usuario antes de preparar audio.',
+            SHARED_RULES,
+            `ID del capítulo: ${chapterId || '(sin ID)'}`,
+            asContext('Texto fuente exacto', sourceContent),
+            asContext('Contexto de apoyo limitado', contextContent, '(ninguno)'),
+            asContext('Instrucción adicional', instruction, '(ninguna)'),
+            'Devuelve únicamente los argumentos de la herramienta diseñar_guion_narracion.',
         ].join('\n\n'),
     },
     coreChat: {
@@ -265,77 +292,26 @@ export const PROMPT_REGISTRY = Object.freeze({
     consistencyAudit: {
         version: PROMPT_VERSION,
         responseMode: 'tool',
-        build: ({ auditType, query, canonical, instruction, normalizedDocuments }) => [
-            'Eres un auditor de continuidad y consistencia para una obra narrativa. Busca contradicciones, detalles repetidos, desactualizados o variables entre documentos.',
-            'No modifiques nada y no conviertas una coincidencia legítima en un error sin evidencia.',
-            'Cada hallazgo debe apuntar a un documentId válido. Para contradicciones entre documentos incluye evidence con citas exactas.',
-            'originalText debe ser el fragmento mínimo literal y replacementText debe conservar una oración gramatical. No propongas cambiar hechos por aparecer una sola vez.',
-            'Para muletillas conserva usos intencionales y reescribe conectores sobrantes cuando sea necesario.',
-            `Tipo de auditoría: ${auditType}`,
-            `Elemento o búsqueda: ${query || '(detectar automáticamente)'}`,
-            `Versión correcta o fuente de verdad: ${canonical || '(no definida; solo detectar)'}`,
-            `Instrucción adicional: ${instruction || '(ninguna)'}`,
-            asContext('Documentos', JSON.stringify(normalizedDocuments)),
-            'Reporta los hallazgos mediante la herramienta disponible y no escribas texto fuera de ella.',
-        ].join('\n\n'),
-    },
-    coherenceAnalysis: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ normalizedDocuments }) => [
-            'Eres un auditor de continuidad narrativa. Analiza exclusivamente los documentos entregados y detecta contradicciones objetivas.',
-            'No propongas soluciones. No reportes diferencias de estilo, omisiones, dudas o hechos compatibles.',
-            'Cada hallazgo debe tener evidencia textual de dos documentos y solo puede usar IDs presentes en la entrada.',
-            'Usa los IDs solo en documentIds y evidencias; en títulos, afirmaciones, explicaciones y summary utiliza nombres de documentos.',
-            asContext('Documentos', JSON.stringify(normalizedDocuments)),
-            'Devuelve únicamente los argumentos de la herramienta solicitada.',
-        ].join('\n\n'),
-    },
-    coherenceValidation: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ finding, affectedDocuments }) => [
-            'Verifica si el hallazgo siguiente es una contradicción objetiva.',
-            'Confirma solo si las dos afirmaciones no pueden ser verdaderas al mismo tiempo y las citas respaldan el hallazgo.',
-            asContext('Hallazgo', JSON.stringify(finding)),
-            asContext('Documentos afectados', JSON.stringify(affectedDocuments)),
-            'Devuelve únicamente los argumentos de la herramienta validar_incoherencia.',
-        ].join('\n\n'),
-    },
-    coherenceOptions: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ finding, affectedDocuments }) => [
-            'Genera exactamente tres opciones distintas para resolver la inconsistencia confirmada. No modifiques documentos.',
-            'Una opción debe minimizar cambios, otra puede cambiar el canon y otra puede introducir una explicación narrativa.',
-            asContext('Hallazgo', JSON.stringify(finding)),
-            asContext('Documentos afectados', JSON.stringify(affectedDocuments)),
-            'Devuelve únicamente el JSON solicitado.',
-        ].join('\n\n'),
-    },
-    coherenceCustomResolution: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ instruction, finding, affectedDocuments }) => [
-            'Convierte la idea del usuario en una única solución alternativa para la inconsistencia.',
-            'Respeta la intención, señala consecuencias y no apliques cambios.',
-            asContext('Idea del usuario', instruction),
-            asContext('Hallazgo', JSON.stringify(finding)),
-            asContext('Documentos afectados', JSON.stringify(affectedDocuments)),
-            'Devuelve la solución mediante la herramienta disponible.',
-        ].join('\n\n'),
-    },
-    coherencePatches: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ finding, option, affectedDocuments }) => [
-            'Construye parches exactos para aplicar la opción elegida. Modifica únicamente lo necesario.',
-            'originalText debe existir literalmente en el documento. Nunca devuelvas un documento completo ni HTML nuevo.',
-            asContext('Hallazgo', JSON.stringify(finding)),
-            asContext('Opción elegida', JSON.stringify(option)),
-            asContext('Documentos actuales', JSON.stringify(affectedDocuments)),
-            'Devuelve únicamente los argumentos de la herramienta solicitada.',
-        ].join('\n\n'),
+        build: ({ auditType, query, canonical, instruction, normalizedDocuments }) => {
+            const integral = auditType === 'full';
+            return [
+                'Eres el auditor principal de una obra narrativa. Esta es una auditoría integral, no una revisión puntual ni una tarea de escritura.',
+                integral
+                    ? 'Analiza automáticamente todas las dimensiones relevantes: canon y continuidad, contradicciones, incoherencias, huecos de trama, causalidad, consecuencias, personajes, relaciones, evolución, mundo, reglas, cronología, terminología, referencias desactualizadas y cabos abiertos.'
+                    : `El usuario solicitó una auditoría dirigida sobre el área: ${auditType}. Mantén el mismo rigor de evidencia, pero prioriza esa área.`,
+                'No modifiques nada. No esperes que el usuario especifique qué problema buscar: descubre los problemas a partir de todos los documentos recibidos.',
+                'Distingue entre contradicción confirmada, hueco probable, pregunta abierta intencional y simple ausencia de información. No conviertas una posibilidad en un hecho.',
+                'Cada hallazgo debe apuntar a un documentId válido. Para contradicciones entre documentos incluye evidence con al menos una cita exacta de cada documento involucrado.',
+                'Para huecos de trama y causalidad incluye la evidencia del planteamiento, consecuencia o transición que hace visible el vacío. Si no puedes demostrarlo, marca evidencia insuficiente o no lo reportes.',
+                'originalText debe ser el fragmento mínimo literal y replacementText debe conservar una oración gramatical. No propongas cambiar hechos por aparecer una sola vez.',
+                'Para muletillas conserva usos intencionales y reescribe conectores sobrantes cuando sea necesario.',
+                `Elemento o búsqueda opcional: ${query || '(ninguno; realiza la auditoría integral)'}`,
+                `Fuente de verdad opcional: ${canonical || '(no definida; compara y detecta)'}`,
+                `Instrucción adicional opcional: ${instruction || '(ninguna)'}`,
+                asContext('Documentos', JSON.stringify(normalizedDocuments)),
+                'Clasifica cada hallazgo con una categoría clara, severidad y confianza. Reporta los hallazgos mediante la herramienta disponible y no escribas texto fuera de ella.',
+            ].join('\n\n');
+        },
     },
     coreImpact: {
         version: PROMPT_VERSION,

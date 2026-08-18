@@ -8,7 +8,7 @@ describe('StructuredResponse y PromptRegistry', () => {
         const prompt = buildRegisteredPrompt('classifyRequestIntent', { message: 'Quita la escena del puerto', context: 'Capítulo 1' });
 
         expect(definition.version).toBe('1.0.0');
-        expect(definition.responseMode).toBe('json');
+        expect(definition.responseMode).toBe('tool');
         expect(prompt).toContain('Quita la escena del puerto');
         expect(prompt).toContain('No inventes IDs');
     });

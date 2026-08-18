@@ -1,89 +1,9 @@
 import AIService, { COHERENCE_AUDIT_SCHEMA } from '../AIService';
 import { formatDraftText, toPlainText } from './plainText';
-import { getConfiguredAIOptions } from './AIRequestOptions';
+import { getConfiguredAIOptions, getStructuredAIOptions } from './AIRequestOptions';
 import { parseStructuredResponse, validateStructuredResponse } from './StructuredResponse';
 import { buildRegisteredPrompt } from './PromptRegistry';
-
-const COHERENCE_MIN_CONFIDENCE = 0.75;
-
-const normalizeDocuments = (documents = []) => documents.map((document) => ({
-    id: String(document.id || ''),
-    type: String(document.type || 'document'),
-    title: String(document.title || document.name || document.label || document.id || 'Documento'),
-    version: String(document.version || ''),
-    content: toPlainText(document.content || document.description || ''),
-})).filter((document) => document.id && document.content);
-
-const replaceDocumentIdsForDisplay = (value, documents) => {
-    let result = String(value || '');
-    documents.forEach((document) => {
-        if (!document.id || !document.title || document.id === document.title) return;
-        result = result.split(document.id).join(document.title);
-    });
-    return result;
-};
-
-const normalizeEvidence = (evidence, allowedIds) => {
-    if (!evidence || typeof evidence !== 'object') return null;
-    const documentId = String(evidence.documentId || '');
-    const quote = String(evidence.quote || '').trim();
-    if (!allowedIds.has(documentId) || !quote) return null;
-    return { documentId, quote };
-};
-
-const COHERENCE_DETECT_TOOL = {
-    type: 'function',
-    function: {
-        name: 'reportar_incoherencias_estructuradas',
-        description: 'Reporta contradicciones objetivas con evidencia entre documentos. No propongas soluciones.',
-        parameters: {
-            type: 'object',
-            properties: {
-                summary: { type: 'string' },
-                findings: { type: 'array', items: { type: 'object', properties: {
-                    documentIds: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 2 },
-                    category: { type: 'string' }, title: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] }, confidence: { type: 'number' }, claimA: { type: 'string' }, claimB: { type: 'string' }, evidenceA: { type: 'object', properties: { documentId: { type: 'string' }, quote: { type: 'string' } }, required: ['documentId', 'quote'] }, evidenceB: { type: 'object', properties: { documentId: { type: 'string' }, quote: { type: 'string' } }, required: ['documentId', 'quote'] }, explanation: { type: 'string' },
-                }, required: ['documentIds', 'title', 'severity', 'confidence', 'claimA', 'claimB', 'evidenceA', 'evidenceB', 'explanation'] } },
-            }, required: ['summary', 'findings'],
-        },
-    },
-};
-
-const COHERENCE_VALIDATE_TOOL = {
-    type: 'function',
-    function: {
-        name: 'validar_incoherencia',
-        description: 'Confirma o rechaza una contradicción objetiva con base en sus citas y documentos actuales.',
-        parameters: { type: 'object', properties: { status: { type: 'string', enum: ['confirmed', 'rejected'] }, confidence: { type: 'number' }, reason: { type: 'string' } }, required: ['status', 'confidence', 'reason'] },
-    },
-};
-
-const COHERENCE_OPTIONS_TOOL = {
-    type: 'function',
-    function: {
-        name: 'proponer_soluciones_incoherencia',
-        description: 'Propone exactamente tres alternativas de resolución para una contradicción confirmada. No aplica cambios.',
-        parameters: { type: 'object', properties: { options: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, impact: { type: 'string' }, preserves: { type: 'array', items: { type: 'string' } }, changes: { type: 'array', items: { type: 'string' } }, documentIds: { type: 'array', items: { type: 'string' } }, patchPlans: { type: 'array', items: { type: 'object' } } }, required: ['id', 'title', 'description', 'risk', 'impact', 'documentIds'] } } }, required: ['options'] },
-    },
-};
-
-const COHERENCE_PATCHES_TOOL = {
-    type: 'function',
-    function: {
-        name: 'preparar_parches_coherencia',
-        description: 'Prepara parches exactos para una solución seleccionada. Nunca reemplaza un documento completo.',
-        parameters: { type: 'object', properties: { patches: { type: 'array', items: { type: 'object', properties: { documentId: { type: 'string' }, baseVersion: { type: 'string' }, originalText: { type: 'string' }, replacementText: { type: 'string' }, reason: { type: 'string' } }, required: ['documentId', 'originalText', 'replacementText', 'reason'] } } }, required: ['patches'] },
-    },
-};
-
-const COHERENCE_CUSTOM_OPTION_TOOL = {
-    type: 'function',
-    function: {
-        name: 'crear_version_alternativa_coherencia',
-        description: 'Convierte la idea del usuario en una única solución alternativa estructurada. No aplica cambios.',
-        parameters: { type: 'object', properties: { option: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, impact: { type: 'string' }, preserves: { type: 'array', items: { type: 'string' } }, changes: { type: 'array', items: { type: 'string' } }, documentIds: { type: 'array', items: { type: 'string' } }, patchPlans: { type: 'array', items: { type: 'object' } } }, required: ['title', 'description', 'risk', 'impact', 'documentIds'] } }, required: ['option'] },
-    },
-};
+import { prepareSegments } from '../NarradorSegmenter';
 
 const CHAPTER_STRUCTURE_ANALYSIS_TOOL = {
     type: 'function',
@@ -167,18 +87,41 @@ const TOOL_ROOM_INSIGHT_TOOL = {
     },
 };
 
+const NARRATION_SCRIPT_TOOL = {
+    type: 'function',
+    function: {
+        name: 'diseñar_guion_narracion',
+        description: 'Diseña un guion de producción de audio sin modificar el texto del manuscrito.',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                segments: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+                    index: { type: 'number' },
+                    text: { type: 'string' },
+                    pauseBeforeMs: { type: 'number', minimum: 0, maximum: 10000 },
+                    pauseAfterMs: { type: 'number', minimum: 0, maximum: 10000 },
+                    tone: { type: 'string' },
+                    emphasis: { type: 'array', items: { type: 'string' } },
+                    direction: { type: 'string' },
+                    pronunciation: { type: 'array', items: { type: 'string' } },
+                }, required: ['index', 'text', 'pauseBeforeMs', 'pauseAfterMs', 'tone', 'emphasis', 'direction', 'pronunciation'] } },
+                warnings: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['summary', 'segments', 'warnings'],
+        },
+    },
+};
+
 export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const requestOptions = {
         temperature: 0.1,
-        responseMode: 'tool',
-        tools: [schema],
-        toolChoice: 'required',
         max_tokens,
     };
     try {
-        const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, requestOptions));
+        const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, schema, requestOptions));
         const parsed = parseStructuredResponse(raw, 'respuesta de Tool Room');
         return validateStructuredResponse(parsed, schema, 'respuesta de Tool Room');
     } catch (error) {
@@ -187,9 +130,8 @@ export const createStructuredRequest = async ({ profile, prompt, schema, max_tok
         if (!canRecover) throw error;
         // El segundo intento conserva la configuración de razonamiento y solo
         // vuelve a exigir el contrato estructurado.
-        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDebes llamar obligatoriamente a la herramienta disponible. Devuelve todos sus argumentos como JSON válido y completo; no escribas texto fuera de la herramienta.`, apiKey, getConfiguredAIOptions(profile, {
+        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDevuelve un objeto JSON válido y completo con todos los campos obligatorios. No escribas texto fuera del objeto.`, apiKey, getStructuredAIOptions(profile, schema, {
             ...requestOptions,
-            toolChoice: 'required',
             max_tokens: Math.max(6000, Math.min(max_tokens, 12000)),
         }));
         const parsed = parseStructuredResponse(recoveryRaw, 'respuesta de Tool Room');
@@ -200,11 +142,13 @@ export const createStructuredRequest = async ({ profile, prompt, schema, max_tok
 const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
-    const requestOptions = getConfiguredAIOptions(profile, {
+    const baseOptions = getConfiguredAIOptions(profile, {
         temperature: 0.35,
-        responseMode: 'json',
         max_tokens,
     });
+    const requestOptions = baseOptions.reasoningMode
+        ? { ...baseOptions, responseMode: 'text' }
+        : { ...baseOptions, responseMode: 'json' };
     try {
         const raw = await AIService.sendMessage(prompt, apiKey, requestOptions);
         return parseStructuredResponse(raw, 'respuesta narrativa');
@@ -387,24 +331,37 @@ export const requestChapterScene = async ({ profile, chapterPlan = null, directi
     return normalizeScene(parsed.scene, nextNumber - 1);
 };
 
-const normalizeConsistencyFinding = (finding, index, allowedIds) => {
-    const documentIds = Array.isArray(finding?.documentIds) ? finding.documentIds.map(String).filter((id) => allowedIds.has(id)) : [];
+const normalizeConsistencyFinding = (finding, index, allowedIds, fallbackCategory = 'detail') => {
+    const rawEvidence = Array.isArray(finding?.evidence)
+        ? finding.evidence
+        : [finding?.evidenceA, finding?.evidenceB].filter(Boolean);
+    const evidence = rawEvidence.map((item) => ({
+        documentId: String(item?.documentId || ''),
+        quote: String(item?.quote || item?.text || '').trim(),
+    })).filter((item) => allowedIds.has(item.documentId) && item.quote);
+    const documentIds = [...new Set([
+        ...(Array.isArray(finding?.documentIds) ? finding.documentIds.map(String) : []),
+        ...evidence.map((item) => item.documentId),
+    ].filter((id) => allowedIds.has(id)))];
     const documentId = String(finding?.documentId || documentIds[0] || '');
     if (!allowedIds.has(documentId)) return null;
+    const allDocumentIds = documentIds.includes(documentId) ? documentIds : [documentId, ...documentIds];
+    const needsEvidence = allDocumentIds.length > 1 && evidence.length < 2;
     return {
         id: String(finding?.id || `consistency-${Date.now()}-${index}`),
         documentId,
-        documentIds: documentIds.length ? documentIds : [documentId],
+        documentIds: allDocumentIds.length ? allDocumentIds : [documentId],
         title: String(finding?.title || 'Detalle para revisar'),
         excerpt: String(finding?.excerpt || finding?.context || ''),
         originalText: String(finding?.originalText || ''),
         replacementText: String(finding?.replacementText || ''),
         replacementEdited: false,
-        reason: String(finding?.reason || ''),
+        reason: String(finding?.reason || finding?.explanation || finding?.whyContradictory || ''),
         severity: ['low', 'medium', 'high'].includes(finding?.severity) ? finding.severity : 'medium',
         confidence: Math.min(1, Math.max(0, Number(finding?.confidence) || 0)),
-        category: String(finding?.category || 'detail'),
-        status: 'pending',
+        category: String(finding?.category || fallbackCategory),
+        evidence,
+        status: needsEvidence ? 'needs_evidence' : 'detected',
     };
 };
 
@@ -426,7 +383,7 @@ const CONSISTENCY_AUDIT_TOOL = {
     },
 };
 
-export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'custom', query = '', canonical = '', documents = [], instruction = '' }) => {
+export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'full', query = '', canonical = '', documents = [], instruction = '' }) => {
     const normalizedDocuments = documents.map((document) => ({
         id: String(document.id || ''),
         type: String(document.type || 'document'),
@@ -437,103 +394,8 @@ export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'c
     const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
     const prompt = buildRegisteredPrompt('consistencyAudit', { auditType, query, canonical, instruction, normalizedDocuments });
     const parsed = await createStructuredRequest({ profile, prompt, schema: CONSISTENCY_AUDIT_TOOL, max_tokens: 9000 });
-    const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds)).filter(Boolean).filter((finding) => finding.originalText || !finding.replacementText) : [];
+    const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds, auditType)).filter(Boolean).filter((finding) => finding.originalText || !finding.replacementText) : [];
     return { summary: String(parsed.summary || ''), findings };
-};
-
-export const requestCoherenceAnalysis = async ({ profile, documents = [] }) => {
-    const normalizedDocuments = normalizeDocuments(documents);
-    if (normalizedDocuments.length < 2) return { summary: 'Se necesitan al menos dos documentos con contenido.', items: [] };
-    const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
-    const prompt = buildRegisteredPrompt('coherenceAnalysis', { normalizedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_DETECT_TOOL, max_tokens: 9000 });
-    const items = (Array.isArray(parsed.findings) ? parsed.findings : []).map((item) => {
-        const documentIds = Array.isArray(item?.documentIds) ? item.documentIds.map(String).slice(0, 2) : [];
-        return {
-            id: `finding-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            documentIds,
-            category: String(item.category || 'fact'),
-            title: replaceDocumentIdsForDisplay(item.title || 'Contradicción detectada', normalizedDocuments),
-            severity: ['low', 'medium', 'high'].includes(item.severity) ? item.severity : 'medium',
-            confidence: Number(item.confidence),
-            claimA: replaceDocumentIdsForDisplay(item.claimA || '', normalizedDocuments),
-            claimB: replaceDocumentIdsForDisplay(item.claimB || '', normalizedDocuments),
-            evidenceA: normalizeEvidence(item.evidenceA, allowedIds),
-            evidenceB: normalizeEvidence(item.evidenceB, allowedIds),
-            explanation: replaceDocumentIdsForDisplay(item.explanation || '', normalizedDocuments),
-            status: 'detected',
-        };
-    }).filter((item) => item.documentIds.length === 2
-        && item.documentIds[0] !== item.documentIds[1]
-        && item.documentIds.every((id) => allowedIds.has(id))
-        && item.confidence >= COHERENCE_MIN_CONFIDENCE
-        && item.claimA && item.claimB && item.explanation && item.evidenceA && item.evidenceB);
-    return { summary: replaceDocumentIdsForDisplay(parsed.summary || '', normalizedDocuments), items };
-};
-
-export const validateCoherenceFinding = async ({ profile, finding, documents = [] }) => {
-    const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
-    const prompt = buildRegisteredPrompt('coherenceValidation', { finding, affectedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_VALIDATE_TOOL, max_tokens: 1800 });
-    const status = parsed.status === 'confirmed' && Number(parsed.confidence) >= COHERENCE_MIN_CONFIDENCE ? 'confirmed' : 'rejected';
-    return { ...finding, status, validationConfidence: Number(parsed.confidence) || 0, validationReason: String(parsed.reason || '') };
-};
-
-export const requestCoherenceResolutionOptions = async ({ profile, finding, documents = [], force = false }) => {
-    const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
-    if (finding.status !== 'confirmed' && !force) throw new Error('Solo se pueden generar soluciones para una inconsistencia confirmada.');
-    const prompt = buildRegisteredPrompt('coherenceOptions', { finding, affectedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_OPTIONS_TOOL, max_tokens: 5000 });
-    const options = Array.isArray(parsed.options) ? parsed.options.slice(0, 3).map((option, index) => ({
-        id: String(option.id || `option-${index + 1}`),
-        title: String(option.title || `Opción ${index + 1}`),
-        description: String(option.description || ''),
-        risk: ['low', 'medium', 'high'].includes(option.risk) ? option.risk : 'medium',
-        impact: String(option.impact || ''),
-        preserves: Array.isArray(option.preserves) ? option.preserves.map(String) : [],
-        changes: Array.isArray(option.changes) ? option.changes.map(String) : [],
-        documentIds: Array.isArray(option.documentIds) ? option.documentIds.map(String).filter((id) => finding.documentIds.includes(id)) : finding.documentIds,
-        patchPlans: Array.isArray(option.patchPlans) ? option.patchPlans : [],
-    })) : [];
-    if (options.length !== 3) throw new Error('La IA no devolvió exactamente tres opciones de resolución.');
-    return options;
-};
-
-export const requestCoherenceCustomResolution = async ({ profile, finding, documents = [], instruction }) => {
-    const affectedDocuments = normalizeDocuments(documents).filter((document) => finding.documentIds.includes(document.id));
-    if (!String(instruction || '').trim()) throw new Error('Describe la solución alternativa que quieres trabajar.');
-    const prompt = buildRegisteredPrompt('coherenceCustomResolution', { instruction, finding, affectedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_CUSTOM_OPTION_TOOL, max_tokens: 3500 });
-    const option = parsed.option || parsed.options?.[0];
-    if (!option) throw new Error('La IA no devolvió una versión alternativa válida.');
-    return {
-        id: String(option.id || `custom-${Date.now()}`),
-        title: String(option.title || 'Versión alternativa del usuario'),
-        description: String(option.description || ''),
-        risk: ['low', 'medium', 'high'].includes(option.risk) ? option.risk : 'medium',
-        impact: String(option.impact || ''),
-        preserves: Array.isArray(option.preserves) ? option.preserves.map(String) : [],
-        changes: Array.isArray(option.changes) ? option.changes.map(String) : [],
-        documentIds: Array.isArray(option.documentIds) ? option.documentIds.map(String).filter((id) => finding.documentIds.includes(id)) : finding.documentIds,
-        patchPlans: Array.isArray(option.patchPlans) ? option.patchPlans : [],
-        custom: true,
-    };
-};
-
-export const buildCoherencePatches = async ({ profile, finding, option, documents = [] }) => {
-    const affectedDocuments = normalizeDocuments(documents).filter((document) => option.documentIds.includes(document.id));
-    const prompt = buildRegisteredPrompt('coherencePatches', { finding, option, affectedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: COHERENCE_PATCHES_TOOL, max_tokens: 5000 });
-    const allowedIds = new Set(option.documentIds);
-    const patches = Array.isArray(parsed.patches) ? parsed.patches.map((patch) => ({
-        documentId: String(patch.documentId || ''),
-        baseVersion: String(patch.baseVersion || ''),
-        originalText: String(patch.originalText || ''),
-        replacementText: String(patch.replacementText || ''),
-        reason: String(patch.reason || ''),
-    })).filter((patch) => allowedIds.has(patch.documentId) && patch.originalText && patch.replacementText) : [];
-    if (!patches.length) throw new Error('La IA no generó parches exactos aplicables.');
-    return patches;
 };
 
 export const requestToolRoomProposal = async ({ profile, instruction, sourceContent, contextContent = '', roomName }) => {
@@ -558,11 +420,8 @@ export const requestToolRoomInsight = async ({ profile, instruction, sourceConte
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const allowedIds = new Set(documentIds.map(String));
     const prompt = buildRegisteredPrompt('toolRoomInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent), documentIds: [...allowedIds] });
-    const raw = await AIService.sendMessage(prompt, apiKey, getConfiguredAIOptions(profile, {
+    const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, COHERENCE_AUDIT_SCHEMA, {
         temperature: 0.15,
-        responseMode: 'tool',
-        tools: [COHERENCE_AUDIT_SCHEMA],
-        toolChoice: 'required',
         max_tokens: 8000,
     }));
     const parsed = parseStructuredResponse(raw, 'auditoría de Tool Room');
@@ -595,6 +454,65 @@ export const requestNarrativeInsight = async ({ profile, instruction, sourceCont
     const prompt = buildRegisteredPrompt('narrativeInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent) });
     const parsed = await createStructuredRequest({ profile, prompt, schema: TOOL_ROOM_INSIGHT_TOOL, max_tokens: 5000 });
     return { result: String(parsed.result || ''), summary: String(parsed.summary || ''), items: Array.isArray(parsed.items) ? parsed.items : [] };
+};
+
+const normalizeNarrationScriptSegment = (segment, index) => ({
+    index: Number.isFinite(Number(segment?.index)) ? Number(segment.index) : index,
+    text: String(segment?.text || '').trim(),
+    pauseBeforeMs: Math.max(0, Math.min(10000, Number(segment?.pauseBeforeMs) || 0)),
+    pauseAfterMs: Math.max(0, Math.min(10000, Number(segment?.pauseAfterMs) || 0)),
+    tone: String(segment?.tone || 'natural'),
+    emphasis: Array.isArray(segment?.emphasis) ? segment.emphasis.map(String).filter(Boolean) : [],
+    direction: String(segment?.direction || ''),
+    pronunciation: Array.isArray(segment?.pronunciation) ? segment.pronunciation.map(String).filter(Boolean) : [],
+});
+
+const normalizeNarrationCoverage = (value) => String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const ensureNarrationSourceCoverage = (source, segments) => {
+    const sourceCoverage = normalizeNarrationCoverage(source);
+    const generatedCoverage = normalizeNarrationCoverage(segments.map((segment) => segment.text).join(' '));
+    if (sourceCoverage === generatedCoverage) return { segments, warning: '' };
+
+    // La producción de audio no puede alterar ni perder palabras del manuscrito.
+    // Si el modelo rompe el contrato, conservamos solo una segmentación literal y
+    // dejamos constancia visible para que el usuario pueda volver a diseñarla.
+    const literalSegments = prepareSegments(source).map((segment, index) => ({
+        ...segment,
+        index,
+        pauseBeforeMs: 0,
+        pauseAfterMs: 0,
+        tone: 'natural',
+        emphasis: [],
+        direction: '',
+        pronunciation: [],
+    }));
+    return {
+        segments: literalSegments,
+        warning: 'La IA no conservó literalmente todo el texto fuente; se restauró una segmentación literal del capítulo.'
+    };
+};
+
+export const requestNarrationScript = async ({ profile, chapterId = '', sourceContent = '', contextContent = '', instruction = '' }) => {
+    const source = toPlainText(sourceContent);
+    if (!source) throw new Error('No hay texto para diseñar el guion de narración.');
+    const prompt = buildRegisteredPrompt('narrationScript', { chapterId, sourceContent: source, contextContent: toPlainText(contextContent).slice(0, 18000), instruction });
+    const parsed = await createStructuredRequest({ profile, prompt, schema: NARRATION_SCRIPT_TOOL, max_tokens: 9000 });
+    const generatedSegments = Array.isArray(parsed.segments)
+        ? parsed.segments.map(normalizeNarrationScriptSegment).filter((segment) => segment.text)
+        : [];
+    if (!generatedSegments.length) throw new Error('La IA no devolvió segmentos válidos para el guion.');
+    const coverage = ensureNarrationSourceCoverage(source, generatedSegments);
+    const warnings = Array.isArray(parsed.warnings) ? parsed.warnings.map(String).filter(Boolean) : [];
+    if (coverage.warning) warnings.unshift(coverage.warning);
+    return {
+        chapterId: String(chapterId || ''),
+        summary: String(parsed.summary || 'Guion de narración preparado para revisión.'),
+        segments: coverage.segments.map((segment, index) => ({ ...segment, index })),
+        warnings,
+    };
 };
 
 export default requestToolRoomProposal;

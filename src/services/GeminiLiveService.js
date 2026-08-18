@@ -23,7 +23,7 @@ export const GEMINI_LIVE_MODELS = [
 const WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
 const SAMPLE_RATE = 24000;
 
-class GeminiLiveService {
+export class GeminiLiveService {
     constructor() {
         this.ws = null;
         this.audioCtx = null;
@@ -188,6 +188,17 @@ class GeminiLiveService {
 
         if (data.setupComplete) return;
 
+        if (data.serverContent?.modelTurn) {
+            const parts = data.serverContent.modelTurn.parts || [];
+            for (const part of parts) {
+                if (part.inlineData?.mimeType?.includes('pcm') && part.inlineData.data) {
+                    this._enqueueAudioChunk(part.inlineData.data);
+                }
+            }
+        }
+
+        // Gemini puede enviar el último bloque PCM junto con turnComplete.
+        // El audio debe capturarse antes de cerrar/finalizar el segmento.
         if (data.serverContent?.turnComplete) {
             this._finalizeSegment();
             this.isTurnInProgress = false;
@@ -200,15 +211,6 @@ class GeminiLiveService {
             this.isTurnInProgress = false;
             this._sendNextPending();
             return;
-        }
-
-        if (data.serverContent?.modelTurn) {
-            const parts = data.serverContent.modelTurn.parts || [];
-            for (const part of parts) {
-                if (part.inlineData?.mimeType?.includes('pcm') && part.inlineData.data) {
-                    this._enqueueAudioChunk(part.inlineData.data);
-                }
-            }
         }
     }
 
@@ -488,7 +490,6 @@ class GeminiLiveService {
         }
 
         this._cleanupPlayback();
-        this._onDisconnected?.();
     }
 
     _cleanupPlayback() {

@@ -24,6 +24,10 @@ const getDb = () => {
     return Promise.resolve(db);
 };
 
+const encodeVariant = (variantKey = 'default') => encodeURIComponent(String(variantKey || 'default'));
+const getSegmentKey = (bookId, chapterId, segmentIndex, variantKey = 'default') => `${bookId}_${chapterId}_${segmentIndex}__${encodeVariant(variantKey)}`;
+const getLegacySegmentKey = (bookId, chapterId, segmentIndex) => `${bookId}_${chapterId}_${segmentIndex}`;
+
 /**
  * Obtiene un segmento cacheado si el hash coincide.
  * @param {string} bookId
@@ -35,24 +39,26 @@ const getDb = () => {
 export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash, variantKey = 'default') => {
     try {
         const d = await getDb();
-        const key = `${bookId}_${chapterId}_${segmentIndex}`;
+        const key = getSegmentKey(bookId, chapterId, segmentIndex, variantKey);
         const permanent = await d.permanentSegments.get(key);
         if (permanent && permanent.textHash === textHash && (permanent.variantKey || 'default') === variantKey) {
             return { pcmData: permanent.pcmData, textHash: permanent.textHash, permanent: true };
         }
         const entry = await d.segments.get(key);
-        if (!entry) return null;
+        const legacyEntry = !entry && variantKey === 'default' ? await d.segments.get(getLegacySegmentKey(bookId, chapterId, segmentIndex)) : null;
+        const selectedEntry = entry || legacyEntry;
+        if (!selectedEntry) return null;
 
         // Invalidar por hash de texto (el texto del segmento cambió)
-        if (entry.textHash !== textHash || (entry.variantKey || 'default') !== variantKey) return null;
+        if (selectedEntry.textHash !== textHash || (selectedEntry.variantKey || 'default') !== variantKey) return null;
 
         // Invalidar por TTL
-        if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-            await d.segments.delete(key);
+        if (Date.now() - selectedEntry.timestamp > CACHE_TTL_MS) {
+            await d.segments.delete(selectedEntry.key || key);
             return null;
         }
 
-        return { pcmData: entry.pcmData, textHash: entry.textHash };
+        return { pcmData: selectedEntry.pcmData, textHash: selectedEntry.textHash };
     } catch (err) {
         console.warn('[NarradorCache] getCachedSegment error:', err);
         return null;
@@ -62,7 +68,7 @@ export const getCachedSegment = async (bookId, chapterId, segmentIndex, textHash
 export const savePermanentSegment = async (bookId, chapterId, segmentIndex, textHash, pcmData, variantKey = 'default') => {
     try {
         const d = await getDb();
-        const key = `${bookId}_${chapterId}_${segmentIndex}`;
+        const key = getSegmentKey(bookId, chapterId, segmentIndex, variantKey);
         await d.permanentSegments.put({ key, bookId, chapterId, segmentIndex, textHash, variantKey, pcmData, timestamp: Date.now() });
         return true;
     } catch (err) {
@@ -100,7 +106,7 @@ export const chooseNarradorDirectory = async () => {
     return directoryHandle.name;
 };
 
-const pcmToWavBlob = (pcmData, sampleRate = 24000) => {
+export const pcmToWavBlob = (pcmData, sampleRate = 24000) => {
     const pcm = new Uint8Array(pcmData);
     const buffer = new ArrayBuffer(44 + pcm.byteLength);
     const view = new DataView(buffer);
@@ -120,6 +126,52 @@ const pcmToWavBlob = (pcmData, sampleRate = 24000) => {
     view.setUint32(40, pcm.byteLength, true);
     new Uint8Array(buffer, 44).set(pcm);
     return new Blob([buffer], { type: 'audio/wav' });
+};
+
+const safeFileName = value => String(value || 'narracion').replace(/[^a-z0-9_-]/gi, '_').slice(0, 80);
+
+/**
+ * Recupera todos los segmentos válidos de una narración para exportación.
+ * No genera audio ni modifica la caché: solo informa qué fragmentos faltan.
+ */
+export const getCachedChapterSegments = async (bookId, chapterId, segments = [], variantKey = 'default') => {
+    const results = await Promise.all(segments.map(async (segment, index) => ({
+        index,
+        segment,
+        cached: await getCachedSegment(bookId, chapterId, index, segment.hash, variantKey)
+    })));
+    return {
+        segments: results.filter(item => item.cached?.pcmData),
+        missingIndexes: results.filter(item => !item.cached?.pcmData).map(item => item.index)
+    };
+};
+
+/**
+ * Descarga una narración completa como WAV cuando todos sus segmentos están cacheados.
+ */
+export const downloadCachedChapterWav = async ({ bookId, chapterId, chapterTitle, segments, variantKey = 'default' }) => {
+    const result = await getCachedChapterSegments(bookId, chapterId, segments, variantKey);
+    if (result.missingIndexes.length > 0) return result;
+
+    const pcmBuffers = result.segments.map(item => new Uint8Array(item.cached.pcmData));
+    const totalLength = pcmBuffers.reduce((total, buffer) => total + buffer.byteLength, 0);
+    const combinedPcm = new Uint8Array(totalLength);
+    let offset = 0;
+    pcmBuffers.forEach(buffer => {
+        combinedPcm.set(buffer, offset);
+        offset += buffer.byteLength;
+    });
+
+    const blob = pcmToWavBlob(combinedPcm.buffer);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${safeFileName(chapterTitle || chapterId)}.wav`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return result;
 };
 
 export const saveSegmentToNarradorDirectory = async (bookId, chapterId, segmentIndex, pcmData) => {
@@ -143,9 +195,12 @@ export const saveSegmentToNarradorDirectory = async (bookId, chapterId, segmentI
 export const invalidateCachedSegment = async (bookId, chapterId, segmentIndex) => {
     try {
         const d = await getDb();
-        const key = `${bookId}_${chapterId}_${segmentIndex}`;
-        await d.segments.delete(key);
-        await d.permanentSegments.delete(key);
+        const prefix = `${bookId}_${chapterId}_${segmentIndex}__`;
+        await d.segments.where('key').startsWith(prefix).delete();
+        await d.permanentSegments.where('key').startsWith(prefix).delete();
+        const legacyKey = getLegacySegmentKey(bookId, chapterId, segmentIndex);
+        await d.segments.delete(legacyKey);
+        await d.permanentSegments.delete(legacyKey);
         return true;
     } catch (err) {
         console.warn('[NarradorCache] invalidate error:', err);
@@ -159,7 +214,7 @@ export const invalidateCachedSegment = async (bookId, chapterId, segmentIndex) =
 export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHash, pcmData, variantKey = 'default') => {
     try {
         const d = await getDb();
-        const key = `${bookId}_${chapterId}_${segmentIndex}`;
+        const key = getSegmentKey(bookId, chapterId, segmentIndex, variantKey);
         await d.segments.put({
             key,
             bookId,
@@ -183,8 +238,8 @@ export const clearNarradorCache = async (bookId, chapterId) => {
     try {
         const d = await getDb();
         if (bookId && chapterId) {
-            await d.segments.where('chapterId').equals(chapterId).delete();
-            await d.permanentSegments.where('chapterId').equals(chapterId).delete();
+            await d.segments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
+            await d.permanentSegments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
         } else if (bookId) {
             await d.segments.where('bookId').equals(bookId).delete();
             await d.permanentSegments.where('bookId').equals(bookId).delete();
@@ -205,11 +260,17 @@ export const clearNarradorCache = async (bookId, chapterId) => {
 export const getNarradorCacheSize = async () => {
     try {
         const d = await getDb();
-        const all = [...await d.segments.toArray(), ...await d.permanentSegments.toArray()];
-        const totalBytes = all.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
+        const temporary = await d.segments.toArray();
+        const permanent = await d.permanentSegments.toArray();
+        const temporaryBytes = temporary.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
+        const permanentBytes = permanent.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
         return {
-            entries: all.length,
-            bytes: totalBytes
+            entries: temporary.length + permanent.length,
+            temporaryEntries: temporary.length,
+            permanentEntries: permanent.length,
+            bytes: temporaryBytes + permanentBytes,
+            temporaryBytes,
+            permanentBytes,
         };
     } catch (err) {
         console.warn('[NarradorCache] size error:', err);
@@ -224,6 +285,9 @@ export default {
     getNarradorStorageSettings,
     saveNarradorStorageSettings,
     chooseNarradorDirectory,
+    pcmToWavBlob,
+    getCachedChapterSegments,
+    downloadCachedChapterWav,
     saveSegmentToNarradorDirectory,
     invalidateCachedSegment,
     clearNarradorCache,

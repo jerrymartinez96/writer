@@ -196,10 +196,11 @@ const IAStudioNextChat = ({ onBack }) => {
                     ? fallbackRoute
                     : { route: 'core', capability: intent.intent === 'analysis' ? 'analyze' : 'chat', toolId: null, confidence: intent.confidence, needsConfirmation: false, reason: intent.reason };
             }
-        } catch (intentError) {
-            setError(intentError?.message || 'No se pudo analizar la intención de la solicitud.');
-            setLoading(false);
-            return;
+        } catch {
+            // La clasificación es una ayuda de enrutamiento, no debe bloquear el chat.
+            // Si DeepSeek devuelve una respuesta vacía o no cumple el contrato,
+            // usamos las reglas locales conservadoras para continuar la conversación.
+            route = { ...classifyCoreRequest(envelope), classificationFallback: true };
         }
         if (route.capability === 'patch' || route.capability === 'multi_patch') {
             if (route.recommendedTool === 'global-constructor') {

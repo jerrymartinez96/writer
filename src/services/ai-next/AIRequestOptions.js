@@ -5,4 +5,17 @@ export const getConfiguredAIOptions = (profile, overrides = {}) => ({
     ...overrides,
 });
 
+/**
+ * DeepSeek no acepta `tool_choice` mientras Thinking está activo. Los flujos
+ * estructurados mantienen el razonamiento configurado, envían el schema y
+ * dejan que la API seleccione la tool por defecto.
+ */
+export const getStructuredAIOptions = (profile, schema, overrides = {}) => {
+    const base = getConfiguredAIOptions(profile, overrides);
+    if (base.reasoningMode) {
+        return { ...base, responseMode: 'tool', tools: [schema] };
+    }
+    return { ...base, responseMode: 'tool', tools: [schema], toolChoice: 'required' };
+};
+
 export default getConfiguredAIOptions;
