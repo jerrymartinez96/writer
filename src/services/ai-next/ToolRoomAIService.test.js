@@ -136,6 +136,8 @@ describe('ToolRoomAIService', () => {
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
         expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
         expect(AIService.sendMessage.mock.calls[0][2]).not.toHaveProperty('toolChoice');
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, responseMode: 'json' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('tools');
     });
 
     it('reintenta el análisis estructurado cuando los argumentos de la tool no son JSON válido', async () => {
@@ -147,8 +149,25 @@ describe('ToolRoomAIService', () => {
 
         expect(result.summary).toBe('Análisis reparado');
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
-        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('toolChoice');
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, responseMode: 'json' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('tools');
+    });
+
+    it('recupera una respuesta JSON que no cumple el contrato obligatorio', async () => {
+        AIService.sendMessage
+            .mockResolvedValueOnce('{}')
+            .mockResolvedValueOnce(JSON.stringify({ summary: 'Auditoría reparada', findings: [] }));
+
+        const result = await requestGlobalConsistencyAnalysis({
+            profile,
+            auditType: 'full',
+            documents: [{ id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Texto</p>' }],
+        });
+
+        expect(result).toEqual({ summary: 'Auditoría reparada', findings: [] });
+        expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, responseMode: 'json' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('tools');
     });
 
     it('permite puntos suspensivos dentro del capítulo pero rechaza un marcador de truncamiento al final', async () => {
@@ -179,7 +198,60 @@ describe('ToolRoomAIService', () => {
         expect(result.findings[0]).toMatchObject({ documentId: 'chapter-1', originalText: 'ya sabes', confidence: 0.94 });
     });
 
-    it('reintenta el análisis de consistencia conservando la configuración de razonamiento', async () => {
+    it('repara variantes comunes de campos en hallazgos de auditoría', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({
+            summary: 'Se detectaron detalles para revisar.',
+            findings: [
+                { title: 'Cronología', type: 'contradiction', whyContradictory: 'Las fechas no coinciden.', severity: 'critical', confidence: '85%', documentId: 'chapter-1' },
+                { label: 'Causalidad', explanation: 'Falta explicar la consecuencia.', severity: 'warning', certainty: '0.6', documentId: 'chapter-1' },
+            ],
+        }));
+
+        const result = await requestGlobalConsistencyAnalysis({
+            profile,
+            auditType: 'full',
+            documents: [{ id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Texto</p>' }],
+        });
+
+        expect(result.findings).toHaveLength(2);
+        expect(result.findings[0]).toMatchObject({ category: 'contradiction', reason: 'Las fechas no coinciden.', severity: 'high', confidence: 0.85 });
+        expect(result.findings[1]).toMatchObject({ title: 'Causalidad', reason: 'Falta explicar la consecuencia.', severity: 'medium', confidence: 0.6 });
+    });
+
+    it('conserva hallazgos estructurales con IDs alternativos y sin reemplazo textual', async () => {
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({
+            summary: 'Se detectó una contradicción entre capítulos.',
+            findings: [{
+                title: 'Fecha incompatible',
+                category: 'timeline',
+                reason: 'La fecha del evento cambia entre ambos capítulos.',
+                severity: 'high',
+                confidence: 0.92,
+                documentAId: 'chapter-1',
+                documentBId: 'chapter-2',
+                evidence: [
+                    { documentId: 'chapter-1', quote: 'Ocurrió el lunes.' },
+                    { documentId: 'chapter-2', quote: 'Ocurrió el martes.' },
+                ],
+                replacementText: 'Ajustar la cronología.',
+            }],
+        }));
+
+        const result = await requestGlobalConsistencyAnalysis({
+            profile,
+            auditType: 'timeline',
+            documents: [
+                { id: 'chapter-1', type: 'chapter', title: 'Capítulo 1', content: '<p>Lunes</p>' },
+                { id: 'chapter-2', type: 'chapter', title: 'Capítulo 2', content: '<p>Martes</p>' },
+            ],
+        });
+
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0]).toMatchObject({ documentId: 'chapter-1', status: 'detected' });
+        expect(result.findings[0].documentIds).toEqual(['chapter-1', 'chapter-2']);
+    });
+
+    it('reintenta el análisis de consistencia con JSON directo', async () => {
         AIService.sendMessage
             .mockResolvedValueOnce('')
             .mockResolvedValueOnce(JSON.stringify({ summary: 'Análisis recuperado', findings: [] }));
@@ -193,8 +265,8 @@ describe('ToolRoomAIService', () => {
 
         expect(result).toEqual({ summary: 'Análisis recuperado', findings: [] });
         expect(AIService.sendMessage).toHaveBeenCalledTimes(2);
-        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: true, responseMode: 'tool' }));
-        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('toolChoice');
+        expect(AIService.sendMessage.mock.calls[1][2]).toEqual(expect.objectContaining({ reasoningMode: false, responseMode: 'json' }));
+        expect(AIService.sendMessage.mock.calls[1][2]).not.toHaveProperty('tools');
     });
 
     it('normaliza hallazgos de auditoría y conserva el contexto auxiliar', async () => {

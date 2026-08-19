@@ -309,7 +309,7 @@ export const PROMPT_REGISTRY = Object.freeze({
                 `Fuente de verdad opcional: ${canonical || '(no definida; compara y detecta)'}`,
                 `Instrucción adicional opcional: ${instruction || '(ninguna)'}`,
                 asContext('Documentos', JSON.stringify(normalizedDocuments)),
-                'Clasifica cada hallazgo con una categoría clara, severidad y confianza. Reporta los hallazgos mediante la herramienta disponible y no escribas texto fuera de ella.',
+                'Cada hallazgo debe incluir siempre documentId, title, category, reason, severity y confidence. documentId debe ser uno de los IDs exactos de los documentos recibidos. Para contradicciones entre documentos añade documentIds y evidence con una cita por documento. Usa exactamente esos nombres; no sustituyas reason por whyContradictory, explanation o suggestedAction. severity debe ser exactamente low, medium o high, y confidence debe ser un número entre 0 y 1, nunca texto ni porcentaje. Si no hay hallazgos verificables, devuelve findings como arreglo vacío. Reporta los hallazgos mediante la herramienta disponible y no escribas texto fuera de ella.',
             ].join('\n\n');
         },
     },

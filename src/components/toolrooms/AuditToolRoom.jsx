@@ -159,13 +159,22 @@ const AuditToolRoom = () => {
     const [instruction, setInstruction] = useState(storedProcess.instruction || '');
     const [documents, setDocuments] = useState(storedProcess.documents || []);
     const [result, setResult] = useState(storedProcess.result || null);
-    const [status, setStatus] = useState(storedProcess.status === 'analyzing' ? 'loading' : storedProcess.status === 'failed' ? 'error' : storedProcess.result ? 'ready' : 'idle');
+    // `analyzing` persisted in storage cannot represent an active request after
+    // a full reload, so recover the screen as idle and allow a fresh run.
+    const [status, setStatus] = useState(storedProcess.status === 'failed' ? 'error' : storedProcess.result ? 'ready' : 'idle');
     const [error, setError] = useState('');
     const [applyingFindingId, setApplyingFindingId] = useState(null);
     const [findingErrors, setFindingErrors] = useState({});
     const [findingToDelete, setFindingToDelete] = useState(null);
     const [statusFilter, setStatusFilter] = useState('all');
     const [categoryFilter, setCategoryFilter] = useState('all');
+    const [analysisPhase, setAnalysisPhase] = useState('idle');
+    const auditAbortControllerRef = useRef(null);
+
+    useEffect(() => () => {
+        auditAbortControllerRef.current?.abort();
+        auditAbortControllerRef.current = null;
+    }, []);
 
     const persistAudit = (patch = {}) => updateProcess('audit', { auditType, scope, query, canonical, instruction, documents, result, ...patch });
 
@@ -193,19 +202,39 @@ const AuditToolRoom = () => {
         ].filter((document) => String(document.content || '').trim());
     };
 
+    const cancelAudit = () => {
+        const controller = auditAbortControllerRef.current;
+        if (!controller) return;
+        auditAbortControllerRef.current = null;
+        controller.abort();
+        setError('Auditoría cancelada. Puedes iniciar un nuevo análisis.');
+        setAnalysisPhase('idle');
+        setStatus('idle');
+        persistAudit({ status: 'cancelled', error: 'Auditoría cancelada por el usuario.', result: null });
+    };
+
     const runAudit = async () => {
         if (status === 'loading') return;
+        const controller = new AbortController();
+        auditAbortControllerRef.current = controller;
+        setAnalysisPhase('preparing');
         setStatus('loading'); setError(''); setResult(null); setStatusFilter('all'); setCategoryFilter('all');
         persistAudit({ status: 'analyzing', error: null, result: null });
         try {
             const completeDocuments = await buildDocuments();
+            if (controller.signal.aborted) return;
             setDocuments(completeDocuments);
-            const nextResult = await requestGlobalConsistencyAnalysis({ profile, auditType, query, canonical, instruction, documents: completeDocuments });
-            setResult(nextResult); setStatus('ready');
+            setAnalysisPhase('analyzing');
+            const nextResult = await requestGlobalConsistencyAnalysis({ profile, auditType, query, canonical, instruction, documents: completeDocuments, signal: controller.signal });
+            if (controller.signal.aborted || auditAbortControllerRef.current !== controller) return;
+            setResult(nextResult); setAnalysisPhase('idle'); setStatus('ready');
             persistAudit({ status: 'completed', documents: completeDocuments, result: nextResult, error: null });
         } catch (requestError) {
+            if (controller.signal.aborted || auditAbortControllerRef.current !== controller) return;
             const message = requestError?.message || 'No se pudo completar la auditoría.';
-            setError(message); setStatus('error'); persistAudit({ status: 'failed', error: message });
+            setError(message); setAnalysisPhase('idle'); setStatus('error'); persistAudit({ status: 'failed', error: message });
+        } finally {
+            if (auditAbortControllerRef.current === controller) auditAbortControllerRef.current = null;
         }
     };
 
@@ -297,7 +326,8 @@ const AuditToolRoom = () => {
                     <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2"><StyledSelect label="Área a priorizar" value={auditType} options={AUDIT_FOCUSES} onChange={setAuditType} /><label className="text-xs font-black">Buscar personaje, frase o detalle<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ej. Kai, ‘ya sabes’, cicatriz…" className="mt-2 w-full rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] p-3 text-sm font-normal outline-none focus:border-orange-500" /></label><label className="text-xs font-black md:col-span-2">Fuente de verdad opcional<input value={canonical} onChange={(event) => setCanonical(event.target.value)} placeholder="Qué versión debe considerarse correcta" className="mt-2 w-full rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] p-3 text-sm font-normal outline-none focus:border-orange-500" /></label></div>
                     <label className="mt-4 block text-xs font-black">Instrucción adicional (opcional)<textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={3} placeholder="Ej. Conserva los usos intencionales en escenas de tensión." className="mt-2 w-full resize-none rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] p-3 text-sm font-normal outline-none focus:border-orange-500" /></label>
                 </details>
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-[var(--text-muted)]">La auditoría no modifica documentos. Los cambios de canon se derivan al Constructor Global.</p><button type="button" onClick={runAudit} disabled={isLoading} className="inline-flex items-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-sm font-black text-white hover:bg-orange-500 disabled:cursor-wait disabled:opacity-60">{isLoading ? <Loader2 size={17} className="animate-spin" /> : result ? <RefreshCw size={17} /> : <Search size={17} />} {isLoading ? 'Analizando…' : result ? 'Actualizar auditoría completa' : 'Iniciar auditoría completa'}</button></div>{error && <p className="mt-4 rounded-xl border border-red-500/25 bg-red-500/5 p-3 text-xs text-red-600">{error}</p>}
+                {isLoading && <div className="mt-5 flex items-center gap-3 rounded-2xl border border-orange-500/30 bg-orange-500/10 p-4" role="status" aria-live="polite"><Loader2 size={20} className="shrink-0 animate-spin text-orange-600" /><div className="min-w-0"><p className="text-sm font-black text-orange-700">Auditoría en proceso</p><p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{analysisPhase === 'preparing' ? 'Preparando los documentos seleccionados…' : 'La IA está revisando la obra y sus relaciones…'} Puedes cancelarla cuando quieras.</p></div><span className="ml-auto shrink-0 rounded-full bg-orange-500/15 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-orange-700">En curso</span></div>}
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-[var(--text-muted)]">La auditoría no modifica documentos. Los cambios de canon se derivan al Constructor Global.</p><button type="button" onClick={isLoading ? cancelAudit : runAudit} className={`inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-60 ${isLoading ? 'bg-red-600 hover:bg-red-500' : 'bg-orange-600 hover:bg-orange-500'}`}>{isLoading ? <><Loader2 size={17} className="animate-spin" /><XCircle size={17} /></> : result ? <RefreshCw size={17} /> : <Search size={17} />} {isLoading ? 'Cancelar auditoría' : result ? 'Actualizar auditoría completa' : 'Iniciar auditoría completa'}</button></div>{error && <p className="mt-4 rounded-xl border border-red-500/25 bg-red-500/5 p-3 text-xs text-red-600">{error}</p>}
             </section>
 
             {result && <section className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-6 lg:p-8"><div className="flex items-start gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-xs font-black text-white">2</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-black">Revisa los hallazgos</h3><p className="mt-1 text-sm leading-relaxed text-[var(--text-muted)]">{result.summary || 'La auditoría terminó sin un resumen adicional.'}</p></div><span className="rounded-full bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase text-orange-700">{filteredFindings.length} de {result.findings.length}</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"><div className="rounded-xl bg-[var(--bg-app)] p-2 text-center text-[10px] text-[var(--text-muted)]"><strong className="block text-base text-[var(--text-main)]">{findingCounts.detected || 0}</strong>por confirmar</div><div className="rounded-xl bg-indigo-500/5 p-2 text-center text-[10px] text-indigo-700"><strong className="block text-base">{findingCounts.confirmed || 0}</strong>confirmados</div><div className="rounded-xl bg-amber-500/5 p-2 text-center text-[10px] text-amber-700"><strong className="block text-base">{findingCounts.needs_evidence || 0}</strong>sin evidencia</div><div className="rounded-xl bg-emerald-500/5 p-2 text-center text-[10px] text-emerald-700"><strong className="block text-base">{findingCounts.applied || 0}</strong>resueltos</div><div className="rounded-xl bg-gray-500/5 p-2 text-center text-[10px] text-gray-600"><strong className="block text-base">{findingCounts.dismissed || 0}</strong>descartados</div></div><div className="mt-4 flex flex-wrap items-center gap-2"><Filter size={14} className="text-[var(--text-muted)]" /><StyledSelect label="Estado" value={statusFilter} options={STATUS_FILTERS} onChange={setStatusFilter} /><StyledSelect label="Categoría" value={categoryFilter} options={categories} onChange={setCategoryFilter} /></div><div className="mt-5 space-y-3">{filteredFindings.length ? filteredFindings.map((finding) => <AuditFinding key={finding.id} finding={finding} documents={documents} applying={applyingFindingId === finding.id} error={findingErrors[finding.id]} onConfirm={(id) => updateFinding(id, { status: 'confirmed' })} onDismiss={(id) => updateFinding(id, { status: 'dismissed' })} onDelete={(item) => setFindingToDelete(item)} onApply={applyFinding} onOpenConstructor={openFindingInConstructor} onOpenEditor={openFindingInEditor} onChangeReplacement={(id, replacementText) => updateFinding(id, { replacementText, replacementEdited: true })} />) : <div className="rounded-2xl border border-dashed border-[var(--border-main)] p-8 text-center text-sm text-[var(--text-muted)]">No hay hallazgos con estos filtros.</div>}</div></div></div></section>}

@@ -37,7 +37,7 @@ const CoWriterRoom = () => {
 
 const NarratorRoom = () => {
     const room = getToolRoom('narrator');
-    const { activeBook, profile, chapters = [], characters = [], worldItems = [], activeChapter, selectChapter, setActiveView } = useData();
+    const { activeBook, profile, chapters = [], characters = [], worldItems = [], activeChapter, setActiveView, lazyLoadChapters } = useData();
     const { getRoomState, updateRoomState } = useToolRooms();
     const state = getRoomState('narrator');
     const launch = useToolRoomLaunch('narrator');
@@ -51,12 +51,18 @@ const NarratorRoom = () => {
     const nextChapter = selectedChapter ? playableChapters[playableChapters.findIndex((chapter) => chapter.id === selectedChapter.id) + 1] || null : null;
     const supportingContext = useMemo(() => [...characters.map((character) => `Personaje: ${character.name}\n${character.description || ''}`), ...worldItems.map((item) => `Mundo: ${item.title}\n${item.content || ''}`)].join('\n\n').slice(0, 18000), [characters, worldItems]);
     const script = scriptState.chapterId === selectedChapter?.id ? scriptState.script : null;
-    const handleSelectChapter = useCallback((chapter) => {
+    const handleSelectChapter = useCallback(async (chapter) => {
         const chapterId = typeof chapter === 'string' ? chapter : chapter?.id;
         if (!chapterId) return;
+        const chapterReference = playableChapters.find((item) => item.id === chapterId);
+        if (!chapterReference) return;
+
+        // El Narrador tiene su propia selección. No debemos usar selectChapter,
+        // porque esa acción global cambia la vista al editor. Cargamos el
+        // contenido bajo demanda y dejamos la vista del Narrador intacta.
+        await lazyLoadChapters([chapterId]);
         updateRoomState('narrator', { chapterId });
-        return selectChapter(chapter);
-    }, [selectChapter, updateRoomState]);
+    }, [lazyLoadChapters, playableChapters, updateRoomState]);
     const handleChapterPickerChange = (event) => {
         const chapter = playableChapters.find((item) => item.id === event.target.value);
         if (!chapter) return;

@@ -158,7 +158,7 @@ const NarradorPanel = ({
     const chapterTitle = activeChapter?.title || 'Capítulo';
     const preparationEta = formatPreparationEta(preparationProgress.etaSeconds);
     const preparationSegmentLabel = Number.isInteger(preparationProgress.currentIndex)
-        ? `Preparando fragmento ${preparationProgress.currentIndex + 1}`
+        ? `Cargando ${preparationProgress.currentIndex + 1}`
         : 'Preparando audio';
     const preparationLabel = preparationProgress.total > 0
         ? `${isPreparationPaused ? 'Pausado · ' : ''}${preparationSegmentLabel} · ${preparationProgress.completed}/${preparationProgress.total}${preparationEta ? ` · ~${preparationEta}` : ''}`

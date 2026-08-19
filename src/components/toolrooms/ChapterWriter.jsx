@@ -17,6 +17,17 @@ const SIZE_OPTIONS = [
 
 const plain = (value) => String(value || '').trim();
 
+const saveCloudSnapshotBestEffort = async (bookId, chapterId, content, triggerType) => {
+    try {
+        await saveEntitySnapshot(bookId, 'chapters', chapterId, content, triggerType);
+    } catch (snapshotError) {
+        // Las reglas de Firestore pueden no permitir snapshots remotos aunque
+        // sí permitan guardar el capítulo. El respaldo local sigue disponible
+        // y no debemos bloquear la aprobación por esta operación auxiliar.
+        console.warn('No se pudo guardar el snapshot remoto del capítulo:', snapshotError);
+    }
+};
+
 const ChapterWriter = ({ state, updateRoomState, worldItems, chapters, characters, activeChapter, lazyLoadChapters, createChapter, selectChapter, setActiveView, onGoDesigner }) => {
     const { activeBook, profile } = useData();
     const { completeMission } = useToolRooms();
@@ -98,8 +109,13 @@ const ChapterWriter = ({ state, updateRoomState, worldItems, chapters, character
             const editorContent = toEditorHtml(replacement);
             const target = selectedEmptyChapter || await createChapter({ title: planDraft.title, content: editorContent, parentId: null, isVolume: false }, { preventRedirect: true });
             if (!target?.id) throw new Error('No se pudo crear el capítulo.');
-            if (selectedEmptyChapter) await updateChapterContent(activeBook.id, target.id, editorContent);
-            await saveEntitySnapshot(activeBook.id, 'chapters', target.id, editorContent, 'toolroom-cowriter-structure');
+            if (selectedEmptyChapter) {
+                const previousContent = target.content || '';
+                await saveLocalSnapshot(target.id, previousContent, 'before-toolroom-cowriter-structure');
+                await saveCloudSnapshotBestEffort(activeBook.id, target.id, previousContent, 'before-toolroom-cowriter-structure');
+                await updateChapterContent(activeBook.id, target.id, editorContent);
+            }
+            await saveCloudSnapshotBestEffort(activeBook.id, target.id, editorContent, 'toolroom-cowriter-structure');
             await saveLocalSnapshot(target.id, editorContent, 'toolroom-cowriter-structure');
             await selectChapter(target);
             completeMission('cowriter');

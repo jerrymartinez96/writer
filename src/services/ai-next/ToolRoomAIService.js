@@ -113,28 +113,47 @@ const NARRATION_SCRIPT_TOOL = {
     },
 };
 
-export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000 }) => {
+export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000, signal, normalizeResponse = (value) => value }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const requestOptions = {
         temperature: 0.1,
         max_tokens,
+        signal,
     };
     try {
         const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, schema, requestOptions));
-        const parsed = parseStructuredResponse(raw, 'respuesta de Tool Room');
+        const parsed = normalizeResponse(parseStructuredResponse(raw, 'respuesta de Tool Room'));
         return validateStructuredResponse(parsed, schema, 'respuesta de Tool Room');
     } catch (error) {
         const errorMessage = String(error?.message || '');
-        const canRecover = errorMessage.includes('respuesta vacía') || errorMessage.includes('respuesta de Tool Room inválida') || errorMessage.includes('JSON válido');
+        const canRecover = errorMessage.includes('respuesta vacía')
+            || errorMessage.includes('respuesta de Tool Room inválida')
+            || errorMessage.includes('JSON válido')
+            || errorMessage.includes('respuesta de Tool Room no cumple el contrato');
         if (!canRecover) throw error;
-        // El segundo intento conserva la configuración de razonamiento y solo
-        // vuelve a exigir el contrato estructurado.
-        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nDevuelve un objeto JSON válido y completo con todos los campos obligatorios. No escribas texto fuera del objeto.`, apiKey, getStructuredAIOptions(profile, schema, {
+        // El segundo intento abandona Tool Calling y usa JSON directo. Así la
+        // recuperación no depende de que DeepSeek emita correctamente un
+        // tool_call después de haber devuelto razonamiento o argumentos incompletos.
+        const recoveryProfile = {
+            ...profile,
+            aiConfig: {
+                ...(profile?.aiConfig || {}),
+                reasoningMode: false,
+            },
+        };
+        const requiredFields = schema?.function?.parameters?.required || [];
+        const findingRequiredFields = schema?.function?.parameters?.properties?.findings?.items?.required || [];
+        const nestedRecoveryInstruction = findingRequiredFields.length
+            ? `Cada elemento de findings debe incluir exactamente estos campos: ${findingRequiredFields.join(', ')}. En particular, severity solo puede ser low, medium o high y confidence debe ser un número entre 0 y 1.`
+            : '';
+        const recoveryRaw = await AIService.sendMessage(`${prompt}\n\nRECUPERACIÓN OBLIGATORIA: devuelve únicamente un objeto JSON válido, sin Markdown, sin razonamiento y sin texto adicional. Debe incluir exactamente los campos obligatorios: ${requiredFields.join(', ')}. ${nestedRecoveryInstruction} Si no hay hallazgos, usa un arreglo vacío en findings.`, apiKey, getConfiguredAIOptions(recoveryProfile, {
             ...requestOptions,
             max_tokens: Math.max(6000, Math.min(max_tokens, 12000)),
+            reasoningMode: false,
+            responseMode: 'json',
         }));
-        const parsed = parseStructuredResponse(recoveryRaw, 'respuesta de Tool Room');
+        const parsed = normalizeResponse(parseStructuredResponse(recoveryRaw, 'respuesta de Tool Room'));
         return validateStructuredResponse(parsed, schema, 'respuesta de Tool Room');
     }
 };
@@ -331,6 +350,88 @@ export const requestChapterScene = async ({ profile, chapterPlan = null, directi
     return normalizeScene(parsed.scene, nextNumber - 1);
 };
 
+const normalizeAuditSeverity = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    const aliases = {
+        critical: 'high', severe: 'high', major: 'high', urgent: 'high', alta: 'high', crítico: 'high', critica: 'high', crítica: 'high',
+        warning: 'medium', moderate: 'medium', warn: 'medium', media: 'medium', medio: 'medium', moderada: 'medium',
+        info: 'low', minor: 'low', baja: 'low', bajo: 'low', leve: 'low',
+    };
+    return ['low', 'medium', 'high'].includes(normalized) ? normalized : aliases[normalized] || 'medium';
+};
+
+const normalizeAuditConfidence = (value) => {
+    const raw = typeof value === 'string' ? value.trim().replace(',', '.') : value;
+    const parsed = Number.parseFloat(String(raw === undefined || raw === null ? '' : raw).replace(/%$/, ''));
+    if (!Number.isFinite(parsed)) return 0.5;
+    const normalized = String(raw).includes('%') || parsed > 1 ? parsed / 100 : parsed;
+    return Math.min(1, Math.max(0, normalized));
+};
+
+const normalizeAuditEvidence = (finding) => {
+    const source = Array.isArray(finding?.evidence)
+        ? finding.evidence
+        : [finding?.evidenceA, finding?.evidenceB].filter(Boolean);
+    const documentIds = Array.isArray(finding?.documentIds)
+        ? finding.documentIds.map(String)
+        : [finding?.documentIds, finding?.documentId, finding?.primaryDocumentId, finding?.documentAId, finding?.documentBId].filter(Boolean).map(String);
+    return source.flatMap((item, index) => {
+        const entries = Array.isArray(item) ? item : [item];
+        return entries.map((entry) => {
+            if (typeof entry === 'string') return { documentId: documentIds[index] || documentIds[0] || '', quote: entry };
+            return {
+                documentId: String(entry?.documentId || entry?.document || entry?.id || documentIds[index] || documentIds[0] || ''),
+                quote: String(entry?.quote || entry?.text || entry?.excerpt || entry?.evidence || entry?.content || '').trim(),
+            };
+        });
+    }).filter((item) => item.documentId && item.quote);
+};
+
+const normalizeConsistencyResponse = (value) => {
+    const source = Array.isArray(value) ? { findings: value } : (value && typeof value === 'object' ? value : {});
+    const hasSummary = ['summary', 'overview', 'result', 'analysis'].some((key) => source[key] !== undefined && source[key] !== null);
+    const hasFindings = Array.isArray(source.findings)
+        ? source.findings
+        : Array.isArray(source.issues)
+            ? source.issues
+            : Array.isArray(source.results)
+                ? source.results
+                : Array.isArray(source.items)
+                    ? source.items
+                : source.findings && typeof source.findings === 'object'
+                    ? [source.findings]
+                    : null;
+    const rawFindings = Array.isArray(hasFindings) ? hasFindings : [];
+    return {
+        ...source,
+        ...(hasSummary ? { summary: String(source.summary || source.overview || source.result || source.analysis) } : {}),
+        ...(hasFindings !== null ? { findings: rawFindings.map((finding) => {
+            const title = String(finding?.title || finding?.name || finding?.label || finding?.issue || finding?.problem || 'Detalle para revisar');
+            const reason = String(finding?.reason || finding?.explanation || finding?.whyContradictory || finding?.why || finding?.rationale || finding?.justification || finding?.description || finding?.detail || finding?.suggestedAction || title);
+            const evidence = normalizeAuditEvidence(finding);
+            const documentIds = [...new Set([
+                ...(Array.isArray(finding?.documentIds) ? finding.documentIds : [finding?.documentIds]),
+                finding?.documentId,
+                finding?.primaryDocumentId,
+                finding?.documentAId,
+                finding?.documentBId,
+                ...evidence.map((item) => item.documentId),
+            ].filter(Boolean).map(String))];
+            return {
+                ...finding,
+                documentId: String(finding?.documentId || documentIds[0] || ''),
+                documentIds,
+                title,
+                category: String(finding?.category || finding?.type || finding?.kind || 'detail'),
+                reason,
+                severity: normalizeAuditSeverity(finding?.severity || finding?.priority || finding?.impact),
+                confidence: normalizeAuditConfidence(finding?.confidence ?? finding?.certainty ?? finding?.probability ?? finding?.score),
+                evidence,
+            };
+        }) } : {}),
+    };
+};
+
 const normalizeConsistencyFinding = (finding, index, allowedIds, fallbackCategory = 'detail') => {
     const rawEvidence = Array.isArray(finding?.evidence)
         ? finding.evidence
@@ -376,14 +477,14 @@ const CONSISTENCY_AUDIT_TOOL = {
                 summary: { type: 'string' },
                 findings: { type: 'array', items: { type: 'object', properties: {
                     id: { type: 'string' }, documentId: { type: 'string' }, documentIds: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, title: { type: 'string' }, excerpt: { type: 'string' }, originalText: { type: 'string' }, replacementText: { type: 'string' }, reason: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] }, confidence: { type: 'number' }, evidence: { type: 'array', items: { type: 'object', properties: { documentId: { type: 'string' }, quote: { type: 'string' } }, required: ['documentId', 'quote'] } },
-                }, required: ['title', 'category', 'reason', 'severity', 'confidence'] } },
+                }, required: ['documentId', 'title', 'category', 'reason', 'severity', 'confidence'] } },
             },
             required: ['summary', 'findings'],
         },
     },
 };
 
-export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'full', query = '', canonical = '', documents = [], instruction = '' }) => {
+export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'full', query = '', canonical = '', documents = [], instruction = '', signal }) => {
     const normalizedDocuments = documents.map((document) => ({
         id: String(document.id || ''),
         type: String(document.type || 'document'),
@@ -393,8 +494,10 @@ export const requestGlobalConsistencyAnalysis = async ({ profile, auditType = 'f
     if (!normalizedDocuments.length) return { summary: 'No hay documentos con contenido suficiente para analizar.', findings: [] };
     const allowedIds = new Set(normalizedDocuments.map((document) => document.id));
     const prompt = buildRegisteredPrompt('consistencyAudit', { auditType, query, canonical, instruction, normalizedDocuments });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: CONSISTENCY_AUDIT_TOOL, max_tokens: 9000 });
-    const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds, auditType)).filter(Boolean).filter((finding) => finding.originalText || !finding.replacementText) : [];
+    const parsed = await createStructuredRequest({ profile, prompt, schema: CONSISTENCY_AUDIT_TOOL, max_tokens: 9000, signal, normalizeResponse: normalizeConsistencyResponse });
+    // Los hallazgos estructurales pueden no tener texto para reemplazar; no
+    // deben desaparecer solo porque describen una consecuencia o un hueco de trama.
+    const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding, index) => normalizeConsistencyFinding(finding, index, allowedIds, auditType)).filter(Boolean) : [];
     return { summary: String(parsed.summary || ''), findings };
 };
 
