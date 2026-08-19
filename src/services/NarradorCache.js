@@ -128,6 +128,56 @@ export const pcmToWavBlob = (pcmData, sampleRate = 24000) => {
     return new Blob([buffer], { type: 'audio/wav' });
 };
 
+/**
+ * Extrae el PCM lineal de un WAV PCM de 16 bits.
+ * Los respaldos del Narrador se generan con pcmToWavBlob, pero se recorren
+ * los chunks para no depender de que el bloque data esté siempre en offset 44.
+ */
+export const wavToPcmData = (arrayBuffer) => {
+    const view = new DataView(arrayBuffer);
+    const readAscii = (offset, length) => {
+        let value = '';
+        for (let index = 0; index < length; index += 1) value += String.fromCharCode(view.getUint8(offset + index));
+        return value;
+    };
+
+    if (arrayBuffer.byteLength < 12 || readAscii(0, 4) !== 'RIFF' || readAscii(8, 4) !== 'WAVE') {
+        throw new Error('El respaldo descargado no es un WAV válido.');
+    }
+
+    let offset = 12;
+    let audioFormat = null;
+    let channels = null;
+    let bitsPerSample = null;
+    let dataOffset = null;
+    let dataLength = null;
+
+    while (offset + 8 <= view.byteLength) {
+        const chunkId = readAscii(offset, 4);
+        const chunkLength = view.getUint32(offset + 4, true);
+        const chunkDataOffset = offset + 8;
+        if (chunkDataOffset + chunkLength > view.byteLength) break;
+
+        if (chunkId === 'fmt ' && chunkLength >= 16) {
+            audioFormat = view.getUint16(chunkDataOffset, true);
+            channels = view.getUint16(chunkDataOffset + 2, true);
+            bitsPerSample = view.getUint16(chunkDataOffset + 14, true);
+        } else if (chunkId === 'data') {
+            dataOffset = chunkDataOffset;
+            dataLength = chunkLength;
+            break;
+        }
+
+        offset = chunkDataOffset + chunkLength + (chunkLength % 2);
+    }
+
+    if (audioFormat !== 1 || channels !== 1 || bitsPerSample !== 16 || dataOffset === null) {
+        throw new Error('El respaldo descargado no usa el formato PCM esperado.');
+    }
+
+    return arrayBuffer.slice(dataOffset, dataOffset + dataLength);
+};
+
 const safeFileName = value => String(value || 'narracion').replace(/[^a-z0-9_-]/gi, '_').slice(0, 80);
 
 /**
@@ -232,21 +282,44 @@ export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHas
 };
 
 /**
- * Limpia la caché de narración completa o solo de un capítulo.
+ * Lista los fragmentos locales de un capítulo, prefiriendo la versión
+ * permanente cuando existe una copia temporal y otra permanente del mismo key.
+ */
+export const getCachedNarradorSegments = async ({ bookId, chapterId } = {}) => {
+    try {
+        const d = await getDb();
+        const [temporary, permanent] = await Promise.all([
+            d.segments.toArray(),
+            d.permanentSegments.toArray()
+        ]);
+        const entries = new Map();
+        temporary
+            .filter((entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId))
+            .forEach((entry) => entries.set(entry.key, { ...entry, permanent: false }));
+        permanent
+            .filter((entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId))
+            .forEach((entry) => entries.set(entry.key, { ...entry, permanent: true }));
+        return Array.from(entries.values());
+    } catch (err) {
+        console.warn('[NarradorCache] list cached segments error:', err);
+        return [];
+    }
+};
+
+/**
+ * Limpia exclusivamente la caché del capítulo indicado.
+ * La operación exige ambos identificadores para evitar borrar capítulos
+ * ajenos por accidente.
  */
 export const clearNarradorCache = async (bookId, chapterId) => {
     try {
-        const d = await getDb();
-        if (bookId && chapterId) {
-            await d.segments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
-            await d.permanentSegments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
-        } else if (bookId) {
-            await d.segments.where('bookId').equals(bookId).delete();
-            await d.permanentSegments.where('bookId').equals(bookId).delete();
-        } else {
-            await d.segments.clear();
-            await d.permanentSegments.clear();
+        if (!bookId || !chapterId) {
+            console.warn('[NarradorCache] clear skipped: chapter scope is required');
+            return false;
         }
+        const d = await getDb();
+        await d.segments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
+        await d.permanentSegments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
         return true;
     } catch (err) {
         console.warn('[NarradorCache] clear error:', err);
@@ -257,11 +330,16 @@ export const clearNarradorCache = async (bookId, chapterId) => {
 /**
  * Calcula el tamaño total de la caché en bytes (para mostrar al usuario).
  */
-export const getNarradorCacheSize = async () => {
+export const getNarradorCacheSize = async (bookId, chapterId) => {
     try {
         const d = await getDb();
-        const temporary = await d.segments.toArray();
-        const permanent = await d.permanentSegments.toArray();
+        const isInScope = (entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId);
+        const [temporaryEntries, permanentEntries] = await Promise.all([
+            d.segments.toArray(),
+            d.permanentSegments.toArray()
+        ]);
+        const temporary = temporaryEntries.filter(isInScope);
+        const permanent = permanentEntries.filter(isInScope);
         const temporaryBytes = temporary.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
         const permanentBytes = permanent.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
         return {
@@ -286,10 +364,12 @@ export default {
     saveNarradorStorageSettings,
     chooseNarradorDirectory,
     pcmToWavBlob,
+    wavToPcmData,
     getCachedChapterSegments,
     downloadCachedChapterWav,
     saveSegmentToNarradorDirectory,
     invalidateCachedSegment,
     clearNarradorCache,
-    getNarradorCacheSize
+    getNarradorCacheSize,
+    getCachedNarradorSegments
 };

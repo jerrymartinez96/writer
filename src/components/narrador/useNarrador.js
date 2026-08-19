@@ -13,6 +13,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import GeminiLiveService, { GeminiLiveService as GeminiLiveSession } from '../../services/GeminiLiveService';
 import { fnv1a, prepareSegments } from '../../services/NarradorSegmenter';
 import { getCachedSegment, saveCachedSegment, savePermanentSegment, saveSegmentToNarradorDirectory, getNarradorStorageSettings, invalidateCachedSegment, getNarradorCacheSize } from '../../services/NarradorCache';
+import { buildNarradorAudioVariant } from '../../services/NarradorAudioIdentity';
 
 const PROGRESS_PREFIX = 'narrador_progress_';
 
@@ -221,13 +222,7 @@ export const useNarrador = ({
     }, []);
 
     const buildAudioVariant = useCallback(() => {
-        const cfg = profileRef.current?.aiConfig || {};
-        return [
-            cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview',
-            cfg.narradorVoice || 'Puck',
-            cfg.narradorTone || 'auto',
-            'prompt-v2'
-        ].join('|');
+        return buildNarradorAudioVariant(profileRef.current);
     }, []);
 
     const markSegmentCached = useCallback((segmentIndex, isCached = true) => {
@@ -1137,6 +1132,7 @@ export const useNarrador = ({
         isPreparationPaused,
         preparationProgress,
         refreshSegmentCacheStatus,
+        markSegmentCached,
 
         setSpeed,
         setIsPanelOpen,

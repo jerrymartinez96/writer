@@ -2,21 +2,36 @@
  * NarradorPanel — Interfaz de control flotante para la narración de capítulos.
  * Aparece en la esquina inferior derecha durante el modo lectura.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Play, Pause, Square, SkipBack, SkipForward,
     Volume2, Settings, X, Sparkles, Globe, ChevronDown, BookOpenText, Minimize2, RefreshCw, CheckCircle2, CircleDashed, Loader2, Download, StopCircle
 } from 'lucide-react';
 import NarradorSettingsModal from './NarradorSettingsModal';
 
-const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment }) => (
-    <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
-        {segments.map((segment, index) => (
-            (() => {
+const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment }) => {
+    const segmentRefs = useRef(new Map());
+
+    useEffect(() => {
+        if (currentSegmentIndex < 0 || !['connecting', 'speaking', 'paused'].includes(status)) return;
+        const activeSegment = segmentRefs.current.get(currentSegmentIndex);
+        activeSegment?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [currentSegmentIndex, status]);
+
+    return (
+        <div className="max-h-64 overflow-y-auto space-y-1 pr-1" style={{ overflowAnchor: 'none' }}>
+            {segments.map((segment, index) => {
                 const preparing = isPreparing && preparationIndex === index && !cachedSegmentIndexes.has(index);
                 const generating = preparing || (status === 'connecting' && index === currentSegmentIndex);
                 return (
-            <div key={`${segment.index}-${segment.hash}`} className={`flex items-center gap-1 rounded-lg ${index === currentSegmentIndex ? 'bg-indigo-500/10' : ''}`}>
+            <div
+                key={`${segment.index}-${segment.hash}`}
+                ref={(element) => {
+                    if (element) segmentRefs.current.set(index, element);
+                    else segmentRefs.current.delete(index);
+                }}
+                className={`flex items-center gap-1 rounded-lg ${index === currentSegmentIndex ? 'bg-indigo-500/10' : ''}`}
+            >
                 <button
                     onClick={() => skipToSegment(index)}
                     className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-[9px] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
@@ -42,10 +57,10 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
                 </button>
             </div>
                 );
-            })()
-        ))}
-    </div>
-);
+            })}
+        </div>
+    );
+};
 
 const KaraokeTranscript = ({ text, progress, isPlaying, isSyncReady }) => {
     const sentences = String(text || '')
@@ -431,6 +446,7 @@ const NarradorPanel = ({
                 <NarradorSettingsModal
                     isOpen={isSettingsOpen}
                     onClose={() => setIsSettingsOpen(false)}
+                    activeChapter={activeChapter}
                     onCacheCleared={refreshCacheStats}
                 />
             </>
@@ -653,6 +669,7 @@ const NarradorPanel = ({
             <NarradorSettingsModal
                 isOpen={isSettingsOpen}
                 onClose={() => setIsSettingsOpen(false)}
+                activeChapter={activeChapter}
                 onCacheCleared={refreshCacheStats}
             />
         </>

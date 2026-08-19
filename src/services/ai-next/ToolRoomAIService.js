@@ -3,7 +3,6 @@ import { formatDraftText, toPlainText } from './plainText';
 import { getConfiguredAIOptions, getStructuredAIOptions } from './AIRequestOptions';
 import { parseStructuredResponse, validateStructuredResponse } from './StructuredResponse';
 import { buildRegisteredPrompt } from './PromptRegistry';
-import { prepareSegments } from '../NarradorSegmenter';
 
 const CHAPTER_STRUCTURE_ANALYSIS_TOOL = {
     type: 'function',
@@ -84,32 +83,6 @@ const TOOL_ROOM_INSIGHT_TOOL = {
         name: 'reportar_insight_de_tool_room',
         description: 'Devuelve un análisis de solo lectura con resumen y elementos accionables.',
         parameters: { type: 'object', properties: { result: { type: 'string' }, summary: { type: 'string' }, items: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, detail: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] } }, required: ['title', 'detail'] } } }, required: ['result', 'summary', 'items'] },
-    },
-};
-
-const NARRATION_SCRIPT_TOOL = {
-    type: 'function',
-    function: {
-        name: 'diseñar_guion_narracion',
-        description: 'Diseña un guion de producción de audio sin modificar el texto del manuscrito.',
-        parameters: {
-            type: 'object',
-            properties: {
-                summary: { type: 'string' },
-                segments: { type: 'array', minItems: 1, items: { type: 'object', properties: {
-                    index: { type: 'number' },
-                    text: { type: 'string' },
-                    pauseBeforeMs: { type: 'number', minimum: 0, maximum: 10000 },
-                    pauseAfterMs: { type: 'number', minimum: 0, maximum: 10000 },
-                    tone: { type: 'string' },
-                    emphasis: { type: 'array', items: { type: 'string' } },
-                    direction: { type: 'string' },
-                    pronunciation: { type: 'array', items: { type: 'string' } },
-                }, required: ['index', 'text', 'pauseBeforeMs', 'pauseAfterMs', 'tone', 'emphasis', 'direction', 'pronunciation'] } },
-                warnings: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['summary', 'segments', 'warnings'],
-        },
     },
 };
 
@@ -557,65 +530,6 @@ export const requestNarrativeInsight = async ({ profile, instruction, sourceCont
     const prompt = buildRegisteredPrompt('narrativeInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent) });
     const parsed = await createStructuredRequest({ profile, prompt, schema: TOOL_ROOM_INSIGHT_TOOL, max_tokens: 5000 });
     return { result: String(parsed.result || ''), summary: String(parsed.summary || ''), items: Array.isArray(parsed.items) ? parsed.items : [] };
-};
-
-const normalizeNarrationScriptSegment = (segment, index) => ({
-    index: Number.isFinite(Number(segment?.index)) ? Number(segment.index) : index,
-    text: String(segment?.text || '').trim(),
-    pauseBeforeMs: Math.max(0, Math.min(10000, Number(segment?.pauseBeforeMs) || 0)),
-    pauseAfterMs: Math.max(0, Math.min(10000, Number(segment?.pauseAfterMs) || 0)),
-    tone: String(segment?.tone || 'natural'),
-    emphasis: Array.isArray(segment?.emphasis) ? segment.emphasis.map(String).filter(Boolean) : [],
-    direction: String(segment?.direction || ''),
-    pronunciation: Array.isArray(segment?.pronunciation) ? segment.pronunciation.map(String).filter(Boolean) : [],
-});
-
-const normalizeNarrationCoverage = (value) => String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const ensureNarrationSourceCoverage = (source, segments) => {
-    const sourceCoverage = normalizeNarrationCoverage(source);
-    const generatedCoverage = normalizeNarrationCoverage(segments.map((segment) => segment.text).join(' '));
-    if (sourceCoverage === generatedCoverage) return { segments, warning: '' };
-
-    // La producción de audio no puede alterar ni perder palabras del manuscrito.
-    // Si el modelo rompe el contrato, conservamos solo una segmentación literal y
-    // dejamos constancia visible para que el usuario pueda volver a diseñarla.
-    const literalSegments = prepareSegments(source).map((segment, index) => ({
-        ...segment,
-        index,
-        pauseBeforeMs: 0,
-        pauseAfterMs: 0,
-        tone: 'natural',
-        emphasis: [],
-        direction: '',
-        pronunciation: [],
-    }));
-    return {
-        segments: literalSegments,
-        warning: 'La IA no conservó literalmente todo el texto fuente; se restauró una segmentación literal del capítulo.'
-    };
-};
-
-export const requestNarrationScript = async ({ profile, chapterId = '', sourceContent = '', contextContent = '', instruction = '' }) => {
-    const source = toPlainText(sourceContent);
-    if (!source) throw new Error('No hay texto para diseñar el guion de narración.');
-    const prompt = buildRegisteredPrompt('narrationScript', { chapterId, sourceContent: source, contextContent: toPlainText(contextContent).slice(0, 18000), instruction });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: NARRATION_SCRIPT_TOOL, max_tokens: 9000 });
-    const generatedSegments = Array.isArray(parsed.segments)
-        ? parsed.segments.map(normalizeNarrationScriptSegment).filter((segment) => segment.text)
-        : [];
-    if (!generatedSegments.length) throw new Error('La IA no devolvió segmentos válidos para el guion.');
-    const coverage = ensureNarrationSourceCoverage(source, generatedSegments);
-    const warnings = Array.isArray(parsed.warnings) ? parsed.warnings.map(String).filter(Boolean) : [];
-    if (coverage.warning) warnings.unshift(coverage.warning);
-    return {
-        chapterId: String(chapterId || ''),
-        summary: String(parsed.summary || 'Guion de narración preparado para revisión.'),
-        segments: coverage.segments.map((segment, index) => ({ ...segment, index })),
-        warnings,
-    };
 };
 
 export default requestToolRoomProposal;

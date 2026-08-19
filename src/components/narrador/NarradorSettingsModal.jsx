@@ -3,13 +3,14 @@
  * Incluye: API key, voz por defecto con preview, velocidad, tono, auto-continuar y limpieza de caché.
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Play, Square, Sparkles, Globe, Trash2, Volume2, Loader2, Check } from 'lucide-react';
+import { Check, ChevronDown, X, Play, Square, Sparkles, Globe, Trash2, Volume2, Loader2, Cloud, AlertTriangle } from 'lucide-react';
 import Modal from '../Modal';
 import ConfirmModal from '../ConfirmModal';
 import GeminiLiveService, { GEMINI_LIVE_VOICES, GEMINI_LIVE_MODELS } from '../../services/GeminiLiveService';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../Toast';
 import { clearNarradorCache, getNarradorCacheSize, getNarradorStorageSettings, saveNarradorStorageSettings, chooseNarradorDirectory } from '../../services/NarradorCache';
+import { isNarradorCloudConfigured } from '../../services/NarradorCloudService';
 
 const TONES = [
     { id: 'auto', label: 'Auto' },
@@ -21,8 +22,8 @@ const TONES = [
     { id: 'misterioso', label: 'Misterioso' }
 ];
 
-const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
-    const { profile, updateProfile } = useData();
+const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter }) => {
+    const { profile, updateProfile, activeBook } = useData();
     const toast = useToast();
     const aiConfig = profile?.aiConfig || {};
 
@@ -35,10 +36,15 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     const [autoContinue, setAutoContinue] = useState(aiConfig.narradorAutoContinue || false);
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [previewVoiceId, setPreviewVoiceId] = useState(null);
+    const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
     const [cacheInfo, setCacheInfo] = useState(null);
     const [isClearingCache, setIsClearingCache] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
+    const [cloudinaryCloudName, setCloudinaryCloudName] = useState(aiConfig.cloudinaryCloudName || '');
+    const [cloudinaryApiKey, setCloudinaryApiKey] = useState(aiConfig.cloudinaryApiKey || '');
+    const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState(aiConfig.cloudinaryUploadPreset || '');
+    const [showCloudinaryApiKey, setShowCloudinaryApiKey] = useState(false);
     const [keepPermanent, setKeepPermanent] = useState(false);
     const [folderName, setFolderName] = useState('');
     const [isClearCacheConfirmOpen, setIsClearCacheConfirmOpen] = useState(false);
@@ -59,6 +65,10 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             setTone(cfg.narradorTone || 'auto');
             setModel(cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview');
             setAutoContinue(cfg.narradorAutoContinue || false);
+            setIsVoiceMenuOpen(false);
+            setCloudinaryCloudName(cfg.cloudinaryCloudName || '');
+            setCloudinaryApiKey(cfg.cloudinaryApiKey || '');
+            setCloudinaryUploadPreset(cfg.cloudinaryUploadPreset || '');
             lastSavedConfigRef.current = JSON.stringify({
                 geminiApiKey: cfg.geminiApiKey || '',
                 narradorVoice: cfg.narradorVoice || 'Puck',
@@ -66,6 +76,9 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                 narradorTone: cfg.narradorTone || 'auto',
                 geminiLiveModel: cfg.geminiLiveModel || 'gemini-3.1-flash-live-preview',
                 narradorAutoContinue: cfg.narradorAutoContinue || false,
+                cloudinaryCloudName: cfg.cloudinaryCloudName || '',
+                cloudinaryApiKey: cfg.cloudinaryApiKey || '',
+                cloudinaryUploadPreset: cfg.cloudinaryUploadPreset || '',
             });
             getNarradorStorageSettings().then(storage => {
                 setKeepPermanent(!!storage.keepPermanent);
@@ -84,6 +97,9 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             narradorTone: tone,
             geminiLiveModel: model,
             narradorAutoContinue: autoContinue,
+            cloudinaryCloudName: cloudinaryCloudName.trim(),
+            cloudinaryApiKey: cloudinaryApiKey.trim(),
+            cloudinaryUploadPreset: cloudinaryUploadPreset.trim(),
         };
         const serializedConfig = JSON.stringify(nextConfig);
         if (serializedConfig === lastSavedConfigRef.current) return;
@@ -104,17 +120,17 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             }
         }, 800);
         return () => clearTimeout(timer);
-    }, [apiKey, voice, speed, tone, model, autoContinue, isOpen, profile]);
+    }, [apiKey, voice, speed, tone, model, autoContinue, cloudinaryCloudName, cloudinaryApiKey, cloudinaryUploadPreset, isOpen, profile]);
 
     // Load cache stats
     useEffect(() => {
         if (!isOpen) return;
         const load = async () => {
-            const stats = await getNarradorCacheSize();
+            const stats = await getNarradorCacheSize(activeBook?.id, activeChapter?.id);
             setCacheInfo(stats);
         };
         load();
-    }, [isOpen]);
+    }, [isOpen, activeBook?.id, activeChapter?.id]);
 
     const formatBytes = (bytes) => {
         if (!bytes) return '0 B';
@@ -122,6 +138,16 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
+
+    const getProfileWithCloudConfig = () => ({
+        ...profileRef.current,
+        aiConfig: {
+            ...(profileRef.current?.aiConfig || {}),
+            cloudinaryCloudName: cloudinaryCloudName.trim(),
+            cloudinaryApiKey: cloudinaryApiKey.trim(),
+            cloudinaryUploadPreset: cloudinaryUploadPreset.trim()
+        }
+    });
 
     const handlePreviewVoice = async (voiceId) => {
         if (isPreviewing) {
@@ -169,10 +195,14 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
     const handleClearCache = async () => {
         setIsClearingCache(true);
         try {
-            const success = await clearNarradorCache();
+            if (!activeBook?.id || !activeChapter?.id) {
+                toast.warning('Selecciona un capítulo antes de limpiar su caché.');
+                return;
+            }
+            const success = await clearNarradorCache(activeBook.id, activeChapter.id);
             if (success) {
-                toast.success('Caché de narración eliminada.');
-                const stats = await getNarradorCacheSize();
+                toast.success('Caché del capítulo eliminada. El respaldo en la nube permanece disponible.');
+                const stats = await getNarradorCacheSize(activeBook.id, activeChapter.id);
                 setCacheInfo(stats);
                 onCacheCleared?.();
             } else {
@@ -200,6 +230,8 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
             if (err?.name !== 'AbortError') toast.error(err.message || 'No se pudo seleccionar la carpeta.');
         }
     };
+
+    const cloudConfigured = isNarradorCloudConfigured(getProfileWithCloudConfig());
 
     return (
         <>
@@ -263,28 +295,53 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                         <Volume2 size={12} className="text-purple-500" />
                         Voz por defecto
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                        {GEMINI_LIVE_VOICES.map(v => (
-                            <div key={v.id} className={`flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer border transition-all ${voice === v.id
-                                ? 'bg-purple-500/10 border-purple-500/50 text-[var(--text-main)]'
-                                : 'bg-[var(--bg-editor)] border-[var(--border-main)] text-[var(--text-muted)] hover:border-purple-500/30'
-                            }`}>
+                    <div className="relative">
+                        <button
+                            type="button"
+                            aria-haspopup="listbox"
+                            aria-expanded={isVoiceMenuOpen}
+                            onClick={() => setIsVoiceMenuOpen((previous) => !previous)}
+                            className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] px-3 py-3 text-left text-xs font-black text-[var(--text-main)] transition-all hover:border-purple-500/50 focus:border-purple-500 focus:outline-none"
+                        >
+                            <span>{GEMINI_LIVE_VOICES.find((item) => item.id === voice)?.label || voice}</span>
+                            <ChevronDown className={`shrink-0 text-[var(--text-muted)] transition-transform ${isVoiceMenuOpen ? 'rotate-180' : ''}`} size={15} />
+                        </button>
+
+                        {isVoiceMenuOpen && (
+                            <>
                                 <button
-                                    onClick={() => setVoice(v.id)}
-                                    className="flex-1 text-left"
-                                >
-                                    <span className="text-[10px] font-black uppercase tracking-wider">{v.label}</span>
-                                </button>
-                                <button
-                                    onClick={() => handlePreviewVoice(v.id)}
-                                    disabled={!apiKey}
-                                    className={`p-1.5 rounded-lg transition-all cursor-pointer ${!apiKey ? 'opacity-30 cursor-not-allowed' : isPreviewing && previewVoiceId === v.id ? 'bg-red-500 text-white' : 'text-purple-500 hover:bg-purple-500/10'}`}
-                                    title={isPreviewing && previewVoiceId === v.id ? 'Detener preview' : 'Probar voz'}
-                                >
-                                    {isPreviewing && previewVoiceId === v.id ? <Square size={12} /> : <Play size={12} />}
-                                </button>
-                            </div>
-                        ))}
+                                    type="button"
+                                    aria-label="Cerrar selector de voz"
+                                    className="fixed inset-0 z-40 cursor-default"
+                                    onClick={() => setIsVoiceMenuOpen(false)}
+                                />
+                                <div role="listbox" aria-label="Seleccionar voz" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-2xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-1.5 shadow-2xl">
+                                    {GEMINI_LIVE_VOICES.map((item) => (
+                                        <div key={item.id} className={`flex items-center gap-2 rounded-xl transition-colors ${voice === item.id ? 'bg-purple-500/10 text-purple-600' : 'text-[var(--text-main)] hover:bg-[var(--accent-soft)]'}`}>
+                                            <button
+                                                type="button"
+                                                role="option"
+                                                aria-selected={voice === item.id}
+                                                onClick={() => { setVoice(item.id); setIsVoiceMenuOpen(false); }}
+                                                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider"
+                                            >
+                                                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                                {voice === item.id && <Check className="shrink-0" size={14} />}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handlePreviewVoice(item.id)}
+                                                disabled={!apiKey}
+                                                className={`mr-1.5 rounded-lg p-1.5 transition-all ${!apiKey ? 'cursor-not-allowed opacity-30' : isPreviewing && previewVoiceId === item.id ? 'bg-red-500 text-white' : 'text-purple-500 hover:bg-purple-500/10'}`}
+                                                title={isPreviewing && previewVoiceId === item.id ? 'Detener preview' : 'Probar voz'}
+                                            >
+                                                {isPreviewing && previewVoiceId === item.id ? <Square size={12} /> : <Play size={12} />}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
                     </div>
                     {!apiKey && (
                         <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
@@ -379,7 +436,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                         </div>
                         <button
                             onClick={() => setIsClearCacheConfirmOpen(true)}
-                            disabled={isClearingCache || !cacheInfo?.entries}
+                            disabled={isClearingCache || !activeBook?.id || !activeChapter?.id || !cacheInfo?.entries}
                             className="px-4 py-2 rounded-xl bg-orange-500/10 text-orange-500 border border-orange-500/30 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
                         >
                             {isClearingCache ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -387,8 +444,60 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                         </button>
                     </div>
                     <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
-                        El audio se cachea localmente por 7 días. Los segmentos editados se regeneran automáticamente.
+                        Limpiar elimina solo la copia local. El respaldo en la nube permanece disponible para descargarlo después.
                     </p>
+                </div>
+
+                {/* Cloudinary configuration */}
+                <div className="pt-4 border-t border-[var(--border-main)] space-y-3">
+                    <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] flex items-center gap-1.5">
+                            <Cloud size={12} className="text-sky-500" />
+                            Configuración de Cloudinary
+                        </p>
+                        <p className="text-[9px] text-[var(--text-muted)] font-medium mt-0.5">
+                            Estos datos se guardan junto con la configuración de IA. Las acciones de subir y descargar están en el panel del capítulo.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                            value={cloudinaryCloudName}
+                            onChange={(event) => setCloudinaryCloudName(event.target.value)}
+                            placeholder="Cloud name"
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-sky-500/20 outline-none text-[var(--text-main)]"
+                        />
+                        <input
+                            value={cloudinaryUploadPreset}
+                            onChange={(event) => setCloudinaryUploadPreset(event.target.value)}
+                            placeholder="Upload preset unsigned"
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-sky-500/20 outline-none text-[var(--text-main)]"
+                        />
+                    </div>
+                    <div className="relative">
+                        <input
+                            type={showCloudinaryApiKey ? 'text' : 'password'}
+                            value={cloudinaryApiKey}
+                            onChange={(event) => setCloudinaryApiKey(event.target.value)}
+                            placeholder="Cloudinary API key (opcional)"
+                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 pr-14 text-xs font-mono focus:ring-2 focus:ring-sky-500/20 outline-none text-[var(--text-main)]"
+                        />
+                        <button
+                            onClick={() => setShowCloudinaryApiKey((previous) => !previous)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                        >
+                            {showCloudinaryApiKey ? 'Ocultar' : 'Ver'}
+                        </button>
+                    </div>
+                    <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
+                        Usa un Upload preset unsigned. La limpieza remota no forma parte de esta versión.
+                    </p>
+                    {!cloudConfigured && (
+                        <p className="text-[9px] text-amber-600 font-medium flex items-start gap-1.5">
+                            <AlertTriangle size={12} className="shrink-0" />
+                            Completa Cloud name y Upload preset para activar la sincronización.
+                        </p>
+                    )}
                 </div>
 
                 {/* Permanent storage */}
@@ -429,7 +538,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared }) => {
                 onClose={() => setIsClearCacheConfirmOpen(false)}
                 onConfirm={handleClearCache}
                 title="¿Limpiar la caché de narración?"
-                message="Se eliminarán los audios temporales y permanentes guardados localmente para todas las obras. Esta acción no modifica ningún manuscrito."
+                message={`Se eliminarán únicamente los audios guardados localmente para el capítulo «${activeChapter?.title || 'activo'}». Esta acción no modifica ningún manuscrito ni el respaldo en la nube.`}
                 confirmText="Limpiar caché"
             />
         </>

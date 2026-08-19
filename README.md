@@ -49,5 +49,11 @@ Una plataforma minimalista y potente diseñada para escritores que buscan un ent
 
 5. **Desplegar en Firebase:**
    ```bash
-   npm run build && npx firebase-tools deploy --only hosting
+   npm run build && npx firebase-tools deploy --only hosting,firestore:rules
    ```
+
+## ☁️ Respaldo de audio del Narrador
+
+En la configuración del Narrador se guardan el `Cloud name`, el `API key` y un `Upload preset` unsigned de Cloudinary. El usuario puede subir la caché del capítulo actual desde un dispositivo y descargarla explícitamente en otro. La reproducción continúa usando IndexedDB local.
+
+La limpieza elimina únicamente la copia local; los respaldos de Cloudinary permanecen disponibles para descargarlos de nuevo.

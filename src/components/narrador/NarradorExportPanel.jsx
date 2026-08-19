@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Download, FileAudio, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Download, FileAudio, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { downloadCachedChapterWav, getCachedChapterSegments, getNarradorCacheSize } from '../../services/NarradorCache';
 
 const formatBytes = (bytes = 0) => {
@@ -78,17 +78,22 @@ const NarradorExportPanel = ({
     };
 
     return (
-        <section className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <details className="group rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-5 outline-none lg:p-6 [&::-webkit-details-marker]:hidden">
                 <div>
                     <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500">Exportar</p>
-                    <h2 className="mt-2 text-2xl font-serif font-black">Descarga una copia de audio</h2>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--text-muted)]">
+                    <h2 className="mt-1 text-lg font-serif font-black">Descarga una copia de audio</h2>
+                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--text-muted)]">
                         Exporta únicamente el audio ya generado y cacheado. El capítulo original y el guion permanecen intactos.
                     </p>
                 </div>
-                <FileAudio className="hidden shrink-0 text-emerald-500 sm:block" size={28} />
-            </div>
+                <div className="flex shrink-0 items-center gap-3 text-emerald-500">
+                    <FileAudio className="hidden sm:block" size={22} />
+                    <ChevronDown className="transition-transform group-open:rotate-180" size={18} />
+                </div>
+            </summary>
+
+            <div className="border-t border-[var(--border-main)] p-5 lg:p-7">
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-4">
@@ -155,7 +160,8 @@ const NarradorExportPanel = ({
                     Escuchar capítulo
                 </button>
             </div>
-        </section>
+            </div>
+        </details>
     );
 };
 

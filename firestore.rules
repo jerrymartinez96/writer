@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. ¿El usuario inició sesión en Firebase Auth?
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 2. ¿El usuario tiene un documento de perfil creado en la colección 'users'?
+    function isRegisteredUser() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+
+    // --- COLECCIÓN: users ---
+    // Aquí es donde guardas los datos del perfil de cada usuario
+    match /users/{userId} {
+      // Cualquiera autenticado puede leer perfiles
+      allow read: if isAuthenticated();
+      
+      // Para crear su propio perfil solo necesita estar autenticado (así no se bloquea al registrarse)
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Solo el dueño de la cuenta puede editar o borrar su propio perfil
+      allow update, delete: if isAuthenticated() && request.auth.uid == userId;
+
+      // --- SUBCOLECCIÓN: narrationAssets ---
+      // Guarda únicamente la metadata de los audios que viven en Cloudinary.
+      // Las reglas del documento users no se heredan automáticamente a sus subcolecciones.
+      match /narrationAssets/{assetId} {
+        allow read, create, update: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+
+    // --- COLECCIÓN: books ---
+    // Aquí está tu documento "EL RENACER DEL DRAGÓN" (Id: MnCX6GZvV57uaV26hTtx)
+    match /books/{bookId} {
+      
+      // Lectura: Solo si está autenticado Y existe en la colección 'users'
+      allow read: if isRegisteredUser();
+      
+      // Creación: Debe estar registrado y el 'ownerId' del libro debe ser su propio UID
+      allow create: if isRegisteredUser() && request.auth.uid == request.resource.data.ownerId;
+      
+      // Edición/Borrado: Debe estar registrado y ser el dueño real (ownerId actual) del libro
+      allow update, delete: if isRegisteredUser() && request.auth.uid == resource.data.ownerId;
+
+
+      // --- SUBCOLECCIONES: chapters, characters, world ---
+      // Este bloque protege automáticamente todo lo que esté dentro de un libro
+      match /{subCollection=**} {
+        
+        // Cualquier usuario registrado del sistema puede leer los capítulos/personajes
+        allow read: if isRegisteredUser();
+        
+        // Solo el dueño del libro padre puede escribir, editar o borrar dentro de sus subcolecciones
+        allow create, update, delete: if isRegisteredUser() 
+          && request.auth.uid == get(/databases/$(database)/documents/books/$(bookId)).data.ownerId;
+      }
+    }
+
+  }
+}

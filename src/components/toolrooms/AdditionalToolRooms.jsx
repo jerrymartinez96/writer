@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, ChevronDown, FilePlus2, Headphones, Play, Sparkles, UsersRound } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useToolRooms } from '../../context/ToolRoomContext';
@@ -10,7 +10,7 @@ import CharacterToolRoom from './CharacterToolRoom';
 import useToolRoomLaunch from './useToolRoomLaunch';
 import { useNarrador } from '../narrador/useNarrador';
 import NarradorPanel from '../narrador/NarradorPanel';
-import NarradorScriptStudio from '../narrador/NarradorScriptStudio';
+import NarradorCloudBackupPanel from '../narrador/NarradorCloudBackupPanel';
 import NarradorExportPanel from '../narrador/NarradorExportPanel';
 import { useToast } from '../Toast';
 
@@ -37,32 +37,40 @@ const CoWriterRoom = () => {
 
 const NarratorRoom = () => {
     const room = getToolRoom('narrator');
-    const { activeBook, profile, chapters = [], characters = [], worldItems = [], activeChapter, setActiveView, lazyLoadChapters } = useData();
+    const { activeBook, profile, chapters = [], activeChapter, setActiveView, lazyLoadChapters } = useData();
     const { getRoomState, updateRoomState } = useToolRooms();
     const state = getRoomState('narrator');
     const launch = useToolRoomLaunch('narrator');
     const toast = useToast();
     const [isPlayerOpen, setIsPlayerOpen] = useState(true);
-    const [scriptState, setScriptState] = useState({ chapterId: null, script: null });
     const [isChapterPickerOpen, setIsChapterPickerOpen] = useState(false);
     const playableChapters = useMemo(() => chapters.filter((chapter) => !chapter.isVolume), [chapters]);
-    const selectedChapter = playableChapters.find((chapter) => chapter.id === (state.chapterId || launch?.context?.chapterIds?.[0])) || activeChapter || null;
+    const selectedChapterId = state.chapterId || launch?.context?.chapterIds?.[0] || activeChapter?.id || null;
+    const listedSelectedChapter = playableChapters.find((chapter) => chapter.id === selectedChapterId);
+    const selectedChapter = listedSelectedChapter || (activeChapter?.id === selectedChapterId || !selectedChapterId ? activeChapter : null);
+    const chapterReady = Boolean(selectedChapter?.isLoaded || selectedChapter?.content !== undefined);
     const selectedChapterIndex = selectedChapter ? playableChapters.findIndex((chapter) => chapter.id === selectedChapter.id) : -1;
     const nextChapter = selectedChapter ? playableChapters[playableChapters.findIndex((chapter) => chapter.id === selectedChapter.id) + 1] || null : null;
-    const supportingContext = useMemo(() => [...characters.map((character) => `Personaje: ${character.name}\n${character.description || ''}`), ...worldItems.map((item) => `Mundo: ${item.title}\n${item.content || ''}`)].join('\n\n').slice(0, 18000), [characters, worldItems]);
-    const script = scriptState.chapterId === selectedChapter?.id ? scriptState.script : null;
-    const handleSelectChapter = useCallback(async (chapter) => {
+    useEffect(() => {
+        if (!activeBook?.id || !selectedChapterId || chapterReady) return undefined;
+        lazyLoadChapters([selectedChapterId])
+            .catch((error) => {
+                console.error('[Narrador] No se pudo precargar el capítulo seleccionado', error);
+            })
+        return undefined;
+    }, [activeBook?.id, chapterReady, lazyLoadChapters, selectedChapterId]);
+
+    const handleSelectChapter = useCallback((chapter) => {
         const chapterId = typeof chapter === 'string' ? chapter : chapter?.id;
         if (!chapterId) return;
         const chapterReference = playableChapters.find((item) => item.id === chapterId);
         if (!chapterReference) return;
 
         // El Narrador tiene su propia selección. No debemos usar selectChapter,
-        // porque esa acción global cambia la vista al editor. Cargamos el
-        // contenido bajo demanda y dejamos la vista del Narrador intacta.
-        await lazyLoadChapters([chapterId]);
+        // porque esa acción global cambia la vista al editor. La precarga se
+        // dispara al cambiar el ID y dejamos la vista del Narrador intacta.
         updateRoomState('narrator', { chapterId });
-    }, [lazyLoadChapters, playableChapters, updateRoomState]);
+    }, [playableChapters, updateRoomState]);
     const handleChapterPickerChange = (event) => {
         const chapter = playableChapters.find((item) => item.id === event.target.value);
         if (!chapter) return;
@@ -70,7 +78,7 @@ const NarratorRoom = () => {
         setIsChapterPickerOpen(false);
         handleSelectChapter(chapter);
     };
-    const narrador = useNarrador({ editor: null, isFocusMode: false, activeBook, activeChapter: selectedChapter, nextChapter, onSelectChapter: handleSelectChapter, profileData: profile, toast, narrationSegments: script?.segments });
+    const narrador = useNarrador({ editor: null, isFocusMode: false, activeBook, activeChapter: selectedChapter, nextChapter, onSelectChapter: handleSelectChapter, profileData: profile, toast });
     const currentSegments = narrador.segments || [];
     const variantKey = [
         profile?.aiConfig?.geminiLiveModel || 'gemini-3.1-flash-live-preview',
@@ -91,11 +99,13 @@ const NarratorRoom = () => {
     return (
         <ToolRoomShell
             room={room}
-            status={selectedChapter ? 'ready' : 'pending'}
+            status={selectedChapter && chapterReady ? 'ready' : 'pending'}
         >
             <main className="rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7">
                     {!selectedChapter ? (
                         <EmptyRoomState icon={Headphones} title="Prepara una narración" text="Selecciona un capítulo para preparar su audio sin modificar el manuscrito." />
+                    ) : !chapterReady ? (
+                        <EmptyRoomState icon={Headphones} title="Cargando capítulo" text="Estamos cargando el contenido del capítulo seleccionado para preparar su narración." />
                     ) : (
                         <>
                             <div className="relative mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -127,16 +137,19 @@ const NarratorRoom = () => {
                                 <div className="rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-4 text-xs leading-relaxed text-[var(--text-muted)]"><strong className="text-[var(--text-main)]">Modo automático: </strong>reproduce el capítulo con la segmentación normal. Usa “Preparar” dentro del reproductor si quieres generar el audio en caché antes de escucharlo.</div>
                             </section>
 
-                            <section className="mt-8 space-y-3" aria-label="Guion avanzado de narración">
-                                <div>
-                                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-600">Opcional · Experiencia avanzada</p>
-                                    <h2 className="mt-1 text-xl font-serif font-black">Personalizar el guion de voz</h2>
-                                    <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">Usa IA para añadir pausas, énfasis y dirección sin alterar el texto del capítulo.</p>
-                                </div>
-                                <NarradorScriptStudio chapter={selectedChapter} contextContent={supportingContext} onScriptReady={(nextScript) => setScriptState({ chapterId: selectedChapter.id, script: nextScript })} />
+                            <section className="mt-8" aria-label="Respaldo de narración">
+                                <NarradorCloudBackupPanel
+                                    profile={profile}
+                                    bookId={activeBook?.id}
+                                    chapterId={selectedChapter.id}
+                                    chapterTitle={selectedChapter.title}
+                                    segments={currentSegments}
+                                    onCacheChanged={narrador.refreshCacheStats}
+                                    onSegmentCached={narrador.markSegmentCached}
+                                />
                             </section>
 
-                            <section className="mt-8" aria-label="Exportación de narración">
+                            <section className="mt-5" aria-label="Exportación de narración">
                                 <NarradorExportPanel
                                     bookId={activeBook?.id}
                                     chapterId={selectedChapter.id}
