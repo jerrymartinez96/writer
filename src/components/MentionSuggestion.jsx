@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
+import React, { forwardRef, useImperativeHandle, useState } from 'react'
 
 const MentionList = forwardRef((props, ref) => {
     const [selectedIndex, setSelectedIndex] = useState(0)
@@ -18,11 +18,11 @@ const MentionList = forwardRef((props, ref) => {
         setSelectedIndex((selectedIndex + 1) % props.items.length)
     }
 
-    const enterHandler = () => {
-        selectItem(selectedIndex)
-    }
+    const activeIndex = Math.min(selectedIndex, Math.max(0, props.items.length - 1))
 
-    useEffect(() => setSelectedIndex(0), [props.items])
+    const enterHandler = () => {
+        selectItem(activeIndex)
+    }
 
     useImperativeHandle(ref, () => ({
         onKeyDown: ({ event }) => {
@@ -57,7 +57,7 @@ const MentionList = forwardRef((props, ref) => {
             {props.items.map((item, index) => (
                 <button
                     key={item.id}
-                    className={`mention-item ${index === selectedIndex ? 'is-selected' : ''}`}
+                    className={`mention-item ${index === activeIndex ? 'is-selected' : ''}`}
                     onClick={() => selectItem(index)}
                 >
                     <div className="mention-item-avatar">

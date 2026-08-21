@@ -4,7 +4,6 @@ import {
     createBook as createBookApi,
     updateBook as updateBookApi,
     deleteBook as deleteBookApi,
-    getChapters,
     getChaptersMetadata,
     createChapter as createChapterApi,
     updateChapter as updateChapterApi,
@@ -20,9 +19,6 @@ import {
     updateWorldItem as updateWorldItemApi,
     deleteWorldItem as deleteWorldItemApi,
     setWorldItemWithId,
-    getChapterSnapshots as getChapterSnapshotsApi,
-    saveChapterSnapshot as saveChapterSnapshotApi,
-    deleteAllChapterSnapshots as deleteAllSnapshotsApi,
     getUserProfile,
     createUserProfile,
     updateUserProfile as updateUserProfileApi,
@@ -33,7 +29,6 @@ import {
     permanentlyDeleteCharacter,
     permanentlyDeleteWorldItem
 } from '../services/db';
-import { decompressData } from '../services/compression';
 import { uploadImageToCloudinary } from '../services/cloudinary';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -98,6 +93,8 @@ const VISUAL_REVIEW_WORLD_ITEMS = [
     { id: 'visual-world-tower', title: 'La torre azul', content: '<p>Una torre abandonada que emite una señal cada tres noches.</p>', isCategory: false },
 ];
 
+// The provider and hook intentionally share this state module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useData = () => useContext(DataContext);
 
 export const DataProvider = ({ children }) => {
@@ -115,6 +112,9 @@ export const DataProvider = ({ children }) => {
     const [lastSaved, setLastSaved] = useState(new Date());
     const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
     const lastCloudContentRef = useRef({}); // { chapterId: string }
+    const activeChapterRef = useRef(activeChapter);
+    const selectBookRef = useRef(null);
+    activeChapterRef.current = activeChapter;
     const [user, setUser] = useState(() => visualReviewMode ? VISUAL_REVIEW_USER : null);
     const [profile, setProfile] = useState(() => visualReviewMode ? { displayName: VISUAL_REVIEW_USER.displayName, email: VISUAL_REVIEW_USER.email, aiConfig: { reasoningMode: true, reasoningEffort: 'high' } } : null);
     const [authLoading, setAuthLoading] = useState(() => !visualReviewMode);
@@ -126,6 +126,7 @@ export const DataProvider = ({ children }) => {
         return newId;
     });
     const [chapterLock, setChapterLock] = useState({ isLocked: false, activeEditorId: null, deviceName: 'Esta computadora' });
+    const [syncConflict, setSyncConflict] = useState(null);
     const [sharedEditor, setSharedEditor] = useState(null);
 
     // XSS Protection - Sanitize HTML content
@@ -218,7 +219,7 @@ export const DataProvider = ({ children }) => {
                 if (savedBookId) {
                     const savedBook = fetchedBooks.find(b => b.id === savedBookId);
                     if (savedBook) {
-                        handleSelectBook(savedBook);
+                        selectBookRef.current?.(savedBook);
                     }
                 }
             } catch (error) {
@@ -230,17 +231,21 @@ export const DataProvider = ({ children }) => {
         loadBooks();
     }, [user]);
 
+    const activeBookId = activeBook?.id;
+    const activeChapterId = activeChapter?.id;
+
     // Real-time synchronization and Presence for active chapter
     useEffect(() => {
         if (visualReviewMode) return undefined;
-        if (!activeBook || !activeChapter || !activeChapter.id) return;
+        if (!activeBookId || !activeChapterId) return;
 
-        const unsubscribe = subscribeToChapter(activeBook.id, activeChapter.id, (cloudData) => {
-            const saveKey = `chap_${activeChapter.id}`;
+        const unsubscribe = subscribeToChapter(activeBookId, activeChapterId, (cloudData) => {
+            const currentChapter = activeChapterRef.current;
+            const saveKey = `chap_${currentChapter.id}`;
             const hasPendingSave = !!pendingSaves.current[saveKey];
 
             // 1. Handle Content Sync
-            if (cloudData.lastSyncToken !== activeChapter.lastSyncToken && !hasPendingSave) {
+            if (cloudData.lastSyncToken !== currentChapter.lastSyncToken && !hasPendingSave) {
                 const safeContent = sanitizeHtml(cloudData.content);
                 setActiveChapter(prev => ({ ...prev, ...cloudData, content: safeContent, isLoaded: true }));
                 setChapters(prev => prev.map(ch => ch.id === cloudData.id ? { ...cloudData, content: safeContent, isLoaded: true } : ch));
@@ -262,7 +267,7 @@ export const DataProvider = ({ children }) => {
         });
 
         return () => unsubscribe();
-    }, [activeBook?.id, activeChapter?.id, sessionId, sanitizeHtml]);
+    }, [activeBookId, activeChapterId, sessionId, sanitizeHtml]);
 
     const handleSelectBook = async (book) => {
         await flushAllSaves();
@@ -361,6 +366,7 @@ export const DataProvider = ({ children }) => {
             setLoading(false);
         }
     };
+    selectBookRef.current = handleSelectBook;
 
     const handleUpdateBookData = async (data) => {
         if (!activeBook) return;
@@ -503,12 +509,18 @@ export const DataProvider = ({ children }) => {
         }
 
         if (options.immediate) {
-            const expectedToken = activeChapter && activeChapter.id === chapterId ? activeChapter.lastSyncToken : null;
-            const newToken = await updateChapterApi(activeBook.id, chapterId, updateData, expectedToken);
-            setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, lastSyncToken: newToken } : c));
-            if (activeChapter && activeChapter.id === chapterId) setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
-            setLastSaved(new Date());
-            return newToken;
+            try {
+                const expectedToken = activeChapter && activeChapter.id === chapterId ? activeChapter.lastSyncToken : null;
+                const newToken = await updateChapterApi(activeBook.id, chapterId, updateData, expectedToken);
+                setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, lastSyncToken: newToken } : c));
+                if (activeChapter && activeChapter.id === chapterId) setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
+                setSyncConflict(null);
+                setLastSaved(new Date());
+                return newToken;
+            } catch (error) {
+                if (error?.code === 'SYNC_CONFLICT') setSyncConflict({ chapterId, message: error.message });
+                throw error;
+            }
         }
 
         const saveKey = `chap_meta_${chapterId}`;
@@ -528,8 +540,10 @@ export const DataProvider = ({ children }) => {
                     setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 }
                 setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, lastSyncToken: newToken } : c));
+                setSyncConflict(null);
                 setLastSaved(new Date());
             } catch (error) {
+                if (error?.code === 'SYNC_CONFLICT') setSyncConflict({ chapterId, message: error.message });
                 console.error("Failed to update chapter", error);
             }
         };
@@ -569,7 +583,7 @@ export const DataProvider = ({ children }) => {
         }
     };
 
-    const handleReorderChapters = async (orderedIds, parentId) => {
+    const handleReorderChapters = async (orderedIds) => {
         if (!activeBook) return;
         // Update local state immediately for snappy UX
         setChapters(prev => {
@@ -581,13 +595,9 @@ export const DataProvider = ({ children }) => {
             return updated;
         });
         // Persist to backend
-        orderedIds.forEach(async (id, index) => {
-            try {
-                await updateChapterApi(activeBook.id, id, { orderIndex: index });
-            } catch (error) {
-                console.error('Failed to reorder chapter', id, error);
-            }
-        });
+        await Promise.all(orderedIds.map((id, index) =>
+            updateChapterApi(activeBook.id, id, { orderIndex: index })
+        ));
     };
 
 
@@ -683,7 +693,7 @@ export const DataProvider = ({ children }) => {
             console.error("lazyLoadChapters failed", error);
             throw error;
         }
-    }, [activeBook?.id, chapters, sanitizeHtml]);
+    }, [activeBook, chapters, sanitizeHtml]);
 
     // --- Character Management ---
     const handleCreateCharacter = async (itemData) => {
@@ -1036,6 +1046,7 @@ export const DataProvider = ({ children }) => {
                 setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 setChapters(prev => prev.map(ch => ch.id === chapId ? { ...ch, lastSyncToken: newToken } : ch));
                 lastCloudContentRef.current[chapId] = content;
+                setSyncConflict(null);
 
                 // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
                 const lastMajor = lastMajorBackupContentRef.current[chapId];
@@ -1048,6 +1059,7 @@ export const DataProvider = ({ children }) => {
 
                 setLastSaved(new Date());
             } catch (error) {
+                if (error?.code === 'SYNC_CONFLICT') setSyncConflict({ chapterId: chapId, message: error.message });
                 console.warn("Cloud sync failed.", error);
             }
         };
@@ -1059,7 +1071,7 @@ export const DataProvider = ({ children }) => {
             pendingSaves.current[saveKey].timeoutId = setTimeout(fn, debounceTime);
             pendingSaves.current[saveKey].fn = fn;
         }
-    }, [activeBook, activeChapter, sanitizeHtml, sessionId]);
+    }, [activeBook, activeChapter, sessionId]);
 
     const handleRestoreTrashItem = async (item) => {
         if (!activeBook) return;
@@ -1082,6 +1094,20 @@ export const DataProvider = ({ children }) => {
             console.error("Failed to restore trash item", error);
             throw error;
         }
+    };
+
+    const handleResolveSyncConflict = async () => {
+        if (!activeBook || !syncConflict?.chapterId) return;
+        const cloudChapter = await getChapter(activeBook.id, syncConflict.chapterId);
+        if (!cloudChapter) throw new Error('No se encontró la versión del capítulo en la nube.');
+        const safeChapter = { ...cloudChapter, content: sanitizeHtml(cloudChapter.content), isLoaded: true };
+        delete pendingSaves.current[`chap_${syncConflict.chapterId}`];
+        delete pendingSaves.current[`chap_meta_${syncConflict.chapterId}`];
+        setChapters(prev => prev.map(chapter => chapter.id === safeChapter.id ? safeChapter : chapter));
+        if (activeChapter?.id === safeChapter.id) setActiveChapter(safeChapter);
+        lastCloudContentRef.current[safeChapter.id] = cloudChapter.content;
+        setSyncConflict(null);
+        setLastSaved(new Date());
     };
 
     const handlePermanentlyDeleteTrashItem = async (item) => {
@@ -1184,6 +1210,8 @@ export const DataProvider = ({ children }) => {
         finalizeChapterCleanup,
         lastSaved,
         chapterLock,
+        syncConflict,
+        resolveSyncConflict: handleResolveSyncConflict,
         sessionId,
         claimLock: handleClaimLock,
         releaseLock: handleReleaseLock,

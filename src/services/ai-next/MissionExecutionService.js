@@ -30,11 +30,6 @@ export const prepareOperations = (operations = [], documents = []) => operations
     return { ...operation, baseFingerprint: operation.baseFingerprint || (document ? fingerprintText(document.content) : '') };
 });
 
-export const validateOperations = (operations = [], documents = []) => operations.map((operation) => ({
-    operation,
-    ...validateOperationAgainstDocument(operation, documents.find((document) => document.id === operation.documentId)),
-}));
-
 export const executeOperationsWithRollback = async ({ operations = [], documents = [], approvedOperationIds = new Set(), apply, rollback }) => {
     const approved = operations.filter((operation) => ['patch', 'replace', 'delete'].includes(operation.action) && (operation.status === 'approved' || approvedOperationIds.has(operation.id)));
     // Validate sequentially against a working copy so multiple operations on the

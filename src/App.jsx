@@ -5,7 +5,7 @@ import Modal from './components/Modal'
 import Login from './components/Login'
 import { DataProvider, useData } from './context/DataContext'
 import { ToolRoomProvider } from './context/ToolRoomContext'
-import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2, Check } from 'lucide-react'
+import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2, Check, AlertTriangle } from 'lucide-react'
 
 // Lazy loaded views
 const Editor = lazy(() => import('./components/Editor'))
@@ -31,7 +31,7 @@ const LoadingScreen = () => (
 );
 
 function AppContent() {
-  const { activeBook, activeChapter, activeWorldDoc, loading, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved } = useData();
+  const { activeBook, activeChapter, activeWorldDoc, loading, activeView, setActiveView, user, authLoading, logout, selectBook, lastSaved, syncConflict, resolveSyncConflict } = useData();
   const [timeSinceSave, setTimeSinceSave] = useState('Recién');
 
   useEffect(() => {
@@ -230,7 +230,7 @@ function AppContent() {
 
   return (
     <div className="w-screen h-screen flex bg-[var(--bg-app)] text-[var(--text-main)] overflow-hidden font-sans transition-colors duration-300">
-      <CommandPalette isOpen={isCommandPaletteOpen} onClose={() => setIsCommandPaletteOpen(false)} />
+      {isCommandPaletteOpen && <CommandPalette onClose={() => setIsCommandPaletteOpen(false)} />}
       <Sidebar isMobileOpen={isMobileMenuOpen} setIsMobileOpen={setIsMobileMenuOpen} />
       <main className="flex-1 h-full flex flex-col min-w-0 bg-[var(--bg-editor)]">
         {/* Top Navbar Refined */}
@@ -332,6 +332,23 @@ function AppContent() {
             </div>
           </div>
         </header>
+
+        {syncConflict && (
+          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-amber-700 dark:text-amber-300 lg:px-12">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-semibold">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span className="truncate">{syncConflict.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => resolveSyncConflict().catch(error => console.error('No se pudo resolver el conflicto de sincronización:', error))}
+              className="shrink-0 rounded-lg border border-amber-500/30 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider hover:bg-amber-500/10"
+              title="Descarta los cambios locales y carga la versión más reciente de la nube"
+            >
+              Cargar versión en nube
+            </button>
+          </div>
+        )}
 
         {/* View Transitioning Container */}
         <div className="flex-1 min-h-0 overflow-hidden relative">

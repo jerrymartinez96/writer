@@ -12,7 +12,7 @@ export const compressData = (data) => {
         // For broad compatibility, compressToEncodedURIComponent is very safe.
         const compressed = LZString.compressToEncodedURIComponent(data);
         return compressed;
-    } catch (e) {
+    } catch {
         return data;
     }
 };
@@ -31,14 +31,4 @@ export const decompressData = (compressedData) => {
         console.error("Decompression failed", e);
         return compressedData;
     }
-};
-
-/**
- * Check if a string is likely compressed.
- */
-export const isCompressed = (str) => {
-    if (!str || typeof str !== 'string') return false;
-    // Compressed lz-string EncodedURIComponent strings are usually alphanumeric + '-' + '_'
-    // and don't contain HTML tags.
-    return !str.includes('<') && !str.includes(' ');
 };

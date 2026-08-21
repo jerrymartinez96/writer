@@ -2,38 +2,19 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useData } from '../context/DataContext'
 import { Search, FileText, Users, Globe, X, CornerDownLeft, Plus, Settings, Moon, Sun, Trash2, Sparkles, Command } from 'lucide-react'
 
-const CommandPalette = ({ isOpen, onClose }) => {
+const CommandPalette = ({ onClose }) => {
     const { 
         chapters, characters, worldItems, selectChapter, setActiveView,
-        createChapter, activeBook
+        createChapter, openCharacterDoc, openWorldDoc
     } = useData()
     const [query, setQuery] = useState('')
     const inputRef = useRef(null)
     const [selectedIndex, setSelectedIndex] = useState(0)
 
     useEffect(() => {
-        if (isOpen) {
-            setQuery('')
-            setSelectedIndex(0)
-            setTimeout(() => inputRef.current?.focus(), 50)
-        }
-    }, [isOpen])
-
-    // Keyboard shortcut listener
-    useEffect(() => {
-        const handleKeyDown = (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault()
-                if (isOpen) {
-                    onClose()
-                } else {
-                    onClose() // toggle via parent
-                }
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [isOpen, onClose])
+        const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 50)
+        return () => window.clearTimeout(focusTimer)
+    }, [])
 
     const results = useMemo(() => {
         const q = query.toLowerCase().trim()
@@ -126,9 +107,7 @@ const CommandPalette = ({ isOpen, onClose }) => {
         return found.slice(0, 15)
     }, [query, chapters, characters, worldItems, createChapter, setActiveView])
 
-    useEffect(() => {
-        setSelectedIndex(0)
-    }, [results])
+    const activeResultIndex = Math.min(selectedIndex, Math.max(0, results.length - 1))
 
     const handleSelect = (result) => {
         if (result.type === 'command') {
@@ -136,9 +115,9 @@ const CommandPalette = ({ isOpen, onClose }) => {
         } else if (result.type === 'chapter') {
             selectChapter(result.data)
         } else if (result.type === 'character') {
-            setActiveView('world')
+            openCharacterDoc(result.id)
         } else if (result.type === 'world') {
-            setActiveView('world')
+            openWorldDoc(result.id)
         }
         onClose()
     }
@@ -150,15 +129,13 @@ const CommandPalette = ({ isOpen, onClose }) => {
         } else if (e.key === 'ArrowUp') {
             e.preventDefault()
             setSelectedIndex(prev => Math.max(prev - 1, 0))
-        } else if (e.key === 'Enter' && results[selectedIndex]) {
+        } else if (e.key === 'Enter' && results[activeResultIndex]) {
             e.preventDefault()
-            handleSelect(results[selectedIndex])
+            handleSelect(results[activeResultIndex])
         } else if (e.key === 'Escape') {
             onClose()
         }
     }
-
-    if (!isOpen) return null
 
     return (
         <div
@@ -178,7 +155,10 @@ const CommandPalette = ({ isOpen, onClose }) => {
                         ref={inputRef}
                         type="text"
                         value={query}
-                        onChange={(e) => setQuery(e.target.value)}
+                        onChange={(e) => {
+                            setQuery(e.target.value)
+                            setSelectedIndex(0)
+                        }}
                         onKeyDown={handleKeyDown}
                         placeholder="Busca cualquier cosa o escribe un comando..."
                         className="flex-1 bg-transparent text-[var(--text-main)] text-lg placeholder:text-[var(--text-muted)]/50 focus:outline-none font-serif tracking-tight"
@@ -219,7 +199,7 @@ const CommandPalette = ({ isOpen, onClose }) => {
                                         {typeResults.map((result) => {
                                             const globalIndex = results.indexOf(result)
                                             const Icon = result.icon
-                                            const isSelected = globalIndex === selectedIndex
+                                            const isSelected = globalIndex === activeResultIndex
 
                                             return (
                                                 <button

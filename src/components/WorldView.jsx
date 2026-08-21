@@ -10,7 +10,7 @@ import RichTextEditor from './RichTextEditor';
 
 const WorldView = () => {
     const {
-        chapters, characters, worldItems,
+        characters, worldItems,
         createCharacter, updateCharacter, deleteCharacter,
         createWorldItem, updateWorldItem, deleteWorldItem,
         openWorldDoc, openCharacterDoc
@@ -64,7 +64,7 @@ const WorldView = () => {
             setLocalContent('');
             setIsUnsaved(false);
         }
-    }, [currentStep?.id, currentStep?.type, characters, worldItems, isUnsaved]);
+    }, [currentStep, characters, worldItems, isUnsaved, localContent]);
 
 
     // Modals
@@ -209,8 +209,6 @@ const WorldView = () => {
     };
 
     // --- Render Parts ---
-    const rootMasterCards = worldItems.filter(i => i.parentId === null);
-
     const renderRoot = () => (
         <div className="animate-in fade-in duration-300 pb-10">
             <header className="mb-8">
@@ -357,7 +355,7 @@ const WorldView = () => {
     };
 
     // Dynamic Lists & System Notas List
-    const renderWorldItemList = (parentId, typeName) => {
+    const renderWorldItemList = (parentId) => {
         const items = worldItems.filter(i => i.parentId === parentId);
         const isEstructura = currentStep.isEstructura || parentId === 'system_estructura';
 

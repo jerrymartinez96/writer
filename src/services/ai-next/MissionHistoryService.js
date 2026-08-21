@@ -18,9 +18,3 @@ export const saveMissionHistoryEntry = (bookId, entry) => {
     try { window.localStorage.setItem(getKey(bookId), JSON.stringify(next)); } catch { /* best effort */ }
     return next;
 };
-
-export const updateMissionHistoryEntry = (bookId, entryId, patch) => {
-    const current = loadMissionHistory(bookId);
-    return saveMissionHistoryEntry(bookId, { ...(current.find((item) => item.id === entryId) || { id: entryId }), ...patch });
-};
-

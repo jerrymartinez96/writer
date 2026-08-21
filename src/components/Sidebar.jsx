@@ -1,10 +1,7 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Zap, MessageSquare, Wrench } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Wrench } from 'lucide-react';
 import { useData } from '../context/DataContext'
-import { useState, useMemo } from 'react'
-import { useIAStudioContext } from '../context/IAStudioContext'
-import { buildContextFromSelections, estimateContextWeight } from '../services/ai-next/contextUtils'
+import { createElement, useState, useMemo } from 'react'
 import Modal from './Modal'
-import ConfirmModal from './ConfirmModal'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -109,19 +106,8 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
         books, activeBook, selectBook, createBook,
         chapters, activeChapter, selectChapter, createChapter, deleteChapter,
         activeView, setActiveView, reorderChapters,
-        activeWorldDoc, openWorldDoc, openCharacterDoc, characters, worldItems, profile
+        activeWorldDoc, openWorldDoc, openCharacterDoc, characters
     } = useData();
-    const { 
-        contextSelections, 
-        sessions,
-        activeSession,
-        switchSession,
-        newSession,
-        deleteSession,
-        messages = [],
-        compressContext = false,
-        setCompressContext
-    } = useIAStudioContext();
 
     const [isBooksOpen, setIsBooksOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -146,70 +132,6 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
     const [selectedVolumeId, setSelectedVolumeId] = useState('');
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [chapterToDelete, setChapterToDelete] = useState(null);
-    const [isDeleteSessionModalOpen, setIsDeleteSessionModalOpen] = useState(false);
-    const [sessionToDelete, setSessionToDelete] = useState(null);
-
-    // Calculate Token Statistics
-    const selectedChapterIds = contextSelections?.chapterIds || [];
-    const selectedWorldItemIds = contextSelections?.worldItemIds || [];
-    const selectedCharacterIds = contextSelections?.characterIds || [];
-
-    const contextText = buildContextFromSelections(
-        activeBook,
-        chapters,
-        selectedChapterIds,
-        characters,
-        worldItems,
-        selectedWorldItemIds,
-        compressContext,
-        selectedCharacterIds
-    );
-
-    const contextWeight = estimateContextWeight(
-        chapters || [],
-        selectedChapterIds,
-        worldItems || [],
-        selectedWorldItemIds,
-        characters || [],
-        selectedCharacterIds
-    );
-    const contextCharCount = contextText.length;
-    const contextTokens = Math.ceil(contextCharCount / 3.8);
-    
-    const messagesCharCount = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
-    const messagesTokens = Math.ceil(messagesCharCount / 3.8);
-    const totalInputTokens = contextTokens + messagesTokens;
-
-    const assistantCharCount = messages
-        .filter(m => m.role === 'assistant')
-        .reduce((sum, m) => sum + (m.content || '').length, 0);
-    const outputTokens = Math.ceil(assistantCharCount / 3.8);
-
-    // Custom Token Costs from profile settings or DeepSeek V4 defaults
-    const aiConfig = profile?.aiConfig || {};
-    const inputTokenCost = aiConfig.inputTokenCost ?? 0.14;
-    const outputTokenCost = aiConfig.outputTokenCost ?? 0.28;
-    const selectedModel = aiConfig.defaultModel || 'deepseek-v4-flash';
-
-    // Híbrido Estimado-Acumulado (Exclusivo DeepSeek)
-    const cumulativeUsage = activeSession?.cumulativeUsage;
-    const hasCumulativeCost = cumulativeUsage && (cumulativeUsage.cost > 0 || cumulativeUsage.totalTokens > 0);
-
-    let displayMessagesTokens = messagesTokens;
-    let displayTotalTokens = totalInputTokens + outputTokens;
-    let totalCost = 0;
-    const isEstimated = !hasCumulativeCost;
-
-    if (hasCumulativeCost) {
-        // Si hay consumo acumulado real persistido, mostramos las cifras reales de la API
-        displayTotalTokens = cumulativeUsage.totalTokens || displayTotalTokens;
-        totalCost = cumulativeUsage.cost;
-    } else {
-        // Si no hay consumo acumulado, mostramos la estimación del costo de la siguiente consulta
-        const inputCost = (totalInputTokens / 1000000) * inputTokenCost;
-        const outputCost = (outputTokens / 1000000) * outputTokenCost;
-        totalCost = inputCost + outputCost;
-    }
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -546,10 +468,10 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                 Secciones
                             </div>
                              {[
-                                { id: 'system_personajes', title: 'Personajes', Icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10', activeBg: 'bg-blue-500', border: 'border-l-blue-500' },
-                                { id: 'system_estructura', title: 'Estructura', Icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-500/10', activeBg: 'bg-indigo-500', border: 'border-l-indigo-500' },
-                                { id: 'system_core', title: 'Info General', Icon: Bookmark, color: 'text-orange-500', bg: 'bg-orange-500/10', activeBg: 'bg-orange-500', border: 'border-l-orange-500' },
-                            ].map(({ id, title, Icon, color, bg, activeBg, border }) => {
+                                { id: 'system_personajes', title: 'Personajes', icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10', activeBg: 'bg-blue-500', border: 'border-l-blue-500' },
+                                { id: 'system_estructura', title: 'Estructura', icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-500/10', activeBg: 'bg-indigo-500', border: 'border-l-indigo-500' },
+                                { id: 'system_core', title: 'Info General', icon: Bookmark, color: 'text-orange-500', bg: 'bg-orange-500/10', activeBg: 'bg-orange-500', border: 'border-l-orange-500' },
+                            ].map(({ id, title, icon, color, bg, activeBg, border }) => {
                                 const isActive = activeWorldDoc?.id === id && activeView === 'editor';
                                 return (
                                     <div key={id} className="space-y-1">
@@ -572,7 +494,7 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                             <div className={`shrink-0 p-1.5 rounded-md transition-all ${
                                                 isActive ? `${activeBg} text-white shadow-md` : `${bg} ${color}`
                                             }`}>
-                                                <Icon size={14} />
+                                                {createElement(icon, { size: 14 })}
                                             </div>
                                             <span className="text-sm font-medium truncate">{title}</span>
                                             {id === 'system_personajes' ? (
@@ -620,154 +542,6 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                                     </div>
                                 );
                             })}
-                        </div>
-                    ) : activeView === '__legacy-ia-studio-disabled__' && !isSidebarCollapsed ? (
-                        <div className="px-4 py-4 space-y-4 flex flex-col h-full min-h-0 animate-in fade-in duration-300">
-                            {/* Separator and Sessions list */}
-                            <div className="flex-1 flex flex-col min-h-0">
-                                <div className="flex items-center justify-between px-1 mb-2 shrink-0">
-                                    <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">
-                                        Conversaciones
-                                    </div>
-                                    <button
-                                        onClick={newSession}
-                                        className="w-6 h-6 flex items-center justify-center bg-[var(--accent-soft)] text-[var(--accent-main)] hover:bg-[var(--accent-main)] hover:text-white rounded-lg transition-all shadow-sm shrink-0"
-                                        title="Nueva conversación"
-                                    >
-                                        <Plus size={14} />
-                                    </button>
-                                </div>
-
-                                <div className="space-y-1.5 overflow-y-auto pr-1 scrollbar-hide flex-1 pb-4">
-                                     {(!sessions || sessions.length === 0) ? (
-                                         <div className="text-xs text-[var(--text-muted)] italic py-6 text-center bg-[var(--accent-soft)]/10 rounded-xl border border-dashed border-[var(--border-main)]/50">
-                                             No hay conversaciones
-                                         </div>
-                                     ) : (
-                                             sessions.map(s => {
-                                                 const isActive = s.id === activeSession?.id;
-
-                                                 return (
-                                                     <div 
-                                                         key={s.id} 
-                                                         className={`group relative rounded-xl transition-all duration-300 ease-out will-change-transform ${
-                                                             isActive 
-                                                                 ? 'bg-[var(--accent-soft)] border-[var(--accent-main)]/30 text-[var(--accent-main)] shadow-sm' 
-                                                                 : 'bg-[var(--bg-editor)]/30 border-transparent hover:bg-[var(--accent-soft)]/30 hover:scale-[1.02] hover:shadow-sm'
-                                                         }`}
-                                                     >
-                                                         <div className="flex items-center justify-between px-3 py-2 transition-all duration-200 ease-out">
-                                                             <button 
-                                                                 onClick={() => handleSelectMobile(() => switchSession(s.id))} 
-                                                                 className="flex-1 flex items-center gap-2.5 text-left min-w-0 pr-8"
-                                                             >
-                                                                 <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-300 ease-out ${
-                                                                     isActive 
-                                                                         ? 'bg-[var(--accent-main)] text-white shadow-sm' 
-                                                                         : 'bg-[var(--bg-editor)] border border-[var(--border-main)] text-[var(--text-muted)] group-hover:bg-[var(--accent-soft)] group-hover:text-indigo-500 group-hover:scale-105 group-hover:shadow-sm'
-                                                                 }`}>
-                                                                     <MessageSquare size={13} />
-                                                                 </div>
-                                                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                                     <span className={`text-[12px] truncate leading-tight transition-colors duration-200 ${isActive ? 'font-black text-[var(--accent-main)]' : 'font-semibold text-[var(--text-main)] group-hover:text-[var(--accent-main)]'}`}>
-                                                                         {s.name}
-                                                                     </span>
-                                                                     <span className="text-[9px] text-[var(--text-muted)] opacity-65 mt-0.5 font-medium transition-all duration-200 group-hover:opacity-100">
-                                                                         {s.messages?.length || 0} mensajes
-                                                                     </span>
-                                                                 </div>
-                                                             </button>
-
-                                                             {/* Actions container - absolute positioned on right */}
-                                                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-300 ease-out pl-2 rounded-r-xl h-full sm:translate-x-1 sm:group-hover:translate-x-0 backdrop-blur-[2px]">
-                                                                 <button 
-                                                                     onClick={(e) => { 
-                                                                         e.stopPropagation(); 
-                                                                         setSessionToDelete(s);
-                                                                         setIsDeleteSessionModalOpen(true);
-                                                                     }}
-                                                                     className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-all duration-200 ease-out shrink-0 active:scale-90 hover:scale-110"
-                                                                     title="Eliminar conversación"
-                                                                 >
-                                                                     <Trash2 size={13} />
-                                                                 </button>
-                                                             </div>
-                                                         </div>
-                                                     </div>
-                                                 );
-                                             })
-                                     )}
-                                </div>
-                            </div>
-
-                            {/* Pinned Stats Widget */}
-                            <div className="pt-3 border-t border-[var(--border-main)]/30 shrink-0">
-                                {/* <div className="flex items-center gap-1.5 mb-2 px-1">
-                                    <Zap size={12} className="text-indigo-500" />
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
-                                        Estadísticas y Costos
-                                    </span>
-                                </div> */}
-                                                      <div className="space-y-2 bg-[var(--bg-editor)]/30 border border-[var(--border-main)]/40 rounded-xl p-2.5 shadow-sm">
-                                    {/* Context Stat */}
-                                    <div className="flex items-center justify-between text-[10px]">
-                                        <span className="text-[var(--text-muted)] flex items-center gap-1">
-                                            <span className={`w-1.5 h-1.5 rounded-full ${contextWeight.isHeavy ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`} />
-                                            {isEstimated ? 'Contexto:' : 'Entrada (Real):'}
-                                        </span>
-                                        <div className="flex items-center gap-1.5">
-                                            <span className={`font-semibold ${contextWeight.isHeavy ? 'text-amber-500 animate-pulse' : 'text-[var(--text-main)]'}`}>
-                                                {((isEstimated ? contextTokens : (cumulativeUsage?.promptTokens || 0)) / 1000).toFixed(1)} k
-                                            </span>
-                                            {contextWeight.isHeavy && (
-                                                <button
-                                                    onClick={() => setCompressContext(prev => !prev)}
-                                                    title={compressContext ? 'Contexto resumido activo — click para desactivar' : 'Contexto pesado detectado — click para comprimir'}
-                                                    className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[7px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                                                        compressContext
-                                                            ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
-                                                            : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
-                                                    }`}
-                                                >
-                                                    <Zap size={6} />
-                                                    {compressContext ? 'Resumido' : 'Comprimir'}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
- 
-                                    {/* Chat Stat */}
-                                    <div className="flex items-center justify-between text-[10px]">
-                                        <span className="text-[var(--text-muted)]">{isEstimated ? 'Conversación:' : 'Salida (Real):'}</span>
-                                        <span className="text-[var(--text-main)] font-semibold">
-                                            {((isEstimated ? displayMessagesTokens : (cumulativeUsage?.completionTokens || 0)) / 1000).toFixed(1)} k 
-                                        </span>
-                                    </div>
- 
-                                    {/* Total Stat */}
-                                    <div className="flex items-center justify-between text-[10px]">
-                                        <span className="text-[var(--text-muted)]">
-                                            {isEstimated ? 'Tokens Totales (Est.):' : 'Tokens Totales (Real):'}
-                                        </span>
-                                        <span className="text-[var(--text-main)] font-bold">
-                                            {(displayTotalTokens / 1000).toFixed(1)} k
-                                        </span>
-                                    </div>
- 
-                                    {/* Dynamic Cost Estimate */}
-                                    <div className="flex items-center justify-between pt-1 text-[10px]">
-                                        <span className="text-[var(--text-muted)] truncate max-w-[120px]" title={selectedModel}>
-                                            {isEstimated ? 'Costo Estimado:' : 'Costo Acumulado:'}
-                                        </span>
-                                        <span 
-                                            className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-black tracking-wider shrink-0 cursor-help"
-                                            title={`Tarifas:\nEntrada: $${inputTokenCost}/1M tokens\nSalida: $${outputTokenCost}/1M tokens`}
-                                        >
-                                            ${totalCost < 0.0001 && totalCost > 0 ? '<$0.0001' : totalCost.toFixed(5)}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     ) : null}
                 </div>
@@ -981,23 +755,6 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                 </div>
             </Modal>
 
-            <ConfirmModal
-                isOpen={isDeleteSessionModalOpen}
-                onClose={() => {
-                    setIsDeleteSessionModalOpen(false);
-                    setSessionToDelete(null);
-                }}
-                onConfirm={() => {
-                    if (sessionToDelete) {
-                        deleteSession(sessionToDelete.id);
-                    }
-                }}
-                title="¿Eliminar Conversación?"
-                message={`¿Estás seguro de que quieres eliminar la conversación "${sessionToDelete?.name || ''}"? Esta acción no se puede deshacer y perderás el historial de mensajes.`}
-                confirmText="Sí, Eliminar"
-                cancelText="Cancelar"
-                type="danger"
-            />
         </>
     )
 }

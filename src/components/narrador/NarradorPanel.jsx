@@ -18,12 +18,17 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
         const activeSegment = segmentRefs.current.get(currentSegmentIndex);
         const list = listRef.current;
         if (!activeSegment || !list) return;
-        const targetTop = activeSegment.offsetTop - ((list.clientHeight - activeSegment.offsetHeight) / 2);
+        const listBounds = list.getBoundingClientRect();
+        const segmentBounds = activeSegment.getBoundingClientRect();
+        const targetTop = list.scrollTop
+            + (segmentBounds.top - listBounds.top)
+            - ((list.clientHeight - segmentBounds.height) / 2);
         list.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
-    }, [currentSegmentIndex, status]);
+    }, [compact, currentSegmentIndex, status]);
 
     return (
         <div ref={listRef} className={`${compact ? 'max-h-[6.5rem]' : 'max-h-64'} overflow-y-auto space-y-1 pr-1`} style={{ overflowAnchor: 'none' }}>
+            {compact && <div aria-hidden="true" className="h-10" />}
             {segments.map((segment, index) => {
                 const preparing = isPreparing && preparationIndex === index && !cachedSegmentIndexes.has(index);
                 const generating = preparing || (status === 'connecting' && index === currentSegmentIndex);
@@ -62,6 +67,7 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
             </div>
                 );
             })}
+            {compact && <div aria-hidden="true" className="h-10" />}
         </div>
     );
 };

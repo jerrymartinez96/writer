@@ -32,33 +32,6 @@ const retryOnRateLimit = async (fetchFn, maxRetries = 3, initialDelay = 2000) =>
     return await fetchFn();
 };
 
-/**
- * The JSON schema that the AI should return for structured responses.
- */
-export const AI_RESPONSE_SCHEMA = {
-    type: "object",
-    properties: {
-        type: {
-            type: "string",
-            enum: ["content", "analysis", "suggestion"],
-            description: "Type of response: 'content' for HTML to apply to a document, 'analysis' for text analysis, 'suggestion' for creative ideas"
-        },
-        html: {
-            type: "string",
-            description: "HTML content for the document (only when type is 'content')"
-        },
-        text: {
-            type: "string",
-            description: "Markdown text for analysis or suggestions (only when type is 'analysis' or 'suggestion')"
-        },
-        title: {
-            type: "string",
-            description: "Suggested title (only when creating a new document)"
-        }
-    },
-    required: ["type"]
-};
-
 export const COHERENCE_AUDIT_SCHEMA = {
     type: "function",
     function: {

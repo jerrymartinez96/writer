@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import SessionManager from '../services/ai-next/CoreSessionStore';
 import { useData } from './DataContext';
 
+/* State in these effects is hydrated from and persisted to the external session store. */
+/* eslint-disable react-hooks/set-state-in-effect */
+
 const IAStudioContext = createContext(null);
 
 export const IAStudioProvider = ({ children }) => {
@@ -137,7 +140,7 @@ export const IAStudioProvider = ({ children }) => {
                 setSessions(SessionManager.getSessions());
             }
         }
-    }, [contextSelections, activeSession?.id]);
+    }, [contextSelections, activeSession]);
 
     // Sync destinationDoc modifications to active session in localStorage
     useEffect(() => {
@@ -149,7 +152,7 @@ export const IAStudioProvider = ({ children }) => {
                 setSessions(SessionManager.getSessions());
             }
         }
-    }, [destinationDoc, activeSession?.id]);
+    }, [destinationDoc, activeSession]);
 
     // Delete a specific message
     const deleteMessage = useCallback((messageId) => {
@@ -185,6 +188,8 @@ export const IAStudioProvider = ({ children }) => {
     );
 };
 
+// The provider and hook intentionally share this state module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useIAStudioContext = () => {
     const ctx = useContext(IAStudioContext);
     if (!ctx) throw new Error('useIAStudioContext must be used within IAStudioProvider');

@@ -26,7 +26,7 @@ const NARRADOR_TONES = [
 ];
 
 const SettingsView = () => {
-    const { activeBook, updateBook, updateBookData: handleUpdateBookData, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
+    const { activeBook, updateBook, deleteBook, uploadCover, chapters, characters, worldItems, profile, updateProfile } = useData();
     const toast = useToast();
     const [title, setTitle] = useState(activeBook?.title || '');
     const [description, setDescription] = useState(activeBook?.description || '');
@@ -46,7 +46,6 @@ const SettingsView = () => {
     const [reasoningEffort, setReasoningEffort] = useState('high');
     const [inputTokenCost, setInputTokenCost] = useState(aiConfig.inputTokenCost ?? 0.14);
     const [outputTokenCost, setOutputTokenCost] = useState(aiConfig.outputTokenCost ?? 0.28);
-    const [showApiKey, setShowApiKey] = useState(false);
 
     // Narrador (Gemini Live) states
     const [geminiApiKey, setGeminiApiKey] = useState(aiConfig.geminiApiKey || '');
@@ -57,9 +56,6 @@ const SettingsView = () => {
     const [narradorAutoContinue, setNarradorAutoContinue] = useState(aiConfig.narradorAutoContinue || false);
     const [showGeminiApiKey, setShowGeminiApiKey] = useState(false);
     const [isGeminiVoiceMenuOpen, setIsGeminiVoiceMenuOpen] = useState(false);
-    const [isGeminiSpeedMenuOpen, setIsGeminiSpeedMenuOpen] = useState(false);
-    const [isGeminiToneMenuOpen, setIsGeminiToneMenuOpen] = useState(false);
-    const [isGeminiPreviewing, setIsGeminiPreviewing] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
     const [isSavingAI, setIsSavingAI] = useState(false);
@@ -67,16 +63,14 @@ const SettingsView = () => {
     const [isModelOpen, setIsModelOpen] = useState(false);
 
     // Derive filtered models (DeepSeek only)
-    const filteredModels = availableModels;
-
     // Auto-set first model if none selected
     useEffect(() => {
-        if (!selectedModel || selectedModel === '' || !filteredModels.find(m => m.id === selectedModel)) {
-            if (filteredModels.length > 0) {
-                setSelectedModel(filteredModels[0].id);
+        if (!selectedModel || !availableModels.find(m => m.id === selectedModel)) {
+            if (availableModels.length > 0) {
+                setSelectedModel(availableModels[0].id);
             }
         }
-    }, [availableModels]);
+    }, [availableModels, selectedModel]);
 
     // Sync state with user profile and fetch models
     useEffect(() => {
@@ -110,6 +104,13 @@ const SettingsView = () => {
     
     // Auto-save whenever any AI setting changes (to profile.aiConfig)
     const autoSaveRef = useRef(null);
+    const updateProfileRef = useRef(updateProfile);
+    const profileConfigRef = useRef(profile?.aiConfig || {});
+    useEffect(() => {
+        updateProfileRef.current = updateProfile;
+        profileConfigRef.current = profile?.aiConfig || {};
+    }, [profile?.aiConfig, updateProfile]);
+
     useEffect(() => {
         if (!hasLoadedProfile.current) return; // skip initial load
         
@@ -117,9 +118,9 @@ const SettingsView = () => {
         autoSaveRef.current = setTimeout(async () => {
             setIsSavingAI(true);
             try {
-                await updateProfile({
+                await updateProfileRef.current({
                     aiConfig: {
-                        ...(profile?.aiConfig || {}),
+                        ...profileConfigRef.current,
                         deepseekApiKey,
                         defaultModel: selectedModel,
                         reasoningMode,
@@ -234,7 +235,7 @@ const SettingsView = () => {
         }
     };
 
-    const selectedModelObj = filteredModels.find(m => m.id === selectedModel) || {};
+    const selectedModelObj = availableModels.find(m => m.id === selectedModel) || {};
 
     return (
         <div className="max-w-4xl mx-auto p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-32">
@@ -569,7 +570,7 @@ const SettingsView = () => {
                                             <>
                                                 <div className="fixed inset-0 z-40" onClick={() => setIsModelOpen(false)}></div>
                                                 <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-56 overflow-y-auto font-sans">
-                                                    {filteredModels.map(model => (
+                                                    {availableModels.map(model => (
                                                         <button
                                                             key={model.id}
                                                             onClick={() => { setSelectedModel(model.id); setIsModelOpen(false); }}

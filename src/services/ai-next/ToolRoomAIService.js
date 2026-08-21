@@ -77,15 +77,6 @@ const TOOL_ROOM_PROPOSAL_TOOL = {
     },
 };
 
-const TOOL_ROOM_INSIGHT_TOOL = {
-    type: 'function',
-    function: {
-        name: 'reportar_insight_de_tool_room',
-        description: 'Devuelve un análisis de solo lectura con resumen y elementos accionables.',
-        parameters: { type: 'object', properties: { result: { type: 'string' }, summary: { type: 'string' }, items: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, detail: { type: 'string' }, severity: { type: 'string', enum: ['low', 'medium', 'high'] } }, required: ['title', 'detail'] } } }, required: ['result', 'summary', 'items'] },
-    },
-};
-
 export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000, signal, normalizeResponse = (value) => value }) => {
     const apiKey = getToolRoomApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
@@ -524,12 +515,6 @@ export const requestToolRoomInsight = async ({ profile, instruction, sourceConte
     }));
     console.info('[CoherenceAudit] Resultado:', { candidateCount: candidates.length, acceptedCount: items.length, rejectedCount: rejected, allowedDocumentCount: allowedIds.size });
     return { summary: String(parsed.summary || ''), items };
-};
-
-export const requestNarrativeInsight = async ({ profile, instruction, sourceContent, contextContent = '', roomName }) => {
-    const prompt = buildRegisteredPrompt('narrativeInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent) });
-    const parsed = await createStructuredRequest({ profile, prompt, schema: TOOL_ROOM_INSIGHT_TOOL, max_tokens: 5000 });
-    return { result: String(parsed.result || ''), summary: String(parsed.summary || ''), items: Array.isArray(parsed.items) ? parsed.items : [] };
 };
 
 export default requestToolRoomProposal;

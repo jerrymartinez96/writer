@@ -25,7 +25,7 @@ const USERS_COLLECTION = 'users';
 const generateSyncToken = () => {
     try {
         return window.crypto.randomUUID();
-    } catch (e) {
+    } catch {
         return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     }
 };
@@ -282,8 +282,11 @@ export const updateChapterContent = async (bookId, chapterId, newContent, expect
             if (!chapDoc.exists()) throw new Error("Chapter does not exist");
 
             const currentToken = chapDoc.data().lastSyncToken;
-
-            // Token validation removed for forced saving
+            if (expectedToken !== null && currentToken !== expectedToken) {
+                const conflict = new Error('El capítulo cambió en otro dispositivo. Recarga antes de volver a guardar.');
+                conflict.code = 'SYNC_CONFLICT';
+                throw conflict;
+            }
 
             transaction.update(chapterRef, {
                 content: compressData(newContent),
@@ -322,8 +325,11 @@ export const updateChapter = async (bookId, chapterId, updateData, expectedToken
             if (!chapDoc.exists()) throw new Error("Chapter does not exist");
 
             const currentToken = chapDoc.data().lastSyncToken;
-
-            // Forced save: ignoring token mismatches
+            if (expectedToken !== null && currentToken !== expectedToken) {
+                const conflict = new Error('El capítulo cambió en otro dispositivo. Recarga antes de volver a guardar.');
+                conflict.code = 'SYNC_CONFLICT';
+                throw conflict;
+            }
 
             transaction.update(chapterRef, {
                 ...updateData,
@@ -472,20 +478,6 @@ export const getEntitySnapshots = async (bookId, collectionName, entityId) => {
     const entityRef = doc(db, BOOKS_COLLECTION, bookId, entityCollection, entityId);
     const snapshots = await getDocs(query(collection(entityRef, SNAPSHOTS_COLLECTION), orderBy('createdAt', 'desc')));
     return snapshots.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data(), content: decompressData(snapshot.data().content || '') }));
-};
-
-export const deleteAllChapterSnapshots = async (bookId, chapterId) => {
-    try {
-        const chapterRef = doc(db, BOOKS_COLLECTION, bookId, CHAPTERS_COLLECTION, chapterId);
-        const snapshotsRef = collection(chapterRef, SNAPSHOTS_COLLECTION);
-        const querySnapshot = await getDocs(snapshotsRef);
-        const deletePromises = querySnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
-        return true;
-    } catch (error) {
-        console.error("Error deleting all snapshots: ", error);
-        throw error;
-    }
 };
 
 // --- CHARACTERS ---

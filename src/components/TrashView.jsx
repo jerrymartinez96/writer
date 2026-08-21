@@ -15,7 +15,7 @@ const TrashView = () => {
         try {
             await restoreTrashItem(item);
             toast.success("¡Elemento restaurado con éxito!");
-        } catch (error) {
+        } catch {
             toast.error("Hubo un error al restaurar el elemento.");
         }
     };
@@ -31,7 +31,7 @@ const TrashView = () => {
             await permanentlyDeleteTrashItem(itemToDelete);
             toast.success("Elemento eliminado permanentemente.");
             setItemToDelete(null);
-        } catch (error) {
+        } catch {
             toast.error("Error al eliminar el elemento.");
         }
     };
@@ -44,7 +44,7 @@ const TrashView = () => {
                 await permanentlyDeleteTrashItem(item);
             }
             toast.success("Papelera vaciada correctamente.");
-        } catch (error) {
+        } catch {
             toast.error("Error al vaciar la papelera.");
         }
     };

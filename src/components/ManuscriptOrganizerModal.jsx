@@ -36,7 +36,7 @@ import { useToast } from './Toast';
 
 // --- Sub-components for DnD ---
 
-const SortableItem = ({ id, item, type, viewMode, onMoveToEmptyVolume }) => {
+const SortableItem = ({ id, item, type, viewMode }) => {
     const {
         attributes,
         listeners,
@@ -98,7 +98,7 @@ const SortableItem = ({ id, item, type, viewMode, onMoveToEmptyVolume }) => {
 };
 
 const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
-    const { chapters, updateChapter, batchUpdateChapters } = useData();
+    const { chapters, batchUpdateChapters } = useData();
     const toast = useToast();
 
     // Local state for reordering (allows undo and preview)
@@ -187,8 +187,6 @@ const ManuscriptOrganizerModal = ({ isOpen, onClose }) => {
             
             // If target is a chapter, we move it to that parent and that position
             // If target is a volume, we move it to the end of that volume
-            const siblings = newItems.filter(c => c.parentId === targetParentId && !c.isVolume).sort((a,b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-            
             const oldIdx = newItems.findIndex(c => c.id === active.id);
             const activeClone = { ...newItems[oldIdx], parentId: targetParentId };
             

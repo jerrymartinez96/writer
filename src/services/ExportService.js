@@ -130,7 +130,7 @@ class ExportService {
         // 2. Capítulos
         const sortedChapters = [...chapters].sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
         
-        sortedChapters.forEach((chapter, index) => {
+        sortedChapters.forEach((chapter) => {
             if (chapter.isVolume) {
                 doc.addPage();
                 doc.setFont("times", "bold");
@@ -261,7 +261,7 @@ class ExportService {
         const sortedChapters = [...chapters].sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
         
         const contentChildren = [];
-        sortedChapters.forEach((chapter, index) => {
+        sortedChapters.forEach((chapter) => {
             if (chapter.isVolume) {
                 contentChildren.push(new Paragraph({
                     text: chapter.title.toUpperCase(),

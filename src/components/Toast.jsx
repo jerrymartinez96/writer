@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import { useState, useCallback, createContext, useContext, useMemo } from 'react';
 import { CheckCircle2, AlertTriangle, Info, X, XCircle } from 'lucide-react';
 
 const ToastContext = createContext(null);
 
+// The provider and its hook intentionally share this small module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = () => {
     const context = useContext(ToastContext);
     if (!context) throw new Error('useToast must be used within a ToastProvider');
@@ -54,19 +56,14 @@ export const ToastProvider = ({ children }) => {
         }, 300);
     }, []);
 
-    const toast = useCallback({
-        success: (msg, dur) => addToast(msg, 'success', dur),
-        error: (msg, dur) => addToast(msg, 'error', dur),
-        warning: (msg, dur) => addToast(msg, 'warning', dur),
-        info: (msg, dur) => addToast(msg, 'info', dur),
+    const toastApi = useMemo(() => {
+        const api = (msg, type, dur) => addToast(msg, type, dur);
+        api.success = (msg, dur) => addToast(msg, 'success', dur);
+        api.error = (msg, dur) => addToast(msg, 'error', dur);
+        api.warning = (msg, dur) => addToast(msg, 'warning', dur);
+        api.info = (msg, dur) => addToast(msg, 'info', dur);
+        return api;
     }, [addToast]);
-
-    // Reassign to make it callable with methods
-    const toastApi = (msg, type, dur) => addToast(msg, type, dur);
-    toastApi.success = (msg, dur) => addToast(msg, 'success', dur);
-    toastApi.error = (msg, dur) => addToast(msg, 'error', dur);
-    toastApi.warning = (msg, dur) => addToast(msg, 'warning', dur);
-    toastApi.info = (msg, dur) => addToast(msg, 'info', dur);
 
     return (
         <ToastContext.Provider value={toastApi}>

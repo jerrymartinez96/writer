@@ -146,19 +146,6 @@ export const PROMPT_REGISTRY = Object.freeze({
             'Si no existe una contradicción real, devuelve findings vacío.',
         ].join('\n\n'),
     },
-    narrativeInsight: {
-        version: PROMPT_VERSION,
-        responseMode: 'tool',
-        build: ({ roomName, instruction, sourceContent, contextContent }) => [
-            `Eres la herramienta especializada ${roomName}.`,
-            'Devuelve un análisis de solo lectura mediante la herramienta disponible.',
-            'Usa texto plano, no inventes hechos y separa el resultado principal de los elementos accionables.',
-            SHARED_RULES,
-            asContext('Objetivo', instruction),
-            asContext('Contenido principal', sourceContent),
-            asContext('Contexto de apoyo no editable', contextContent),
-        ].join('\n\n'),
-    },
     coreChat: {
         version: PROMPT_VERSION,
         responseMode: 'text',

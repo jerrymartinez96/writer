@@ -37,7 +37,7 @@ import { useToast } from './Toast';
 
 // --- Sub-components for DnD ---
 
-const SortableItem = ({ id, item, type, viewMode }) => {
+const SortableItem = ({ id, item, viewMode }) => {
     const {
         attributes,
         listeners,
@@ -99,7 +99,7 @@ const SortableItem = ({ id, item, type, viewMode }) => {
 };
 
 const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
-    const { worldItems, updateWorldItem, batchUpdateWorldItems, reorderWorldItems } = useData();
+    const { worldItems, batchUpdateWorldItems } = useData();
     const toast = useToast();
 
     // Local state for reordering
@@ -120,7 +120,7 @@ const MasterDocOrganizerModal = ({ isOpen, onClose }) => {
             setLocalItems(JSON.parse(JSON.stringify(structureItems)));
             setHistory([]);
         }
-    }, [isOpen]);
+    }, [isOpen, worldItems]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {

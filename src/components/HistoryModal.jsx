@@ -27,6 +27,20 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
     const [showOnlyChanged, setShowOnlyChanged] = useState(false);
     const [selectedChangeIndex, setSelectedChangeIndex] = useState(0);
     const diffContainerRef = useRef(null);
+    const snapshotDependenciesRef = useRef({ getDocumentSnapshots, toast });
+    snapshotDependenciesRef.current = { getDocumentSnapshots, toast };
+
+    const loadSnapshots = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await snapshotDependenciesRef.current.getDocumentSnapshots(activeDoc.id);
+            setSnapshots(data);
+        } catch {
+            snapshotDependenciesRef.current.toast.error("Error al cargar el historial.");
+        } finally {
+            setLoading(false);
+        }
+    }, [activeDoc]);
 
     useEffect(() => {
         if (isOpen && activeDoc) {
@@ -38,19 +52,7 @@ const HistoryModal = ({ isOpen, onClose, editor }) => {
             setShowOnlyChanged(false);
             setSelectedChangeIndex(0);
         }
-    }, [isOpen, activeDoc]);
-
-    const loadSnapshots = async () => {
-        setLoading(true);
-        try {
-            const data = await getDocumentSnapshots(activeDoc.id);
-            setSnapshots(data);
-        } catch {
-            toast.error("Error al cargar el historial.");
-        } finally {
-            setLoading(false);
-        }
-    };
+    }, [isOpen, activeDoc, loadSnapshots]);
 
     const handleCreateSnapshot = async () => {
         if (!editor || !activeDoc) return;

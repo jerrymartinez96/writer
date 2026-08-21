@@ -49,4 +49,3 @@ export const TOOL_ROOMS = [
 ];
 
 export const getToolRoom = (id) => TOOL_ROOMS.find((room) => room.id === id) || null;
-export const getToolRoomByRoute = (route) => TOOL_ROOMS.find((room) => room.route === route) || null;
