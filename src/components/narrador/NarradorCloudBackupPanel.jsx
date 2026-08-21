@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Cloud, Download, Loader2, RefreshCw, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Cloud, Download, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
+import ConfirmModal from '../ConfirmModal';
 import { useToast } from '../Toast';
 import { buildNarradorAudioVariant } from '../../services/NarradorAudioIdentity';
 import {
+    deleteNarradorCloudChapterAssets,
     downloadNarradorChapterToCache,
     getNarradorCloudChapterStatus,
     isNarradorCloudConfigured,
@@ -27,6 +29,7 @@ const NarradorCloudBackupPanel = ({
     const [backupStatus, setBackupStatus] = useState(null);
     const [isStatusLoading, setIsStatusLoading] = useState(false);
     const [statusError, setStatusError] = useState('');
+    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const scopeRef = useRef('');
 
     const variantKey = buildNarradorAudioVariant(profile);
@@ -170,9 +173,43 @@ const NarradorCloudBackupPanel = ({
         }
     };
 
+    const handleDeleteCloudBackup = async () => {
+        if (!bookId || !chapterId) return;
+
+        const requestScope = scopeKey;
+        setOperation('delete');
+        setProgress(emptyProgress);
+        try {
+            const result = await deleteNarradorCloudChapterAssets({
+                bookId,
+                chapterId,
+                onProgress: (nextProgress) => updateProgressForScope(requestScope, { ...emptyProgress, ...nextProgress })
+            });
+            if (scopeRef.current !== requestScope) return;
+            toast.success(result.deleted > 0
+                ? `Respaldo eliminado: ${result.deleted} referencia(s) de audio borrada(s).`
+                : 'Este capítulo no tenía referencias de audio en la nube.');
+            setProgress(emptyProgress);
+            await refreshBackupStatus();
+        } catch (error) {
+            if (scopeRef.current !== requestScope) return;
+            console.error('[NarradorCloud] Error al eliminar el respaldo desde el panel', {
+                bookId,
+                chapterId,
+                error: { name: error?.name || 'Error', message: error?.message || String(error), code: error?.code || null, status: error?.status || null }
+            });
+            toast.error(error.message || 'No se pudo eliminar el respaldo de la nube.');
+            await refreshBackupStatus();
+        } finally {
+            setOperation(null);
+        }
+    };
+
     const progressLabel = operation === 'upload'
         ? `Subiendo ${progress.completed}/${progress.total}`
-        : `Descargando ${progress.completed}/${progress.total}`;
+        : operation === 'delete'
+            ? `Eliminando ${progress.completed}/${progress.total}`
+            : `Descargando ${progress.completed}/${progress.total}`;
     const readyTotal = backupStatus?.total ?? segments.length;
 
     return (
@@ -234,10 +271,23 @@ const NarradorCloudBackupPanel = ({
                     {operation === 'download' ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
                     {operation === 'download' ? progressLabel : 'Descargar a este equipo'}
                 </button>
+                <button type="button" onClick={() => setIsDeleteConfirmOpen(true)} disabled={isBusy || !bookId || !chapterId} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-3 text-sm font-black text-red-600 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">
+                    {operation === 'delete' ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                    {operation === 'delete' ? progressLabel : 'Eliminar respaldo de la nube'}
+                </button>
                 <button type="button" onClick={() => void refreshBackupStatus()} disabled={isBusy || isStatusLoading || !bookId || !chapterId} className="inline-flex items-center gap-2 rounded-xl px-3 py-3 text-xs font-black text-[var(--text-muted)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-40" title="Actualizar estado del respaldo">
                     <RefreshCw className={isStatusLoading ? 'animate-spin' : ''} size={15} /> Actualizar
                 </button>
             </div>
+
+            <ConfirmModal
+                isOpen={isDeleteConfirmOpen}
+                onClose={() => setIsDeleteConfirmOpen(false)}
+                onConfirm={handleDeleteCloudBackup}
+                title="¿Eliminar respaldo del capítulo?"
+                message={`Se eliminarán de la nube las referencias de todos los audios de «${chapterTitle || 'este capítulo'}». El texto y los audios guardados en este equipo no se modificarán.`}
+                confirmText="Eliminar respaldo"
+            />
         </section>
     );
 };

@@ -56,4 +56,4 @@ Una plataforma minimalista y potente diseñada para escritores que buscan un ent
 
 En la configuración del Narrador se guardan el `Cloud name`, el `API key` y un `Upload preset` unsigned de Cloudinary. El usuario puede subir la caché del capítulo actual desde un dispositivo y descargarla explícitamente en otro. La reproducción continúa usando IndexedDB local.
 
-La limpieza elimina únicamente la copia local; los respaldos de Cloudinary permanecen disponibles para descargarlos de nuevo.
+La limpieza elimina únicamente la copia local; los respaldos de Cloudinary permanecen disponibles para descargarlos de nuevo. Desde el panel de respaldo también se pueden eliminar las referencias de audio de un capítulo en la nube, sin modificar el texto ni la caché local. Los archivos de Cloudinary no se borran desde el navegador porque esa operación requiere credenciales secretas.

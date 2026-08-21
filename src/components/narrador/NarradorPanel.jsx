@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import NarradorSettingsModal from './NarradorSettingsModal';
 
-const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment }) => {
+const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment, compact = false }) => {
     const segmentRefs = useRef(new Map());
     const listRef = useRef(null);
 
@@ -23,7 +23,7 @@ const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndex
     }, [currentSegmentIndex, status]);
 
     return (
-        <div ref={listRef} className="max-h-64 overflow-y-auto space-y-1 pr-1" style={{ overflowAnchor: 'none' }}>
+        <div ref={listRef} className={`${compact ? 'max-h-[6.5rem]' : 'max-h-64'} overflow-y-auto space-y-1 pr-1`} style={{ overflowAnchor: 'none' }}>
             {segments.map((segment, index) => {
                 const preparing = isPreparing && preparationIndex === index && !cachedSegmentIndexes.has(index);
                 const generating = preparing || (status === 'connecting' && index === currentSegmentIndex);
@@ -93,7 +93,7 @@ const KaraokeTranscript = ({ text, progress, isPlaying, isSyncReady }) => {
     }
 
     return (
-        <p className="text-xl md:text-3xl leading-[1.9] md:leading-[2.05] tracking-[-0.015em] text-center">
+        <p className="text-lg sm:text-xl md:text-2xl leading-[1.75] md:leading-[1.85] tracking-[-0.015em] text-center">
             {sentences.map((sentence, index) => {
                 const isActive = index === activeSentence && isPlaying && isSyncReady;
                 const isPast = index < activeSentence;
@@ -404,6 +404,7 @@ const NarradorPanel = ({
                                     preparationIndex={preparationProgress.currentIndex}
                                     skipToSegment={skipToSegment}
                                     regenerateSegment={regenerateSegment}
+                                    compact
                                 />
                             </div>
 

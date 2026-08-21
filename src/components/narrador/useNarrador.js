@@ -16,6 +16,15 @@ import { getCachedSegment, saveCachedSegment, savePermanentSegment, saveSegmentT
 import { buildNarradorAudioVariant } from '../../services/NarradorAudioIdentity';
 
 const PROGRESS_PREFIX = 'narrador_progress_';
+const MEDIA_SESSION_ACTIONS = ['play', 'pause', 'stop', 'nexttrack', 'previoustrack'];
+
+const setMediaSessionAction = (mediaSession, action, handler) => {
+    try {
+        mediaSession.setActionHandler(action, handler);
+    } catch {
+        // Algunas acciones no existen en todos los navegadores.
+    }
+};
 
 const isSameAudioScope = (left, right) => Boolean(left && right)
     && left.bookId === right.bookId
@@ -1064,49 +1073,70 @@ export const useNarrador = ({
         };
     }, [stopAllAudio, stopPreparationSession]);
 
+    const isMediaActive = status === 'speaking' || status === 'connecting' || status === 'paused';
+
     useEffect(() => {
-        const mediaSession = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
-        const active = status === 'speaking' || status === 'connecting' || status === 'paused';
         const releaseWakeLock = async () => {
             if (!wakeLockRef.current) return;
             try { await wakeLockRef.current.release(); } catch { /* ignore */ }
             wakeLockRef.current = null;
         };
         const requestWakeLock = async () => {
-            if (!active || !('wakeLock' in navigator) || wakeLockRef.current) return;
+            if (!isMediaActive || !('wakeLock' in navigator) || wakeLockRef.current) return;
             try {
                 wakeLockRef.current = await navigator.wakeLock.request('screen');
                 wakeLockRef.current.addEventListener('release', () => { wakeLockRef.current = null; });
             } catch { /* navegador no compatible o permiso denegado */ }
         };
 
-        if (active) requestWakeLock();
+        if (isMediaActive) requestWakeLock();
         else releaseWakeLock();
-        if (!mediaSession) return () => { releaseWakeLock(); };
-
-        try {
-            mediaSession.metadata = active ? new MediaMetadata({
-                title: activeChapterRef.current?.title || 'Narrador',
-                artist: activeBookRef.current?.title || 'Verne Studio',
-                album: 'Narración'
-            }) : null;
-            mediaSession.playbackState = status === 'speaking' ? 'playing' : status === 'paused' ? 'paused' : 'none';
-            mediaSession.setActionHandler('play', () => {
-                if (statusRef.current === 'paused') resumeNarration();
-                else if (statusRef.current === 'idle' || statusRef.current === 'stopped') startNarration(currentIndexRef.current);
-            });
-            mediaSession.setActionHandler('pause', pauseNarration);
-            mediaSession.setActionHandler('stop', stopNarration);
-            mediaSession.setActionHandler('nexttrack', () => {
-                if (currentIndexRef.current < segmentsRef.current.length - 1) skipToSegment(currentIndexRef.current + 1);
-            });
-            mediaSession.setActionHandler('previoustrack', () => {
-                if (currentIndexRef.current > 0) skipToSegment(currentIndexRef.current - 1);
-            });
-        } catch { /* algunas acciones no existen en todos los navegadores */ }
 
         return () => { releaseWakeLock(); };
-    }, [activeChapter?.id, pauseNarration, resumeNarration, skipToSegment, startNarration, status, stopNarration]);
+    }, [isMediaActive]);
+
+    useEffect(() => {
+        const mediaSession = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
+        if (!mediaSession) return undefined;
+
+        const clearMediaSession = () => {
+            try { mediaSession.metadata = null; } catch { /* ignore */ }
+            try { mediaSession.playbackState = 'none'; } catch { /* ignore */ }
+            MEDIA_SESSION_ACTIONS.forEach(action => setMediaSessionAction(mediaSession, action, null));
+        };
+
+        if (!isMediaActive) {
+            clearMediaSession();
+            return undefined;
+        }
+
+        if (typeof MediaMetadata === 'function') {
+            try {
+                mediaSession.metadata = new MediaMetadata({
+                    title: activeChapterRef.current?.title || 'Narrador',
+                    artist: activeBookRef.current?.title || 'Verne Studio',
+                    album: 'Narración'
+                });
+            } catch { /* navegador sin metadata enriquecida */ }
+        }
+
+        try {
+            mediaSession.playbackState = status === 'speaking' ? 'playing' : 'paused';
+        } catch { /* ignore */ }
+        setMediaSessionAction(mediaSession, 'play', () => {
+            if (statusRef.current === 'paused') resumeNarration();
+        });
+        setMediaSessionAction(mediaSession, 'pause', pauseNarration);
+        setMediaSessionAction(mediaSession, 'stop', stopNarration);
+        setMediaSessionAction(mediaSession, 'nexttrack', () => {
+            if (currentIndexRef.current < segmentsRef.current.length - 1) skipToSegment(currentIndexRef.current + 1);
+        });
+        setMediaSessionAction(mediaSession, 'previoustrack', () => {
+            if (currentIndexRef.current > 0) skipToSegment(currentIndexRef.current - 1);
+        });
+
+        return clearMediaSession;
+    }, [activeChapter?.id, isMediaActive, pauseNarration, resumeNarration, skipToSegment, status, stopNarration]);
 
     const [webVoicesAvailable, setWebVoicesAvailable] = useState(false);
     useEffect(() => {

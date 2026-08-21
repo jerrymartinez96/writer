@@ -13,7 +13,8 @@ import {
     query,
     serverTimestamp,
     setDoc,
-    where
+    where,
+    writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import {
@@ -31,6 +32,7 @@ import {
 
 const ASSETS_COLLECTION = 'narrationAssets';
 const PENDING_UPLOAD_PREFIX = 'narrador_cloud_pending_';
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const getUid = () => auth.currentUser?.uid || '';
 
@@ -278,6 +280,55 @@ export const getCachedNarradorChapterAssets = async ({ bookId, chapterId }) => {
         .filter((asset) => asset.chapterId === chapterId && asset.status === 'ready' && asset.secureUrl);
 };
 
+/**
+ * Elimina las referencias de Firestore para todos los audios de un capítulo.
+ * Los archivos en Cloudinary no se borran desde el cliente porque esa acción
+ * requiere credenciales secretas; al no tener metadata, ya no son accesibles
+ * ni descargables desde la aplicación.
+ */
+export const deleteNarradorCloudChapterAssets = async ({ bookId, chapterId, onProgress } = {}) => {
+    if (!bookId || !chapterId) {
+        throw new Error('Selecciona un libro y un capítulo antes de eliminar su respaldo.');
+    }
+
+    const uid = getUid();
+    const assetsQuery = query(getAssetsCollection(uid), where('bookId', '==', bookId));
+    let snapshot;
+    try {
+        snapshot = await getDocs(assetsQuery);
+    } catch (error) {
+        logCloudError('No se pudieron consultar las referencias para eliminar el respaldo', error, { bookId, chapterId });
+        throw error;
+    }
+
+    const chapterAssets = snapshot.docs.filter((assetDoc) => assetDoc.data()?.chapterId === chapterId);
+    const total = chapterAssets.length;
+    let deleted = 0;
+
+    for (let start = 0; start < total; start += FIRESTORE_BATCH_LIMIT) {
+        const batchAssets = chapterAssets.slice(start, start + FIRESTORE_BATCH_LIMIT);
+        const batch = writeBatch(db);
+        batchAssets.forEach((assetDoc) => batch.delete(assetDoc.ref));
+        try {
+            await batch.commit();
+        } catch (error) {
+            logCloudError('No se pudieron eliminar las referencias del respaldo', error, {
+                bookId,
+                chapterId,
+                deleted,
+                total
+            });
+            throw error;
+        }
+
+        batchAssets.forEach((assetDoc) => clearPendingUpload(uid, assetDoc.id));
+        deleted += batchAssets.length;
+        onProgress?.({ completed: deleted, total, deleted });
+    }
+
+    return { total, deleted };
+};
+
 export const getNarradorCloudChapterStatus = async ({
     bookId,
     chapterId,
@@ -425,6 +476,7 @@ export default {
     isNarradorCloudConfigured,
     uploadNarradorSegment,
     getCachedNarradorChapterAssets,
+    deleteNarradorCloudChapterAssets,
     getNarradorCloudChapterStatus,
     uploadCachedNarradorChapter,
     downloadNarradorChapterToCache
