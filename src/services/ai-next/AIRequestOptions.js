@@ -1,11 +1,14 @@
 export const getConfiguredAIOptions = (profile, overrides = {}) => ({
     model: profile?.aiConfig?.defaultModel || 'deepseek-v4-flash',
+    executionMode: profile?.aiConfig?.executionMode === 'manual' ? 'manual' : 'api',
     reasoningMode: profile?.aiConfig?.reasoningMode ?? false,
     // Un único nivel evita que perfiles antiguos con `max` consuman el
     // presupuesto de salida antes de completar una herramienta o respuesta.
     reasoningEffort: 'high',
     ...overrides,
 });
+
+export const isManualAIExecution = (profile) => profile?.aiConfig?.executionMode === 'manual';
 
 /**
  * DeepSeek no acepta `tool_choice` mientras Thinking está activo. Los flujos

@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, Save } from 'lucide-react';
+import { useToolRooms } from '../../context/ToolRoomContext';
 
 const accentClasses = {
     amber: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
@@ -17,15 +18,17 @@ const statusLabels = {
 };
 
 const ToolRoomShell = ({ room, status = 'ready', children, context, title, headerAction }) => {
+    const { returnToIAStudio } = useToolRooms();
     const Icon = room.icon;
     const statusText = statusLabels[status] || statusLabels.ready;
+    const showWorkspaceBack = room.id !== 'narrator';
 
     return (
         <section className="h-full min-h-0 flex flex-col bg-[var(--bg-app)] text-[var(--text-main)]">
             <header className="shrink-0 border-b border-[var(--border-main)] bg-[var(--bg-app)]/90 backdrop-blur-xl px-4 py-3 lg:px-8">
                 <div className="max-w-[1500px] mx-auto flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
-                       
+                        {showWorkspaceBack && <button type="button" onClick={returnToIAStudio} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border-main)] bg-[var(--bg-editor)] text-[var(--text-muted)] transition-colors hover:border-indigo-500 hover:text-indigo-500" aria-label="Volver a IA Studio"><ArrowLeft size={17} /></button>}
                         <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${accentClasses[room.accent] || accentClasses.indigo}`}>
                             <Icon size={18} />
                         </div>

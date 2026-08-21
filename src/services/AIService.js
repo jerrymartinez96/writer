@@ -1,6 +1,8 @@
 /**
  * Service to handle AI interactions exclusively via DeepSeek Direct API
  */
+import { requestManualAIResponse } from './ai-next/ManualAIRequestService';
+
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 const AI_SERVICE_VERBOSE_LOGS = false;
 
@@ -328,6 +330,9 @@ export const AIService = {
      * Supports both a single prompt string and an array of message objects [{role, content}]
      */
     async sendMessage(prompt, apiKey, options = {}) {
+        if (options.executionMode === 'manual') {
+            return requestManualAIResponse(prompt, options);
+        }
         const modelId = options.model || "deepseek-v4-flash";
         const deepseekKey = options.deepseekApiKey || apiKey;
         return this.sendDeepSeekMessage(prompt, deepseekKey, modelId, options);

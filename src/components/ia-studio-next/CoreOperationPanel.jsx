@@ -5,7 +5,7 @@ import AIService from '../../services/AIService';
 import { applyPatchesAtomically } from '../../services/ai/OperationEngine';
 import { saveEntitySnapshot } from '../../services/db';
 import SanitizedContentPreview from '../toolrooms/SanitizedContentPreview';
-import { getConfiguredAIOptions } from '../../services/ai-next/AIRequestOptions';
+import { getConfiguredAIOptions, isManualAIExecution } from '../../services/ai-next/AIRequestOptions';
 import { buildRegisteredPrompt } from '../../services/ai-next/PromptRegistry';
 
 const parseJson = (value) => {
@@ -48,7 +48,7 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
         setStatus('analyzing'); setError('');
         try {
             const key = getApiKey(profile);
-            if (!key) throw new Error('Configura una API Key de DeepSeek para analizar el impacto.');
+            if (!key && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek para analizar el impacto.');
             const prompt = buildRegisteredPrompt('coreImpact', { request: request.message, contextText });
             const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.1, responseMode: 'json', max_tokens: 2200 }));
             const result = parseJson(raw);
@@ -73,7 +73,7 @@ const CoreOperationPanel = ({ request, capability, onClose }) => {
         setStatus('loading'); setError('');
         try {
             const key = getApiKey(profile);
-            if (!key) throw new Error('Configura una API Key de DeepSeek para preparar cambios.');
+            if (!key && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek para preparar cambios.');
             const limit = isMulti ? 'uno o más parches solo donde sean necesarios' : 'exactamente un parche';
             const prompt = buildRegisteredPrompt('corePatch', { limit, impactAnalysis: impactAnalysis || {}, request: request.message, contextText });
             const raw = await AIService.sendMessage(prompt, key, getConfiguredAIOptions(profile, { temperature: 0.2, responseMode: 'json', max_tokens: 5000 }));

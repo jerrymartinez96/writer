@@ -5,6 +5,7 @@ import Modal from './components/Modal'
 import Login from './components/Login'
 import { DataProvider, useData } from './context/DataContext'
 import { ToolRoomProvider } from './context/ToolRoomContext'
+import ManualAIExchange from './components/ManualAIExchange'
 import { Settings, FileText, Moon, Sun, Menu, X, Library, LogIn, LogOut, Loader2, Check, AlertTriangle } from 'lucide-react'
 
 // Lazy loaded views
@@ -228,13 +229,20 @@ function AppContent() {
     }
   };
 
+  const isImmersiveIAView = activeView === 'ia-studio'
+    || activeView === 'ia-studio-next'
+    || activeView === 'toolroom:creative-studio'
+    || activeView === 'toolroom:global-constructor'
+    || activeView === 'toolroom:audit';
+
   return (
     <div className="w-screen h-screen flex bg-[var(--bg-app)] text-[var(--text-main)] overflow-hidden font-sans transition-colors duration-300">
+      <ManualAIExchange />
       {isCommandPaletteOpen && <CommandPalette onClose={() => setIsCommandPaletteOpen(false)} />}
-      <Sidebar isMobileOpen={isMobileMenuOpen} setIsMobileOpen={setIsMobileMenuOpen} />
+      {!isImmersiveIAView && <Sidebar isMobileOpen={isMobileMenuOpen} setIsMobileOpen={setIsMobileMenuOpen} />}
       <main className="flex-1 h-full flex flex-col min-w-0 bg-[var(--bg-editor)]">
         {/* Top Navbar Refined */}
-        <header className="h-16 border-b border-[var(--border-main)] flex items-center justify-between px-4 lg:px-12 bg-[var(--bg-app)]/90 backdrop-blur-xl z-20 shrink-0">
+        {!isImmersiveIAView && <header className="h-16 border-b border-[var(--border-main)] flex items-center justify-between px-4 lg:px-12 bg-[var(--bg-app)]/90 backdrop-blur-xl z-20 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setIsMobileMenuOpen(true)}
@@ -331,7 +339,7 @@ function AppContent() {
               )}
             </div>
           </div>
-        </header>
+        </header>}
 
         {syncConflict && (
           <div className="flex shrink-0 items-center justify-between gap-4 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-amber-700 dark:text-amber-300 lg:px-12">

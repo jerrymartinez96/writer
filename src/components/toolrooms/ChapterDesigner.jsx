@@ -11,6 +11,7 @@ const SIZE_OPTIONS = [
 ];
 
 const text = (value) => String(value || '').trim();
+const DesignerFeedbackContext = React.createContext({ feedback: '', setFeedback: () => {} });
 
 const formatStructureBlock = ({ plan, direction, scenes, size, customMin, customMax }) => {
     const sizeLabel = SIZE_OPTIONS.find((option) => option.id === size)?.detail || `${customMin || 500}–${customMax || 2000} palabras`;
@@ -42,10 +43,14 @@ const formatStructureBlock = ({ plan, direction, scenes, size, customMin, custom
     ].join('\n');
 };
 
-const Panel = ({ children, className = '' }) => <section className={`rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7 ${className}`}>{children}</section>;
+const Panel = ({ children, className = '' }) => {
+    const { feedback } = React.useContext(DesignerFeedbackContext);
+    return <section className={`rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] p-5 lg:p-7 ${className}`}>{feedback && <div role="status" aria-live="polite" className="mb-5 flex items-start gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-relaxed"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white"><Check size={15} /></span><div><p className="font-black text-emerald-700 dark:text-emerald-300">Resultado listo</p><p className="mt-1 text-xs text-[var(--text-muted)]">{feedback}</p></div></div>}{children}</section>;
+};
 
-const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, characters, activeChapter, lazyLoadChapters, updateWorldItem, saveDocumentSnapshot, onWriteChapter }) => {
+const ChapterDesignerContent = ({ state, updateRoomState, worldItems, chapters, characters, activeChapter, lazyLoadChapters, updateWorldItem, saveDocumentSnapshot, onWriteChapter }) => {
     const { profile } = useData();
+    const { setFeedback } = React.useContext(DesignerFeedbackContext);
     const stored = state.designer || {};
     const [designer, setDesigner] = useState(stored);
     const [status, setStatus] = useState('idle');
@@ -64,7 +69,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     const patchDesigner = (patch) => {
         setDesigner((previous) => {
             const next = { ...previous, ...patch };
-            updateRoomState('cowriter', { designer: next });
+            updateRoomState('creative-studio', { designer: next });
             return next;
         });
     };
@@ -72,6 +77,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     const runAnalysis = async () => {
         setStatus('loading');
         setError('');
+        setFeedback('');
         try {
             const loaded = await lazyLoadChapters(chapters.filter((chapter) => !chapter.isVolume).map((chapter) => chapter.id));
             const loadedById = new Map((loaded || []).map((chapter) => [chapter.id, chapter]));
@@ -86,6 +92,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
                 characters,
             });
             patchDesigner({ analysis: result, analysisSourceHash: sourceHash, analysisAnalyzedAt: new Date().toISOString(), stage: 'analysis', confirmedMatches: {} });
+            setFeedback('Análisis recibido. Revisa las coincidencias y elige qué capítulo quieres trabajar.');
             setStatus('ready');
         } catch (requestError) {
             setError(requestError?.message || 'No se pudo analizar la estructura.');
@@ -96,13 +103,17 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     const confirmMatch = (match, value) => patchDesigner({ confirmedMatches: { ...(designer.confirmedMatches || {}), [match.structureChapterId]: value ? match.manuscriptChapterId : null } });
     const assignManualMatch = (structureChapterId, manuscriptChapterId) => patchDesigner({ confirmedMatches: { ...(designer.confirmedMatches || {}), [structureChapterId]: manuscriptChapterId || null } });
 
-    const choosePlan = (plan) => patchDesigner({ selectedPlan: plan, stage: 'directions', directions: null, direction: null, scenes: [], draftScene: null });
+    const choosePlan = (plan) => {
+        setFeedback('Paso 1 activo. Define la intención del capítulo y solicita direcciones narrativas.');
+        patchDesigner({ selectedPlan: plan, stage: 'directions', directions: null, direction: null, scenes: [], draftScene: null });
+    };
 
     const startFreeDesign = () => choosePlan({ id: `new-${Date.now()}`, title: 'Nuevo capítulo', position: (chapters.length || 0) + 1, summary: '', purpose: '', conflict: '', characters: [] });
 
     const generateDirections = async () => {
         setStatus('loading');
         setError('');
+        setFeedback('');
         try {
             const result = await requestChapterDirections({
                 profile,
@@ -113,6 +124,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
                 contextContent: `${worldItem?.content || ''}\n${characters.map((character) => `${character.name}: ${character.description || ''}`).join('\n')}`,
             });
             patchDesigner({ directions: result.directions, stage: 'directions' });
+            setFeedback(`${result.directions.length} direcciones recibidas. Elige una tarjeta para avanzar al Paso 2.`);
             setStatus('ready');
         } catch (requestError) {
             setError(requestError?.message || 'No se pudieron generar direcciones narrativas.');
@@ -123,6 +135,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     const generateScene = async (instruction = '') => {
         setStatus('loading');
         setError('');
+        setFeedback('');
         try {
             const scene = await requestChapterScene({
                 profile,
@@ -135,6 +148,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
                 instruction,
             });
             patchDesigner({ draftScene: scene, stage: 'scenes' });
+            setFeedback('Escena recibida. Revísala y pulsa «Aprobar escena» para incorporarla.');
             setStatus('ready');
         } catch (requestError) {
             setError(requestError?.message || 'No se pudo proponer la escena.');
@@ -145,6 +159,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     const approveScene = () => {
         if (!designer.draftScene) return;
         patchDesigner({ scenes: [...(designer.scenes || []), designer.draftScene], draftScene: null, stage: 'scenes' });
+        setFeedback('Escena aprobada. Puedes proponer la siguiente o terminar la estructura.');
     };
 
     const finishScenes = () => patchDesigner({ stage: 'preview' });
@@ -159,6 +174,7 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
             await updateWorldItem('system_estructura', { content: `${current}${separator}${structureBlock}` }, { immediate: true });
             await saveDocumentSnapshot('system_estructura', `${current}${separator}${structureBlock}`, 'toolroom-cowriter-structure');
             patchDesigner({ savedStructure: structureBlock, stage: 'saved', savedAt: new Date().toISOString() });
+            setFeedback('Estructura guardada correctamente. Ya puedes redactar el capítulo.');
             setStatus('ready');
         } catch (saveError) {
             setError(saveError?.message || 'No se pudo guardar la estructura.');
@@ -182,6 +198,12 @@ const ChapterDesigner = ({ state, updateRoomState, worldItems, chapters, charact
     if (stage === 'preview') { const block = designer.previewText || formatStructureBlock({ plan: selectedPlan, direction: designer.direction, scenes: designer.scenes || [], size, customMin: designer.customMin, customMax: designer.customMax }); return <Panel className="mx-auto max-w-5xl"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-500">Paso 4 · Revisión</p><h2 className="mt-2 text-3xl font-serif font-black">Revisa antes de guardar</h2><p className="mt-2 text-sm text-[var(--text-muted)]">Esta estructura se añadirá al documento Estructura solo cuando la confirmes.</p><textarea value={block} onChange={(event) => patchDesigner({ previewText: event.target.value })} rows={24} className="mt-6 w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-4 font-mono text-xs leading-relaxed outline-none focus:border-violet-500" /> <div className="mt-5 flex flex-wrap justify-between gap-3"><button type="button" onClick={() => patchDesigner({ stage: 'scenes', previewText: null })} className="rounded-xl border border-[var(--border-main)] px-4 py-3 text-sm font-black">Volver a escenas</button><button type="button" onClick={saveStructure} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-black text-white disabled:opacity-60">{busy ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />} Guardar en Estructura</button></div>{error && <p className="mt-4 rounded-xl border border-red-500/25 bg-red-500/5 p-3 text-xs text-red-600">{error}</p>}</Panel>; }
 
     return <Panel className="mx-auto max-w-4xl"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600"><Check size={24} /></div><p className="mt-6 text-[9px] font-black uppercase tracking-[0.18em] text-emerald-600">Estructura guardada</p><h2 className="mt-2 text-3xl font-serif font-black">{selectedPlan?.title}</h2><p className="mt-3 text-sm leading-relaxed text-[var(--text-muted)]">El capítulo ya está disponible en Estructura con sus escenas y objetivos aprobados.</p><div className="mt-7 flex flex-wrap gap-3"><button type="button" onClick={() => onWriteChapter({ title: selectedPlan?.title, structure: designer.savedStructure, plan: selectedPlan })} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white"><FileText size={17} /> Redactar este capítulo</button><button type="button" onClick={() => patchDesigner({ stage: 'analysis', selectedPlan: null, direction: null, scenes: [], draftScene: null })} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-4 py-3 text-sm font-black"><Plus size={17} /> Diseñar otro</button></div></Panel>;
+};
+
+const ChapterDesigner = (props) => {
+    const [feedback, setFeedback] = useState('');
+    const feedbackValue = useMemo(() => ({ feedback, setFeedback }), [feedback]);
+    return <DesignerFeedbackContext.Provider value={feedbackValue}><ChapterDesignerContent {...props} /></DesignerFeedbackContext.Provider>;
 };
 
 export default ChapterDesigner;

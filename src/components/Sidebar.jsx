@@ -1,4 +1,4 @@
-import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Wrench } from 'lucide-react';
+import { Plus, Settings, ChevronRight, Book, Folder, FileText, Trash2, Users, Search, MoreVertical, Edit2, LogOut, Check, AlignLeft, Sparkles, BookOpen, Globe, User, Layers, X, GripVertical, ShieldCheck, PencilLine, AlertTriangle, Bookmark, Target, Wrench, Headphones } from 'lucide-react';
 import { useData } from '../context/DataContext'
 import { createElement, useState, useMemo } from 'react'
 import Modal from './Modal'
@@ -349,6 +349,17 @@ const Sidebar = ({ isMobileOpen, setIsMobileOpen }) => {
                             <Sparkles size={16} />
                         </div>
                         {!isSidebarCollapsed && <span>IA Studio</span>}
+                    </button>
+
+                    <button
+                        onClick={() => handleSelectMobile(() => setActiveView('toolroom:narrator'))}
+                        className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all group ${activeView === 'toolroom:narrator' ? 'bg-[var(--accent-soft)] text-[var(--accent-main)] font-semibold shadow-sm' : 'hover:bg-[var(--accent-soft)] text-[var(--text-main)] transition-colors'} ${isSidebarCollapsed ? 'justify-center w-12 h-12' : 'w-full text-left'}`}
+                        title="Narrador"
+                    >
+                        <div className={`shrink-0 p-1.5 rounded-md transition-transform group-hover:scale-110 ${activeView === 'toolroom:narrator' ? 'bg-[var(--accent-main)] text-white shadow-md' : 'bg-violet-500/10 text-violet-500'}`}>
+                            <Headphones size={16} />
+                        </div>
+                        {!isSidebarCollapsed && <span>Narrador</span>}
                     </button>
 
                     <button

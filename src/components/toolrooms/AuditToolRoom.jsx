@@ -5,6 +5,7 @@ import { useToolRooms } from '../../context/ToolRoomContext';
 import { getToolRoom } from './toolRoomCatalog';
 import ToolRoomShell from './ToolRoomShell';
 import ConfirmModal from '../ConfirmModal';
+import useToolRoomLaunch from './useToolRoomLaunch';
 import { requestGlobalConsistencyAnalysis } from '../../services/ai-next/ToolRoomAIService';
 import { applyPlainTextPatch } from '../../services/ai-next/plainText';
 import { saveEntitySnapshot } from '../../services/db';
@@ -23,6 +24,7 @@ const AUDIT_FOCUSES = [
 
 const SCOPES = [
     ['all', 'Toda la obra'],
+    ['selected', 'Fuentes de IA Studio'],
     ['chapters', 'Solo capítulos'],
     ['world', 'Mundo y estructura'],
     ['characters', 'Fichas de personajes'],
@@ -148,15 +150,18 @@ const AuditFinding = ({ finding, documents, applying, error, onConfirm, onDismis
 
 const AuditToolRoom = () => {
     const room = getToolRoom('audit');
+    const launch = useToolRoomLaunch('audit');
     const { activeBook, profile, chapters = [], worldItems = [], characters = [], lazyLoadChapters, updateChapter, updateWorldItem, updateCharacter, selectChapter, setActiveView } = useData();
     const { getRoomState, updateProcess, openToolRoom } = useToolRooms();
-    const storedProcess = getRoomState('audit').process || {};
+    const storedProcess = launch?.prompt ? {} : (getRoomState('audit').process || {});
+    const launchContext = launch?.context || {};
+    const hasLaunchContext = ['chapterIds', 'characterIds', 'worldItemIds'].some((key) => launchContext[key]?.length);
     const savedAuditType = storedProcess.auditType;
     const [auditType, setAuditType] = useState(savedAuditType && !['continuity', 'custom'].includes(savedAuditType) ? savedAuditType : 'full');
-    const [scope, setScope] = useState(storedProcess.scope || 'all');
+    const [scope, setScope] = useState(hasLaunchContext ? 'selected' : (storedProcess.scope || 'all'));
     const [query, setQuery] = useState(storedProcess.query || '');
     const [canonical, setCanonical] = useState(storedProcess.canonical || '');
-    const [instruction, setInstruction] = useState(storedProcess.instruction || '');
+    const [instruction, setInstruction] = useState(launch?.prompt || storedProcess.instruction || '');
     const [documents, setDocuments] = useState(storedProcess.documents || []);
     const [result, setResult] = useState(storedProcess.result || null);
     // `analyzing` persisted in storage cannot represent an active request after
@@ -189,16 +194,25 @@ const AuditToolRoom = () => {
     const findingCounts = useMemo(() => (result?.findings || []).reduce((counts, finding) => ({ ...counts, [finding.status]: (counts[finding.status] || 0) + 1 }), {}), [result]);
 
     const buildDocuments = async () => {
+        const selectedChapterIds = new Set((launchContext.chapterIds || []).map(String));
+        const selectedWorldItemIds = new Set((launchContext.worldItemIds || []).map(String));
+        const selectedCharacterIds = new Set((launchContext.characterIds || []).map(String));
         const includeChapters = scope === 'all' || scope === 'chapters';
         const includeWorld = scope === 'all' || scope === 'world';
         const includeCharacters = scope === 'all' || scope === 'characters';
-        const selectedChapters = includeChapters ? chapters.filter((chapter) => !chapter.isVolume) : [];
-        const loaded = includeChapters ? await lazyLoadChapters(selectedChapters.map((chapter) => chapter.id)) : [];
+        const selectedChapters = scope === 'selected'
+            ? chapters.filter((chapter) => !chapter.isVolume && selectedChapterIds.has(String(chapter.id)))
+            : includeChapters ? chapters.filter((chapter) => !chapter.isVolume) : [];
+        const loaded = selectedChapters.length ? await lazyLoadChapters(selectedChapters.map((chapter) => chapter.id)) : [];
         const loadedById = new Map((loaded || []).map((chapter) => [chapter.id, chapter]));
         return [
             ...selectedChapters.map((chapter) => ({ ...chapter, ...(loadedById.get(chapter.id) || {}), type: 'chapter', title: chapter.title })),
-            ...(includeWorld ? worldItems.map((item) => ({ ...item, type: 'worldItem', title: item.title, content: item.content || item.description || '' })) : []),
-            ...(includeCharacters ? characters.map((character) => ({ ...character, type: 'character', title: character.name, content: character.description || '' })) : []),
+            ...(scope === 'selected'
+                ? worldItems.filter((item) => selectedWorldItemIds.has(String(item.id)))
+                : includeWorld ? worldItems : []).map((item) => ({ ...item, type: 'worldItem', title: item.title, content: item.content || item.description || '' })),
+            ...(scope === 'selected'
+                ? characters.filter((character) => selectedCharacterIds.has(String(character.id)))
+                : includeCharacters ? characters : []).map((character) => ({ ...character, type: 'character', title: character.name, content: character.description || '' })),
         ].filter((document) => String(document.content || '').trim());
     };
 

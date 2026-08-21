@@ -1,5 +1,5 @@
 import AIService from '../AIService';
-import { getStructuredAIOptions } from './AIRequestOptions';
+import { getStructuredAIOptions, isManualAIExecution } from './AIRequestOptions';
 import { toPlainText } from './plainText';
 export const MISSION_TYPES = [
     { id: 'develop_canon', label: 'Modificar canon', description: 'Crea, elimina o transforma hechos, reglas y relaciones importantes.' },
@@ -58,7 +58,7 @@ const hasExactEvidence = (evidence, content) => {
 
 const structuredCall = async ({ profile, prompt, schema, temperature = 0.1, max_tokens = 7000, normalizeResponse = (value) => value }) => {
     const apiKey = getApiKey(profile);
-    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de analizar la misión.');
+    if (!apiKey && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek antes de analizar la misión.');
     // El Constructor Global siempre privilegia un único análisis razonado y
     // estructurado. Evitamos reintentos automáticos que duplican coste y pueden
     // producir respuestas de menor calidad; el escritor decide si reintenta.

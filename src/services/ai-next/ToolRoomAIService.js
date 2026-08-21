@@ -1,6 +1,6 @@
 import AIService, { COHERENCE_AUDIT_SCHEMA } from '../AIService';
 import { formatDraftText, toPlainText } from './plainText';
-import { getConfiguredAIOptions, getStructuredAIOptions } from './AIRequestOptions';
+import { getConfiguredAIOptions, getStructuredAIOptions, isManualAIExecution } from './AIRequestOptions';
 import { parseStructuredResponse, validateStructuredResponse } from './StructuredResponse';
 import { buildRegisteredPrompt } from './PromptRegistry';
 
@@ -79,7 +79,7 @@ const TOOL_ROOM_PROPOSAL_TOOL = {
 
 export const createStructuredRequest = async ({ profile, prompt, schema, max_tokens = 7000, signal, normalizeResponse = (value) => value }) => {
     const apiKey = getToolRoomApiKey(profile);
-    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
+    if (!apiKey && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const requestOptions = {
         temperature: 0.1,
         max_tokens,
@@ -124,7 +124,7 @@ export const createStructuredRequest = async ({ profile, prompt, schema, max_tok
 
 const createNarrativeJsonRequest = async ({ profile, prompt, max_tokens = 7000 }) => {
     const apiKey = getToolRoomApiKey(profile);
-    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
+    if (!apiKey && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const baseOptions = getConfiguredAIOptions(profile, {
         temperature: 0.35,
         max_tokens,
@@ -279,7 +279,9 @@ export const requestChapterDirections = async ({ profile, idea = '', chapterPlan
         contextContent: toPlainText(contextContent),
     });
     const parsed = await createNarrativeJsonRequest({ profile, prompt, max_tokens: 6500 });
-    return { directions: Array.isArray(parsed.directions) ? parsed.directions.slice(0, 3).map(normalizeDirection) : [] };
+    const directions = Array.isArray(parsed.directions) ? parsed.directions.slice(0, 3).map(normalizeDirection) : [];
+    if (!directions.length) throw new Error('La respuesta no incluyó direcciones narrativas. Corrígela y vuelve a pegarla.');
+    return { directions };
 };
 
 const normalizeScene = (scene, index) => ({
@@ -484,7 +486,7 @@ export const requestToolRoomProposal = async ({ profile, instruction, sourceCont
 
 export const requestToolRoomInsight = async ({ profile, instruction, sourceContent, contextContent = '', roomName, documentIds = [] }) => {
     const apiKey = getToolRoomApiKey(profile);
-    if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
+    if (!apiKey && !isManualAIExecution(profile)) throw new Error('Configura una API Key de DeepSeek antes de usar esta Tool Room.');
     const allowedIds = new Set(documentIds.map(String));
     const prompt = buildRegisteredPrompt('toolRoomInsight', { roomName, instruction, sourceContent: toPlainText(sourceContent), contextContent: toPlainText(contextContent), documentIds: [...allowedIds] });
     const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, COHERENCE_AUDIT_SCHEMA, {

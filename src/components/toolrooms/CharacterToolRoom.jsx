@@ -11,11 +11,12 @@ import { saveEntitySnapshot } from '../../services/db';
 
 const visualReviewMode = import.meta.env.DEV && import.meta.env.VITE_VISUAL_REVIEW === 'true';
 
-const CharacterToolRoom = () => {
+const CharacterToolRoom = ({ launchOverride = null }) => {
     const { activeBook, chapters = [], characters = [], worldItems = [], createCharacter, updateCharacter } = useData();
     const { getRoomState, updateRoomState, dismissProposal, openToolRoom } = useToolRooms();
     const state = getRoomState('creative-studio');
-    const launch = useToolRoomLaunch('creative-studio');
+    const storedLaunch = useToolRoomLaunch('creative-studio');
+    const launch = launchOverride || storedLaunch;
     const selectedCharacterId = state.selectedCharacterId || launch?.context?.characterIds?.[0] || null;
     const selectedCharacter = characters.find((character) => character.id === selectedCharacterId) || null;
     const supportingContext = useMemo(() => {
@@ -106,7 +107,7 @@ const CharacterToolRoom = () => {
                             <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 {['Identidad', 'Psicología', 'Trayectoria'].map((label) => <div key={label} className="rounded-2xl border border-[var(--border-main)] p-4 text-left"><p className="text-sm font-black">{label}</p><p className="mt-1 text-xs text-[var(--text-muted)]">Se trabaja dentro de la ficha revisable.</p></div>)}
                             </div>
-                            <ToolRoomAIProposal roomName="Diseñador de personajes" instruction={`Desarrolla la identidad, psicología, motivaciones y arco narrativo de ${selectedCharacter.name}. Conserva los hechos existentes y mejora la ficha.`} sourceContent={selectedCharacter.description || ''} contextContent={supportingContext} onApply={sendCharacterProposalToConstructor} applyLabel="Enviar al Constructor Global" />
+                            <ToolRoomAIProposal roomName="Diseñador de personajes" instruction={`${launch?.prompt ? `Objetivo del escritor: ${launch.prompt}\n\n` : ''}Desarrolla la identidad, psicología, motivaciones y arco narrativo de ${selectedCharacter.name}. Conserva los hechos existentes y mejora la ficha.`} sourceContent={selectedCharacter.description || ''} contextContent={supportingContext} onApply={sendCharacterProposalToConstructor} applyLabel="Enviar al Constructor Global" />
                             {!visualReviewMode && <ToolRoomHistoryPanel bookId={activeBook?.id} collectionName="characters" entityId={selectedCharacter.id} currentContent={selectedCharacter.description || ''} onRestore={restoreCharacter} />}
                             <div className="mt-5"><ToolRoomProposalCard proposal={state.pendingProposal} onDismiss={() => dismissProposal('creative-studio')} /></div>
                             <div className="mt-7 rounded-2xl border border-dashed border-[var(--border-main)] p-4 text-sm text-[var(--text-muted)]"><strong className="text-[var(--text-main)]">Siguiente paso:</strong> define un objetivo para que las acciones de IA trabajen sobre una intención concreta.</div>

@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useToast } from './Toast';
 import { Save, Trash2, Settings, Book, Upload, Image as ImageIcon, Loader2, Download, FileText, File as FilePdf, Globe, Users, BookOpen, AlignLeft, Check, CheckSquare, Square, Eye, EyeOff, Zap, X, Copy, ChevronDown } from 'lucide-react';
-import ExportService from '../services/ExportService';
 import AIService from '../services/AIService';
 import ConfirmModal from './ConfirmModal';
 import { getChapters } from '../services/db';
@@ -40,6 +39,7 @@ const SettingsView = () => {
     
     // AI States (from profile.aiConfig or legacy profile fallbacks)
     const aiConfig = profile?.aiConfig || {};
+    const [executionMode, setExecutionMode] = useState(aiConfig.executionMode === 'manual' ? 'manual' : 'api');
     const [deepseekApiKey, setDeepseekApiKey] = useState(aiConfig.deepseekApiKey || profile?.deepseekApiKey || '');
     const [selectedModel, setSelectedModel] = useState(aiConfig.defaultModel || 'deepseek-v4-flash');
     const [reasoningMode, setReasoningMode] = useState(aiConfig.reasoningMode ?? false);
@@ -76,6 +76,7 @@ const SettingsView = () => {
     useEffect(() => {
         if (profile) {
             const cfg = profile.aiConfig || {};
+            setExecutionMode(cfg.executionMode === 'manual' ? 'manual' : 'api');
             setDeepseekApiKey(cfg.deepseekApiKey || profile.deepseekApiKey || '');
             setSelectedModel(cfg.defaultModel || 'deepseek-v4-flash');
             setReasoningMode(cfg.reasoningMode ?? false);
@@ -121,6 +122,7 @@ const SettingsView = () => {
                 await updateProfileRef.current({
                     aiConfig: {
                         ...profileConfigRef.current,
+                        executionMode,
                         deepseekApiKey,
                         defaultModel: selectedModel,
                         reasoningMode,
@@ -145,7 +147,7 @@ const SettingsView = () => {
         return () => {
             if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
         };
-    }, [deepseekApiKey, reasoningMode, reasoningEffort, selectedModel, inputTokenCost, outputTokenCost, geminiApiKey, narradorVoice, narradorSpeed, narradorTone, geminiLiveModel, narradorAutoContinue]);
+    }, [executionMode, deepseekApiKey, reasoningMode, reasoningEffort, selectedModel, inputTokenCost, outputTokenCost, geminiApiKey, narradorVoice, narradorSpeed, narradorTone, geminiLiveModel, narradorAutoContinue]);
     
     // Export States
     const [exportFormat, setExportFormat] = useState('pdf');
@@ -165,6 +167,10 @@ const SettingsView = () => {
     const handleExport = async () => {
         setIsExporting(true);
         try {
+            // Los exportadores PDF/DOCX son dependencias pesadas y ajenas a la
+            // configuración. Se cargan solo al exportar para que abrir Ajustes
+            // no dependa de la caché de jsPDF, docx, html-to-text o file-saver.
+            const { default: ExportService } = await import('../services/ExportService');
             const includeMaster = exportScope === 'master' || exportScope === 'master_only';
             const includeManuscript = exportScope !== 'master_only';
 
@@ -224,10 +230,11 @@ const SettingsView = () => {
         setIsIdentityModalOpen(false);
     };
 
-    const handleCopyMasterDoc = () => {
+    const handleCopyMasterDoc = async () => {
         try {
+            const { default: ExportService } = await import('../services/ExportService');
             const text = ExportService.getMasterDocText(activeBook, characters, worldItems);
-            navigator.clipboard.writeText(text);
+            await navigator.clipboard.writeText(text);
             toast.success("¡Biblia copiada al portapapeles!");
         } catch (error) {
             console.error("Copy failed:", error);
@@ -522,6 +529,15 @@ const SettingsView = () => {
                             </div>
 
                             <div className="space-y-5 my-6">
+                                <div>
+                                    <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Modo de ejecución</p>
+                                    <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[var(--border-main)] bg-[var(--bg-app)] p-1.5">
+                                        <button type="button" onClick={() => setExecutionMode('api')} aria-pressed={executionMode === 'api'} className={`rounded-xl px-3 py-3 text-left transition-colors ${executionMode === 'api' ? 'bg-indigo-600 text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}><span className="flex items-center gap-2 text-xs font-black"><Zap size={15} /> API automática</span><span className={`mt-1 block text-[9px] leading-relaxed ${executionMode === 'api' ? 'text-indigo-100' : ''}`}>Envía y recibe directamente desde DeepSeek.</span></button>
+                                        <button type="button" onClick={() => setExecutionMode('manual')} aria-pressed={executionMode === 'manual'} className={`rounded-xl px-3 py-3 text-left transition-colors ${executionMode === 'manual' ? 'bg-violet-600 text-white shadow-md' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-main)]'}`}><span className="flex items-center gap-2 text-xs font-black"><Copy size={15} /> Prompt manual</span><span className={`mt-1 block text-[9px] leading-relaxed ${executionMode === 'manual' ? 'text-violet-100' : ''}`}>Copia el prompt y permite pegar la respuesta.</span></button>
+                                    </div>
+                                    {executionMode === 'manual' && <p className="mt-2 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-[10px] leading-relaxed text-[var(--text-muted)]"><strong className="text-violet-600 dark:text-violet-400">Modo manual activo:</strong> IA Studio y sus herramientas pausarán cada solicitud en un panel de intercambio. El Narrador seguirá usando Gemini Live.</p>}
+                                </div>
+
                                 {/* Step 1: API Key de DeepSeek */}
                                 <div>
                                     <div className="flex items-center gap-2 mb-2">
