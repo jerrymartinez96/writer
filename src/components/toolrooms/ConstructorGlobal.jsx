@@ -9,7 +9,7 @@ import { buildMissionDocuments, mergeLoadedMissionChapters, MISSION_SCOPES, MISS
 import { executeOperationsWithRollback, prepareOperations, validateOperationAgainstDocument } from '../../services/ai-next/MissionExecutionService';
 import { saveMissionHistoryEntry } from '../../services/ai-next/MissionHistoryService';
 import { saveEntitySnapshot } from '../../services/db';
-import { saveLocalSnapshot } from '../../services/localDb';
+import { getLocalSnapshotKey, saveLocalSnapshot } from '../../services/localDb';
 
 const DEFAULT_CONSTRAINTS = { preserveCanon: true, preserveStyle: true, noAutomaticWrites: true, preserveEnding: true };
 const TYPES = [
@@ -121,7 +121,7 @@ const ConstructorGlobal = () => {
     };
     const writeDocument = async (document, content, trigger) => {
         await saveEntitySnapshot(activeBook.id, document.type === 'chapter' ? 'chapters' : document.type === 'character' ? 'characters' : 'world', document.id, document.content, trigger);
-        if (document.type === 'chapter') { await updateChapter(document.id, { content }, { immediate: true }); await saveLocalSnapshot(document.id, content, trigger); }
+        if (document.type === 'chapter') { await updateChapter(document.id, { content }, { immediate: true }); await saveLocalSnapshot(getLocalSnapshotKey(activeBook.id, document.id), content, trigger); }
         else if (document.type === 'character') await updateCharacter(document.id, { description: content }, { immediate: true });
         else await updateWorldItem(document.id, { content }, { immediate: true });
     };

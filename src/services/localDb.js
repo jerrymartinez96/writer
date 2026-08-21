@@ -3,6 +3,8 @@ import { compressData, decompressData } from './compression';
 
 export const localDb = new Dexie('WriterLocalDB');
 
+export const getLocalSnapshotKey = (bookId, documentId) => `${bookId || 'legacy'}:${documentId}`;
+
 // ... (schema stays same)
 localDb.version(1).stores({
     lightweightBackups: '++id, chapterId, createdAt, expiresAt'

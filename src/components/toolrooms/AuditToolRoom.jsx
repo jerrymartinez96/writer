@@ -9,7 +9,7 @@ import useToolRoomLaunch from './useToolRoomLaunch';
 import { requestGlobalConsistencyAnalysis } from '../../services/ai-next/ToolRoomAIService';
 import { applyPlainTextPatch } from '../../services/ai-next/plainText';
 import { saveEntitySnapshot } from '../../services/db';
-import { saveLocalSnapshot } from '../../services/localDb';
+import { getLocalSnapshotKey, saveLocalSnapshot } from '../../services/localDb';
 
 const AUDIT_FOCUSES = [
     ['full', 'Auditoría integral'],
@@ -283,7 +283,7 @@ const AuditToolRoom = () => {
         try {
             const collection = target.type === 'chapter' ? 'chapters' : target.type === 'worldItem' ? 'world' : 'characters';
             await saveEntitySnapshot(activeBook.id, collection, target.id, target.content, 'before-audit-resolution');
-            if (target.type === 'chapter') { await updateChapter(target.id, { content: nextContent }, { immediate: true }); await saveLocalSnapshot(target.id, nextContent, 'audit-resolution'); }
+            if (target.type === 'chapter') { await updateChapter(target.id, { content: nextContent }, { immediate: true }); await saveLocalSnapshot(getLocalSnapshotKey(activeBook.id, target.id), nextContent, 'audit-resolution'); }
             else if (target.type === 'worldItem') await updateWorldItem(target.id, { content: nextContent }, { immediate: true });
             else await updateCharacter(target.id, { description: nextContent }, { immediate: true });
             setDocuments((previous) => previous.map((document) => document.id === target.id ? { ...document, content: nextContent } : document));

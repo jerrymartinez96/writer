@@ -5,7 +5,7 @@ import { useToolRooms } from '../../context/ToolRoomContext';
 import ToolRoomAIProposal from './ToolRoomAIProposal';
 import { getStructureSourceHash, requestChapterStructureAnalysis } from '../../services/ai-next/ToolRoomAIService';
 import { saveEntitySnapshot, updateChapterContent } from '../../services/db';
-import { saveLocalSnapshot } from '../../services/localDb';
+import { getLocalSnapshotKey, saveLocalSnapshot } from '../../services/localDb';
 import { toEditorHtml } from '../../services/ai-next/plainText';
 
 const SIZE_OPTIONS = [
@@ -111,12 +111,12 @@ const ChapterWriter = ({ state, updateRoomState, worldItems, chapters, character
             if (!target?.id) throw new Error('No se pudo crear el capítulo.');
             if (selectedEmptyChapter) {
                 const previousContent = target.content || '';
-                await saveLocalSnapshot(target.id, previousContent, 'before-toolroom-cowriter-structure');
+                await saveLocalSnapshot(getLocalSnapshotKey(activeBook.id, target.id), previousContent, 'before-toolroom-cowriter-structure');
                 await saveCloudSnapshotBestEffort(activeBook.id, target.id, previousContent, 'before-toolroom-cowriter-structure');
                 await updateChapterContent(activeBook.id, target.id, editorContent);
             }
             await saveCloudSnapshotBestEffort(activeBook.id, target.id, editorContent, 'toolroom-cowriter-structure');
-            await saveLocalSnapshot(target.id, editorContent, 'toolroom-cowriter-structure');
+            await saveLocalSnapshot(getLocalSnapshotKey(activeBook.id, target.id), editorContent, 'toolroom-cowriter-structure');
             await selectChapter(target);
             completeMission('creative-studio');
             updateRoomState('creative-studio', { chapterId: target.id, missionStatus: 'completed', lastProposalSummary: proposal.summary, designer: { ...(state.designer || {}), writingStructure: JSON.stringify(planDraft) } });

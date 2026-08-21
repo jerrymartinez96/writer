@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Copy, Expand, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Expand, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { requestChapterDraft, requestChapterFormatting, requestToolRoomProposal } from '../../services/ai-next/ToolRoomAIService';
 import SanitizedContentPreview from './SanitizedContentPreview';
@@ -61,7 +61,14 @@ const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', context
     };
 
     const busy = status === 'loading' || status === 'saving';
-    const updateReplacement = (replacement) => setProposal((current) => current ? { ...current, replacement } : current);
+    const updateReplacement = (replacement) => setProposal((current) => {
+        if (!current) return current;
+        const wordCount = replacement.trim().split(/\s+/).filter(Boolean).length;
+        const sizeWarning = current.maximumWords && wordCount > current.maximumWords
+            ? `La propuesta tiene ${wordCount.toLocaleString()} palabras y supera el objetivo orientativo de ${current.maximumWords.toLocaleString()}. Puedes recortarla o aprobarla completa.`
+            : '';
+        return { ...current, replacement, wordCount, sizeWarning };
+    });
     const copyProposal = async () => {
         if (!proposal?.replacement || !navigator.clipboard) return;
         await navigator.clipboard.writeText(proposal.replacement);
@@ -105,6 +112,7 @@ const ToolRoomAIProposal = ({ roomName, instruction, sourceContent = '', context
             )}
 
             {proposal?.summary && <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{proposal.summary}</p>}
+            {proposal?.sizeWarning && <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300"><AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{proposal.sizeWarning}</span></div>}
             {error && <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-600">{error}</div>}
 
             {isExpanded && proposal && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setIsExpanded(false)}><div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-[var(--border-main)] bg-[var(--bg-editor)] shadow-2xl" role="dialog" aria-modal="true" aria-label="Propuesta completa"><div className="flex items-center justify-between gap-3 border-b border-[var(--border-main)] p-5"><div><p className="text-[9px] font-black uppercase tracking-[0.16em] text-[var(--accent-main)]">Revisión ampliada</p><h3 className="mt-1 text-xl font-serif font-black">{roomName}</h3></div><div className="flex items-center gap-2"><button type="button" onClick={copyProposal} className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-main)] px-3 py-2 text-xs font-black"><Copy size={14} /> Copiar</button><button type="button" onClick={() => setIsExpanded(false)} className="rounded-xl p-2 text-[var(--text-muted)] hover:bg-[var(--accent-soft)]" aria-label="Cerrar"><X size={18} /></button></div></div><textarea value={proposal.replacement} onChange={(event) => updateReplacement(event.target.value)} className="min-h-[55vh] flex-1 resize-none bg-[var(--bg-app)] p-6 font-serif text-base leading-8 outline-none" /><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-main)] p-4"><span className="text-xs text-[var(--text-muted)]">{proposal.replacement.split(/\s+/).filter(Boolean).length.toLocaleString()} palabras · Puedes editar antes de aprobar.</span><button type="button" onClick={() => setIsExpanded(false)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white"><Check size={14} /> Terminar revisión</button></div></div></div>}

@@ -20,6 +20,24 @@ const TEST_TOOL = {
     },
 };
 
+const CHAPTER_TOOL = {
+    type: 'function',
+    function: {
+        name: 'redactar_capitulo_desde_estructura',
+        parameters: {
+            type: 'object',
+            properties: {
+                summary: { type: 'string' },
+                replacement: { type: 'string' },
+                wordCount: { type: 'number' },
+                usedScenes: { type: 'array', items: { type: 'number' } },
+                risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+            },
+            required: ['summary', 'replacement', 'wordCount', 'usedScenes', 'risk'],
+        },
+    },
+};
+
 describe('ManualAIRequestService', () => {
     afterEach(() => resetManualAIRequestsForTests());
 
@@ -66,5 +84,32 @@ describe('ManualAIRequestService', () => {
 
         await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
         expect(getActiveManualAIRequest()).toBeNull();
+    });
+
+    it('adapts a chapter pasted as plain text and derives its metadata', async () => {
+        const pending = requestManualAIResponse('Redacta el capítulo', { responseMode: 'tool', tools: [CHAPTER_TOOL] });
+        const request = getActiveManualAIRequest();
+
+        submitManualAIResponse(request.id, 'Elena abrió la puerta.\n\nNadie respondió.');
+
+        await expect(pending).resolves.toBe(JSON.stringify({
+            replacement: 'Elena abrió la puerta.\n\nNadie respondió.',
+            summary: 'Respuesta manual preparada para revisión.',
+            wordCount: 6,
+            usedScenes: [],
+            risk: 'medium',
+        }));
+    });
+
+    it('unwraps a tool response and repairs common chapter field aliases', async () => {
+        const pending = requestManualAIResponse('Redacta el capítulo', { responseMode: 'tool', tools: [CHAPTER_TOOL] });
+        const request = getActiveManualAIRequest();
+
+        submitManualAIResponse(request.id, JSON.stringify({
+            name: 'redactar_capitulo_desde_estructura',
+            arguments: JSON.stringify({ chapter: 'Una sombra cruzó el patio.' }),
+        }));
+
+        await expect(pending).resolves.toContain('"replacement":"Una sombra cruzó el patio."');
     });
 });

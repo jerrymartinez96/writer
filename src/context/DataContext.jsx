@@ -49,6 +49,11 @@ const detectSignificantChange = (oldHtml, newHtml) => {
     return diffPercent > 0.15;
 };
 
+// Los documentos del Master Doc usan IDs fijos (por ejemplo,
+// `system_estructura`) dentro de cada libro. Toda memoria efímera y cada
+// snapshot local deben añadir el libro para no mezclar esos documentos.
+const getBookScopedKey = (bookId, documentId) => `${bookId || 'legacy'}:${documentId}`;
+
 const DataContext = createContext();
 
 // Only for local UI review. It is opt-in, development-only and never enabled in production.
@@ -110,8 +115,10 @@ export const DataProvider = ({ children }) => {
     const [activeView, setActiveView] = useState('editor'); // 'editor', 'characters', 'world', 'settings'
     const [loading, setLoading] = useState(() => !visualReviewMode);
     const [lastSaved, setLastSaved] = useState(new Date());
-    const lastMajorBackupContentRef = useRef({}); // { chapterId: string }
-    const lastCloudContentRef = useRef({}); // { chapterId: string }
+    const lastMajorBackupContentRef = useRef({}); // { `${bookId}:${documentId}`: string }
+    const lastCloudContentRef = useRef({}); // { `${bookId}:${documentId}`: string }
+    const bookLoadRequestRef = useRef(0);
+    const activeBookIdRef = useRef(activeBook?.id || null);
     const activeChapterRef = useRef(activeChapter);
     const selectBookRef = useRef(null);
     activeChapterRef.current = activeChapter;
@@ -215,13 +222,13 @@ export const DataProvider = ({ children }) => {
                 setBooks(fetchedBooks);
                 
                 // RESTORE PERSISTENCE: Check if there's a saved book to auto-select
-                const savedBookId = localStorage.getItem('lastBookId');
-                if (savedBookId) {
-                    const savedBook = fetchedBooks.find(b => b.id === savedBookId);
-                    if (savedBook) {
-                        selectBookRef.current?.(savedBook);
+                    const savedBookId = localStorage.getItem('lastBookId');
+                    if (savedBookId) {
+                        const savedBook = fetchedBooks.find(b => b.id === savedBookId);
+                        if (savedBook) {
+                            await selectBookRef.current?.(savedBook);
+                        }
                     }
-                }
             } catch (error) {
                 console.error("Failed to load books from Firestore", error);
             } finally {
@@ -241,7 +248,8 @@ export const DataProvider = ({ children }) => {
 
         const unsubscribe = subscribeToChapter(activeBookId, activeChapterId, (cloudData) => {
             const currentChapter = activeChapterRef.current;
-            const saveKey = `chap_${currentChapter.id}`;
+            const documentKey = getBookScopedKey(activeBookId, currentChapter.id);
+            const saveKey = `chap_${documentKey}`;
             const hasPendingSave = !!pendingSaves.current[saveKey];
 
             // 1. Handle Content Sync
@@ -249,7 +257,7 @@ export const DataProvider = ({ children }) => {
                 const safeContent = sanitizeHtml(cloudData.content);
                 setActiveChapter(prev => ({ ...prev, ...cloudData, content: safeContent, isLoaded: true }));
                 setChapters(prev => prev.map(ch => ch.id === cloudData.id ? { ...cloudData, content: safeContent, isLoaded: true } : ch));
-                lastCloudContentRef.current[cloudData.id] = cloudData.content;
+                lastCloudContentRef.current[getBookScopedKey(activeBookId, cloudData.id)] = cloudData.content;
                 setLastSaved(new Date());
             }
 
@@ -270,8 +278,27 @@ export const DataProvider = ({ children }) => {
     }, [activeBookId, activeChapterId, sessionId, sanitizeHtml]);
 
     const handleSelectBook = async (book) => {
-        await flushAllSaves();
+        const requestId = bookLoadRequestRef.current + 1;
+        bookLoadRequestRef.current = requestId;
+        activeBookIdRef.current = book?.id || null;
+
+        // Invalidar de inmediato la vista anterior. Así nunca se presenta la
+        // estructura del libro previo mientras llega la nueva respuesta.
+        setActiveChapter(null);
+        setActiveWorldDoc(null);
+        setChapters([]);
+        setCharacters([]);
+        setWorldItems([]);
+        setTrashItems([]);
+        setChapterLock({ isLocked: false, activeEditorId: null, deviceName: 'Esta computadora' });
+        setSyncConflict(null);
+        lastMajorBackupContentRef.current = {};
+        lastCloudContentRef.current = {};
         setActiveBook(book);
+        setLoading(Boolean(book));
+
+        await flushAllSaves();
+        if (bookLoadRequestRef.current !== requestId) return;
         
         if (book) {
             localStorage.setItem('lastBookId', book.id);
@@ -280,16 +307,12 @@ export const DataProvider = ({ children }) => {
         }
         
         if (!book) {
-            setChapters([]);
-            setActiveChapter(null);
-            setCharacters([]);
-            setWorldItems([]);
-            setTrashItems([]);
             setLoading(false);
             return;
         }
 
         if (visualReviewMode) {
+            if (bookLoadRequestRef.current !== requestId) return;
             setChapters(VISUAL_REVIEW_CHAPTERS);
             setActiveChapter(VISUAL_REVIEW_CHAPTERS[0]);
             setCharacters(VISUAL_REVIEW_CHARACTERS);
@@ -300,10 +323,10 @@ export const DataProvider = ({ children }) => {
             return;
         }
 
-        setLoading(true);
         try {
             // Load Chapters Metadata (Optimized initial load)
             const allChapters = await getChaptersMetadata(book.id);
+            if (bookLoadRequestRef.current !== requestId || activeBookIdRef.current !== book.id) return;
             const fetchedChapters = allChapters.filter(c => !c.deletedAt);
             const trashChaps = allChapters.filter(c => c.deletedAt).map(c => ({ ...c, collectionType: 'chapters' }));
             setChapters(fetchedChapters);
@@ -319,6 +342,7 @@ export const DataProvider = ({ children }) => {
 
             // Load Characters
             const allCharacters = await getCharacters(book.id);
+            if (bookLoadRequestRef.current !== requestId || activeBookIdRef.current !== book.id) return;
             const fetchedCharacters = allCharacters.filter(c => !c.deletedAt);
             const trashChars = allCharacters.filter(c => c.deletedAt).map(c => ({ ...c, collectionType: 'characters' }));
             setCharacters(fetchedCharacters);
@@ -326,6 +350,7 @@ export const DataProvider = ({ children }) => {
             // Load World Items. `system_personajes` is a legacy document and is
             // intentionally excluded: characters live in the characters collection.
             const allWorldItems = await getWorld(book.id);
+            if (bookLoadRequestRef.current !== requestId || activeBookIdRef.current !== book.id) return;
             let fetchedWorldItems = allWorldItems.filter(i => !i.deletedAt && i.id !== 'system_personajes');
             const trashWorlds = allWorldItems.filter(i => i.deletedAt && i.id !== 'system_personajes').map(c => ({ ...c, collectionType: 'world' }));
 
@@ -352,6 +377,7 @@ export const DataProvider = ({ children }) => {
                     }
                 }
             }
+            if (bookLoadRequestRef.current !== requestId || activeBookIdRef.current !== book.id) return;
             fetchedWorldItems = updatedFetchedItems;
             setWorldItems(fetchedWorldItems);
 
@@ -361,9 +387,10 @@ export const DataProvider = ({ children }) => {
             // Default view
             setActiveView('editor');
         } catch (error) {
+            if (bookLoadRequestRef.current !== requestId || activeBookIdRef.current !== book.id) return;
             console.error("Failed to fully load book data", error);
         } finally {
-            setLoading(false);
+            if (bookLoadRequestRef.current === requestId && activeBookIdRef.current === book.id) setLoading(false);
         }
     };
     selectBookRef.current = handleSelectBook;
@@ -427,11 +454,7 @@ export const DataProvider = ({ children }) => {
             await deleteBookApi(bookId);
             const remainingBooks = books.filter(b => b.id !== bookId);
             setBooks(remainingBooks);
-            if (remainingBooks.length > 0) {
-                handleSelectBook(remainingBooks[0]);
-            } else {
-                setActiveBook(null);
-            }
+            await handleSelectBook(remainingBooks[0] || null);
         } catch (error) {
             console.error("Failed to delete book", error);
         }
@@ -456,7 +479,7 @@ export const DataProvider = ({ children }) => {
 
     const handleGetDocumentSnapshots = async (documentId) => {
         try {
-            return await getLocalSnapshots(documentId);
+            return await getLocalSnapshots(getBookScopedKey(activeBook?.id, documentId));
         } catch (error) {
             console.error("Failed to get document snapshots", error);
             return [];
@@ -465,7 +488,7 @@ export const DataProvider = ({ children }) => {
 
     const handleSaveDocumentSnapshot = async (documentId, content, triggerType = 'manual') => {
         try {
-            await saveLocalSnapshot(documentId, content, triggerType);
+            await saveLocalSnapshot(getBookScopedKey(activeBook?.id, documentId), content, triggerType);
             return true;
         } catch (error) {
             console.error("Failed to save document snapshot", error);
@@ -523,7 +546,7 @@ export const DataProvider = ({ children }) => {
             }
         }
 
-        const saveKey = `chap_meta_${chapterId}`;
+        const saveKey = `chap_meta_${getBookScopedKey(activeBook.id, chapterId)}`;
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
@@ -575,7 +598,7 @@ export const DataProvider = ({ children }) => {
 
     const finalizeChapterCleanup = async (chapterId) => {
         try {
-            await deleteAllLocalSnapshots(chapterId);
+            await deleteAllLocalSnapshots(getBookScopedKey(activeBook?.id, chapterId));
             return true;
         } catch (error) {
             console.error("Cleanup failed", error);
@@ -604,7 +627,9 @@ export const DataProvider = ({ children }) => {
 
 
     const handleSelectChapter = async (chapter, bookIdOverride = null) => {
+        const selectionRequestId = bookLoadRequestRef.current;
         await flushAllSaves();
+        if (bookLoadRequestRef.current !== selectionRequestId) return;
 
         const chapterReference = typeof chapter === 'string'
             ? chapters.find((item) => item.id === chapter)
@@ -625,6 +650,7 @@ export const DataProvider = ({ children }) => {
         if (chapterReference && !chapterReference.isLoaded && bookId) {
             try {
                 const fullChapter = await getChapter(bookId, chapterReference.id);
+                if (bookLoadRequestRef.current !== selectionRequestId || activeBookIdRef.current !== bookId) return;
                 if (fullChapter) {
                     const safeContent = sanitizeHtml(fullChapter.content);
                     chapterToActivate = { ...fullChapter, content: safeContent, isLoaded: true };
@@ -635,21 +661,25 @@ export const DataProvider = ({ children }) => {
                 console.error("Lazy loading failed, using metadata-only chapter", error);
             }
         }
+
+        if (bookLoadRequestRef.current !== selectionRequestId || activeBookIdRef.current !== bookId) return;
         
         setActiveChapter(chapterToActivate);
         setActiveWorldDoc(null); // Clear any active world doc when selecting a chapter
         
         if (chapterToActivate && chapterToActivate.id) {
-            lastCloudContentRef.current[chapterToActivate.id] = chapterToActivate.content;
-            lastMajorBackupContentRef.current[chapterToActivate.id] = chapterToActivate.content;
+            const documentKey = getBookScopedKey(bookId, chapterToActivate.id);
+            lastCloudContentRef.current[documentKey] = chapterToActivate.content;
+            lastMajorBackupContentRef.current[documentKey] = chapterToActivate.content;
             
             // Baseline Snapshot: if history is empty but document has content, save initial state
             const docId = chapterToActivate.id;
             const docContent = chapterToActivate.content || '';
             if (docContent && docContent !== '<p></p>') {
-                getLocalSnapshots(docId).then(async (snaps) => {
+                const snapshotKey = getBookScopedKey(bookId, docId);
+                getLocalSnapshots(snapshotKey).then(async (snaps) => {
                     if (snaps.length === 0) {
-                        await saveLocalSnapshot(docId, docContent, 'auto');
+                        await saveLocalSnapshot(snapshotKey, docContent, 'auto');
                     }
                 }).catch(err => console.error("Failed to save baseline snapshot", err));
             }
@@ -726,7 +756,7 @@ export const DataProvider = ({ children }) => {
             return true;
         }
 
-        const saveKey = `char_${charId}`;
+        const saveKey = `char_${getBookScopedKey(activeBook.id, charId)}`;
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
@@ -774,14 +804,15 @@ export const DataProvider = ({ children }) => {
         if (!item) return;
         setActiveChapter(null);
         setActiveWorldDoc({ id: item.id, title: item.title, content: item.content || '', type: 'worldItem' });
-        lastMajorBackupContentRef.current[item.id] = item.content || '';
+        const documentKey = getBookScopedKey(activeBook?.id, item.id);
+        lastMajorBackupContentRef.current[documentKey] = item.content || '';
         
         // Baseline Snapshot: if history is empty but document has content, save initial state
         const docContent = item.content || '';
         if (docContent && docContent !== '<p></p>') {
-            getLocalSnapshots(item.id).then(async (snaps) => {
+            getLocalSnapshots(documentKey).then(async (snaps) => {
                 if (snaps.length === 0) {
-                    await saveLocalSnapshot(item.id, docContent, 'auto');
+                    await saveLocalSnapshot(documentKey, docContent, 'auto');
                 }
             }).catch(err => console.error("Failed to save baseline snapshot", err));
         }
@@ -801,14 +832,15 @@ export const DataProvider = ({ children }) => {
             type: 'character',
             role: char.role || ''
         });
-        lastMajorBackupContentRef.current[char.id] = char.description || '';
+        const documentKey = getBookScopedKey(activeBook?.id, char.id);
+        lastMajorBackupContentRef.current[documentKey] = char.description || '';
         
         // Baseline Snapshot: if history is empty but document has content, save initial state
         const docContent = char.description || '';
         if (docContent && docContent !== '<p></p>') {
-            getLocalSnapshots(char.id).then(async (snaps) => {
+            getLocalSnapshots(documentKey).then(async (snaps) => {
                 if (snaps.length === 0) {
-                    await saveLocalSnapshot(char.id, docContent, 'auto');
+                    await saveLocalSnapshot(documentKey, docContent, 'auto');
                 }
             }).catch(err => console.error("Failed to save baseline snapshot", err));
         }
@@ -830,7 +862,8 @@ export const DataProvider = ({ children }) => {
             setWorldItems(prev => prev.map(item => item.id === docId ? { ...item, content: html } : item));
         }
 
-        const saveKey = `worlddoc_${docId}`;
+        const documentKey = getBookScopedKey(bookId, docId);
+        const saveKey = `worlddoc_${documentKey}`;
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
@@ -847,21 +880,23 @@ export const DataProvider = ({ children }) => {
                     }
                     
                     // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
-                    const lastMajor = lastMajorBackupContentRef.current[docId];
+                    const lastMajor = lastMajorBackupContentRef.current[documentKey];
                     const hasRealDifference = lastMajor !== undefined ? lastMajor !== html : true;
                     
                     if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', html))) {
-                        await saveLocalSnapshot(docId, html, triggerType);
-                        lastMajorBackupContentRef.current[docId] = html;
+                        await saveLocalSnapshot(documentKey, html, triggerType);
+                        lastMajorBackupContentRef.current[documentKey] = html;
                     }
                 }
+                return true;
             } catch (error) {
                 console.error('Failed to save world doc content', error);
+                return false;
             }
         };
 
         if (triggerType === 'ia') {
-            fn(true);
+            return fn(true);
         } else {
             pendingSaves.current[saveKey] = {
                 timeoutId: setTimeout(fn, 1500),
@@ -895,7 +930,7 @@ export const DataProvider = ({ children }) => {
             return true;
         }
 
-        const saveKey = `world_${itemId}`;
+        const saveKey = `world_${getBookScopedKey(activeBook.id, itemId)}`;
         if (pendingSaves.current[saveKey]) {
             clearTimeout(pendingSaves.current[saveKey].timeoutId);
         }
@@ -1002,7 +1037,8 @@ export const DataProvider = ({ children }) => {
             return;
         }
 
-        const saveKey = `chap_${activeChapter.id}`;
+        const documentKey = getBookScopedKey(activeBook.id, activeChapter.id);
+        const saveKey = `chap_${documentKey}`;
         
         // Cancel existing timer
         if (pendingSaves.current[saveKey]) {
@@ -1013,7 +1049,7 @@ export const DataProvider = ({ children }) => {
         const chapId = activeChapter.id;
 
         // Dirty Checking: If content is same as last cloud save, only save locally
-        const isDirty = lastCloudContentRef.current[chapId] !== content;
+        const isDirty = lastCloudContentRef.current[documentKey] !== content;
         
         if (!isDirty) {
             return;
@@ -1045,28 +1081,30 @@ export const DataProvider = ({ children }) => {
                 
                 setActiveChapter(prev => ({ ...prev, lastSyncToken: newToken }));
                 setChapters(prev => prev.map(ch => ch.id === chapId ? { ...ch, lastSyncToken: newToken } : ch));
-                lastCloudContentRef.current[chapId] = content;
+                lastCloudContentRef.current[documentKey] = content;
                 setSyncConflict(null);
 
                 // Guardar punto de control local de forma automática en IndexedDB (si es flush o si hay cambio > 15%)
-                const lastMajor = lastMajorBackupContentRef.current[chapId];
+                const lastMajor = lastMajorBackupContentRef.current[documentKey];
                 const hasRealDifference = lastMajor !== undefined ? lastMajor !== content : true;
                 
                 if (hasRealDifference && (isFlushing || detectSignificantChange(lastMajor || '', content))) {
-                    await saveLocalSnapshot(chapId, content, triggerType);
-                    lastMajorBackupContentRef.current[chapId] = content;
+                    await saveLocalSnapshot(documentKey, content, triggerType);
+                    lastMajorBackupContentRef.current[documentKey] = content;
                 }
 
                 setLastSaved(new Date());
+                return true;
             } catch (error) {
                 if (error?.code === 'SYNC_CONFLICT') setSyncConflict({ chapterId: chapId, message: error.message });
                 console.warn("Cloud sync failed.", error);
+                return false;
             }
         };
 
         // Decide: Normal debounce or Safety Force?
         if (timeElapsed >= safetyLimit || triggerType === 'ia') {
-            fn(true);
+            return fn(true);
         } else {
             pendingSaves.current[saveKey].timeoutId = setTimeout(fn, debounceTime);
             pendingSaves.current[saveKey].fn = fn;
@@ -1101,11 +1139,12 @@ export const DataProvider = ({ children }) => {
         const cloudChapter = await getChapter(activeBook.id, syncConflict.chapterId);
         if (!cloudChapter) throw new Error('No se encontró la versión del capítulo en la nube.');
         const safeChapter = { ...cloudChapter, content: sanitizeHtml(cloudChapter.content), isLoaded: true };
-        delete pendingSaves.current[`chap_${syncConflict.chapterId}`];
-        delete pendingSaves.current[`chap_meta_${syncConflict.chapterId}`];
+        const conflictDocumentKey = getBookScopedKey(activeBook.id, syncConflict.chapterId);
+        delete pendingSaves.current[`chap_${conflictDocumentKey}`];
+        delete pendingSaves.current[`chap_meta_${conflictDocumentKey}`];
         setChapters(prev => prev.map(chapter => chapter.id === safeChapter.id ? safeChapter : chapter));
         if (activeChapter?.id === safeChapter.id) setActiveChapter(safeChapter);
-        lastCloudContentRef.current[safeChapter.id] = cloudChapter.content;
+        lastCloudContentRef.current[getBookScopedKey(activeBook.id, safeChapter.id)] = cloudChapter.content;
         setSyncConflict(null);
         setLastSaved(new Date());
     };

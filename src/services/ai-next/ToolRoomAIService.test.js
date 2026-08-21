@@ -178,6 +178,17 @@ describe('ToolRoomAIService', () => {
         await expect(requestChapterDraft({ profile, title: 'La puerta', sizeLabel: '', contextContent: 'Contexto' })).rejects.toThrow('capítulo truncado');
     });
 
+    it('acepta un capítulo que supera el objetivo orientativo y devuelve una advertencia editable', async () => {
+        const replacement = Array.from({ length: 2600 }, (_, index) => `palabra${index}`).join(' ');
+        AIService.sendMessage.mockResolvedValue(JSON.stringify({ summary: 'Capítulo extenso', replacement, wordCount: 2000, usedScenes: [1], risk: 'low' }));
+
+        const result = await requestChapterDraft({ profile, title: 'Capítulo extenso', sizeLabel: '1,200–2,000 palabras', contextContent: 'Contexto' });
+
+        expect(result.wordCount).toBe(2600);
+        expect(result.maximumWords).toBe(2000);
+        expect(result.sizeWarning).toContain('supera el objetivo orientativo');
+    });
+
     it('formatea un capítulo sin permitir cambios de contenido', async () => {
         AIService.sendMessage.mockResolvedValue(JSON.stringify({ formattedText: 'Primero.\n\n—Hola —dijo Kai.' }));
         const result = await requestChapterFormatting({ profile, text: 'Primero. —Hola —dijo Kai.' });

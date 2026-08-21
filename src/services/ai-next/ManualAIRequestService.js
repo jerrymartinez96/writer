@@ -29,11 +29,92 @@ const formatMessages = (prompt) => {
     }).join('\n\n');
 };
 
+const buildRequiredExample = (schema) => {
+    if (!schema) return null;
+    if (schema.type === 'object') return Object.fromEntries((schema.required || []).map((key) => [key, buildRequiredExample(schema.properties?.[key])]));
+    if (schema.type === 'array') return [];
+    if (schema.type === 'number') return 0;
+    if (schema.type === 'boolean') return false;
+    if (schema.enum?.length) return schema.enum[0];
+    return '';
+};
+
 const buildManualPrompt = (prompt, options = {}) => {
     const basePrompt = formatMessages(prompt);
     const schema = options.tools?.[0];
     if (!schema?.function?.parameters) return basePrompt;
-    return `${basePrompt}\n\n---\nINSTRUCCIÓN DE FORMATO PARA RESPUESTA MANUAL:\nDevuelve únicamente un objeto JSON válido, sin bloques Markdown, comentarios ni texto adicional. Debe cumplir este esquema:\n${JSON.stringify(schema.function.parameters, null, 2)}`;
+    const parameters = schema.function.parameters;
+    const required = parameters.required || [];
+    const example = buildRequiredExample(parameters);
+    return `${basePrompt}\n\n---\nINSTRUCCIÓN DE FORMATO PARA RESPUESTA MANUAL:\nAunque este chat no admita herramientas o function calling, responde con sus argumentos como un objeto JSON en la raíz. No incluyas el nombre de la herramienta, bloques Markdown, comentarios ni texto adicional.\nCampos obligatorios en la raíz: ${required.join(', ') || '(ninguno)'}. Inclúyelos todos; usa [] para listas vacías. No copies este ejemplo literalmente: sustituye sus valores con la respuesta completa.\nEstructura mínima de ejemplo:\n${JSON.stringify(example, null, 2)}\nEsquema que debe cumplirse:\n${JSON.stringify(parameters)}`;
+};
+
+const unwrapStructuredValue = (parsed, schemaName) => {
+    let value = parsed;
+    for (let depth = 0; depth < 4; depth += 1) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) break;
+        if (schemaName && value[schemaName] !== undefined) {
+            value = value[schemaName];
+            continue;
+        }
+        const toolArguments = value.tool_calls?.[0]?.function?.arguments ?? value.function?.arguments ?? value.arguments;
+        if (toolArguments !== undefined) {
+            value = typeof toolArguments === 'string' ? parseStructuredResponse(toolArguments, 'argumentos de herramienta') : toolArguments;
+            continue;
+        }
+        const wrapperKey = ['result', 'response', 'data'].find((key) => value[key] && typeof value[key] === 'object');
+        if (!wrapperKey) break;
+        value = value[wrapperKey];
+    }
+    return value;
+};
+
+const countWords = (value) => String(value || '').trim().split(/\s+/).filter(Boolean).length;
+
+const normalizeRecoverableStructuredValue = (parsed, raw, schema) => {
+    const schemaName = schema?.function?.name || '';
+    const properties = schema?.function?.parameters?.properties || {};
+    let value = unwrapStructuredValue(parsed, schemaName);
+    const acceptsReplacement = properties.replacement?.type === 'string';
+    const acceptsFormattedText = properties.formattedText?.type === 'string';
+
+    if (typeof value === 'string') value = acceptsFormattedText ? { formattedText: value } : acceptsReplacement ? { replacement: value } : value;
+    if ((!value || typeof value !== 'object' || Array.isArray(value)) && (acceptsReplacement || acceptsFormattedText)) {
+        value = acceptsFormattedText ? { formattedText: raw } : { replacement: raw };
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+
+    if (acceptsReplacement && !value.replacement) {
+        const replacementAlias = ['content', 'text', 'chapter', 'chapterText', 'draft', 'output', 'proposal'].find((key) => typeof value[key] === 'string' && value[key].trim());
+        if (replacementAlias) value = { ...value, replacement: value[replacementAlias] };
+    }
+    if (acceptsFormattedText && !value.formattedText) {
+        const textAlias = ['content', 'text', 'output', 'replacement'].find((key) => typeof value[key] === 'string' && value[key].trim());
+        if (textAlias) value = { ...value, formattedText: value[textAlias] };
+    }
+
+    // Estos campos describen el texto y se pueden reconstruir sin inventar
+    // contenido narrativo. Los contratos de auditoría y planificación siguen
+    // validándose de forma estricta.
+    if (typeof value.replacement === 'string' && value.replacement.trim()) {
+        if (properties.summary && value.summary == null) value.summary = 'Respuesta manual preparada para revisión.';
+        if (properties.wordCount && value.wordCount == null) value.wordCount = countWords(value.replacement);
+        if (properties.usedScenes && value.usedScenes == null) value.usedScenes = [];
+        if (properties.risk && value.risk == null) value.risk = 'medium';
+    }
+    return value;
+};
+
+const parseManualStructuredResponse = (value, schema) => {
+    let parsed;
+    try {
+        parsed = parseStructuredResponse(value, 'respuesta manual');
+    } catch (error) {
+        const properties = schema?.function?.parameters?.properties || {};
+        if (!properties.replacement && !properties.formattedText) throw error;
+        parsed = value;
+    }
+    return normalizeRecoverableStructuredValue(parsed, value, schema);
 };
 
 const makeAbortError = () => {
@@ -103,8 +184,9 @@ export const validateManualAIResponse = (requestId, response) => {
     if (!value) throw new Error('Pega la respuesta de la IA antes de continuar.');
 
     if (activeRequest.schema) {
-        const parsed = parseStructuredResponse(value, 'respuesta manual');
+        const parsed = parseManualStructuredResponse(value, activeRequest.schema);
         validateStructuredResponse(parsed, activeRequest.schema, 'respuesta manual');
+        return JSON.stringify(parsed);
     } else if (activeRequest.responseMode === 'json') {
         parseStructuredResponse(value, 'respuesta manual');
     }

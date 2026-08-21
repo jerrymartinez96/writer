@@ -230,16 +230,22 @@ export const requestChapterDraft = async ({ profile, title = '', plan = null, st
     }
     const wordCount = replacement.split(/\s+/).filter(Boolean).length;
     const sizeMatch = String(sizeLabel).match(/(\d[\d,]*)\s*[–-]\s*(\d[\d,]*)/);
+    let minimumWords = null;
+    let maximumWords = null;
+    let sizeWarning = '';
     if (sizeMatch) {
-        const minimum = Number(sizeMatch[1].replace(/,/g, ''));
-        const maximum = Number(sizeMatch[2].replace(/,/g, ''));
-        if (wordCount < minimum * 0.55) throw new Error(`La propuesta es demasiado corta: ${wordCount.toLocaleString()} de ${minimum.toLocaleString()} palabras mínimas esperadas.`);
-        if (wordCount > maximum * 1.25) throw new Error(`La propuesta supera el tamaño elegido: ${wordCount.toLocaleString()} de ${maximum.toLocaleString()} palabras máximas orientativas.`);
+        minimumWords = Number(sizeMatch[1].replace(/,/g, ''));
+        maximumWords = Number(sizeMatch[2].replace(/,/g, ''));
+        if (wordCount < minimumWords * 0.55) throw new Error(`La propuesta es demasiado corta: ${wordCount.toLocaleString()} de ${minimumWords.toLocaleString()} palabras mínimas esperadas.`);
+        if (wordCount > maximumWords) sizeWarning = `La propuesta tiene ${wordCount.toLocaleString()} palabras y supera el objetivo orientativo de ${maximumWords.toLocaleString()}. Puedes recortarla o aprobarla completa.`;
     }
     return {
         summary: String(parsed.summary || 'Capítulo generado desde la estructura aprobada.'),
         replacement,
-        wordCount: Number(parsed.wordCount) || wordCount,
+        wordCount,
+        minimumWords,
+        maximumWords,
+        sizeWarning,
         usedScenes: Array.isArray(parsed.usedScenes) ? parsed.usedScenes.map(Number).filter(Number.isFinite) : [],
         risk: ['low', 'medium', 'high'].includes(parsed.risk) ? parsed.risk : 'medium',
     };

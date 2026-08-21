@@ -1,6 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Copy, ClipboardPaste, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft, Bookmark } from 'lucide-react'
+import { Copy, ClipboardPaste, Loader2, Maximize2, ScanSearch, ChevronLeft, ChevronRight, Info, X, Tag, History, BookOpen, Settings, Wind, Keyboard, MessageSquarePlus, Sparkles, Trash2, Pencil, Volume2, Pause, Play, Square, Lock, Unlock, Check, Languages, Plus, FileAudio, MoreHorizontal, Sliders, ChevronDown, Users, Folder, Layers, AlignLeft, Bookmark } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import { mergeAttributes } from '@tiptap/react'
 import Modal from './Modal'
@@ -14,6 +14,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Focus from '@tiptap/extension-focus'
 import createSuggestion from './MentionSuggestionConfig'
 import FinalizeModal from './FinalizeModal'
+import { buildEditorClipboardText, clipboardTextToEditorHtml } from '../services/ai/editorClipboard'
 
 // Isolated Extensions & Modals Imports
 import { CharacterMention, InlineNote, GhostMention } from './editor/extensions/customMarks'
@@ -40,6 +41,7 @@ const Editor = () => {
     const [readingWidth, setReadingWidth] = useState('md');
     const [readingTextSize, setReadingTextSize] = useState('base');
     const [copied, setCopied] = useState(false);
+    const [isReplacingFromClipboard, setIsReplacingFromClipboard] = useState(false);
     const [copyMode, setCopyMode] = useState('text');
 
     const [isDetectionModalOpen, setIsDetectionModalOpen] = useState(false);
@@ -262,8 +264,12 @@ const Editor = () => {
         }
     };
 
-    const handleCopyToClipboard = () => {
-        if (!editor || !activeChapter) return;
+    const handleCopyToClipboard = async () => {
+        const activeDocument = activeChapter || activeWorldDoc;
+        if (!editor || !activeDocument) {
+            toast.info('No hay un documento abierto para copiar.');
+            return false;
+        }
 
         const itemLabels = {};
         let volCount = 1;
@@ -285,56 +291,71 @@ const Editor = () => {
             });
         }
 
-        const chapterPrefix = itemLabels[activeChapter.id] || '';
+        const chapterPrefix = activeChapter ? itemLabels[activeChapter.id] || '' : '';
+        const title = activeChapter?.title || activeWorldDoc?.title || activeWorldDoc?.name || '';
+        const textToCopy = buildEditorClipboardText({ mode: copyMode, title, prefix: chapterPrefix, text: editor.getText() });
 
-        let textToCopy = '';
-        if (copyMode === 'title') {
-            textToCopy = `${chapterPrefix}${activeChapter.title || ''}`;
-        } else if (copyMode === 'text') {
-            textToCopy = editor.getText();
-        } else if (copyMode === 'all') {
-            textToCopy = `${chapterPrefix}${activeChapter.title || ''}\n\n${editor.getText()}`;
+        try {
+            if (!navigator.clipboard?.writeText) throw new Error('El portapapeles no está disponible.');
+            await navigator.clipboard.writeText(textToCopy);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 2000);
+            toast.success(copyMode === 'title' ? 'Título copiado.' : copyMode === 'all' ? 'Título y contenido copiados.' : 'Contenido copiado.');
+            return true;
+        } catch (copyError) {
+            console.error(copyError);
+            setCopied(false);
+            toast.warning('No se pudo copiar. Revisa el permiso del portapapeles para este sitio.');
+            return false;
         }
-
-        navigator.clipboard.writeText(textToCopy);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
     };
 
     const handleReplaceFromClipboard = async () => {
-        if (!editor || !activeChapter) return;
+        const activeDocument = activeChapter || activeWorldDoc;
+        if (!editor || !activeDocument || isReplacingFromClipboard) return false;
+        if (isEditorLocked) {
+            toast.warning('El documento está bloqueado o marcado como finalizado. Desbloquéalo antes de reemplazarlo.');
+            return false;
+        }
+        let text = '';
         try {
-            const text = await navigator.clipboard.readText();
-            if (text) {
-                const currentContent = editor.getHTML();
-                if (currentContent && currentContent !== '<p></p>') {
-                    await saveChapterSnapshot(activeChapter.id, currentContent);
-                    toast.success("Respaldo de seguridad creado.");
-                }
-
-                let htmlContent = '';
-                if (text.includes('<p>') || text.includes('<h1>')) {
-                    htmlContent = text;
-                } else {
-                    htmlContent = text.split('\n')
-                        .map(line => line.trim())
-                        .filter(line => line !== '')
-                        .map(trimmed => {
-                            let pText = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                            pText = pText.replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-                            if (trimmed.startsWith('### ')) return `<h3>${pText.replace(/^###\s*/, '')}</h3>`;
-                            if (trimmed.startsWith('## ')) return `<h2>${pText.replace(/^##\s*/, '')}</h2>`;
-                            if (trimmed.startsWith('# ')) return `<h1>${pText.replace(/^#\s*/, '')}</h1>`;
-
-                            return `<p>${pText}</p>`;
-                        }).join('');
-                }
-                editor.commands.setContent(htmlContent);
-            }
-        } catch (err) {
-            console.error(err);
+            if (!navigator.clipboard?.readText) throw new Error('El portapapeles no está disponible.');
+            text = await navigator.clipboard.readText();
+        } catch (clipboardError) {
+            console.error(clipboardError);
             toast.warning('No se pudo acceder al portapapeles. Da permiso al navegador en este sitio web.');
+            return false;
+        }
+        if (!text.trim()) {
+            toast.info('El portapapeles está vacío; no se reemplazó el documento.');
+            return false;
+        }
+
+        setIsReplacingFromClipboard(true);
+        try {
+            const currentContent = editor.getHTML();
+            if (currentContent && currentContent !== '<p></p>') {
+                const snapshotSaved = await saveChapterSnapshot(activeDocument.id, currentContent, 'before-clipboard-replace');
+                if (!snapshotSaved) throw new Error('No se pudo crear el respaldo de seguridad. No se reemplazó el documento.');
+            }
+
+            const htmlContent = clipboardTextToEditorHtml(text);
+            if (!htmlContent) throw new Error('El portapapeles no contiene texto utilizable.');
+            const applied = editor.commands.setContent(htmlContent);
+            if (!applied) throw new Error('El editor no pudo aplicar el contenido del portapapeles.');
+
+            const saved = activeChapter
+                ? await saveChapterContent(htmlContent, 'ia')
+                : await saveWorldDocContent(htmlContent, 'ia');
+            if (saved === false) throw new Error('El contenido cambió en el editor, pero no pudo guardarse. Conserva esta pestaña abierta y vuelve a intentarlo.');
+            toast.success('Contenido reemplazado y guardado. El original quedó en Versiones.');
+            return true;
+        } catch (replaceError) {
+            console.error(replaceError);
+            toast.error(replaceError?.message || 'No se pudo reemplazar el contenido.');
+            return false;
+        } finally {
+            setIsReplacingFromClipboard(false);
         }
     };
 
@@ -903,21 +924,25 @@ const Editor = () => {
 
                                 <div className="w-px h-4 bg-[var(--border-main)] mx-1"></div>
                                 <button
-                                    onClick={handleCopyToClipboard}
+                                    type="button"
+                                    onClick={() => void handleCopyToClipboard()}
                                     className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all cursor-pointer ${copied ? 'bg-green-500 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-main)]'}`}
-                                    title="Copiar"
+                                    title={copied ? 'Copiado' : 'Copiar al portapapeles'}
+                                    aria-label={copied ? 'Copiado' : 'Copiar al portapapeles'}
                                 >
-                                    <Copy size={18} />
+                                    {copied ? <Check size={18} /> : <Copy size={18} />}
                                 </button>
                             </div>
                             
                             <button
-                                onClick={handleReplaceFromClipboard}
-                                className="h-11 px-4 rounded-xl text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white transition-all shadow-sm border border-[var(--border-main)] flex items-center gap-2 cursor-pointer"
+                                type="button"
+                                onClick={() => void handleReplaceFromClipboard()}
+                                disabled={isEditorLocked || isReplacingFromClipboard}
+                                className="h-11 px-4 rounded-xl text-[var(--accent-main)] bg-[var(--accent-soft)] hover:bg-[var(--accent-main)] hover:text-white transition-all shadow-sm border border-[var(--border-main)] flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
                                 title="Sustituir con Portapapeles"
                             >
-                                <ClipboardPaste size={18} />
-                                <span className="text-[10px] font-black uppercase tracking-widest">Reemplazar</span>
+                                {isReplacingFromClipboard ? <Loader2 size={18} className="animate-spin" /> : <ClipboardPaste size={18} />}
+                                <span className="text-[10px] font-black uppercase tracking-widest">{isReplacingFromClipboard ? 'Guardando…' : 'Reemplazar'}</span>
                             </button>
                         </div>
 
@@ -1278,11 +1303,21 @@ const Editor = () => {
                                 ))}
                             </div>
                             <button
-                                onClick={() => { handleCopyToClipboard(); setIsMobileMenuOpen(false); }}
+                                type="button"
+                                onClick={async () => { await handleCopyToClipboard(); setIsMobileMenuOpen(false); }}
                                 className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] flex items-center justify-center gap-3 shadow-xl shadow-blue-600/30 active:scale-95 transition-all cursor-pointer"
                             >
-                                <Copy size={18} />
-                                <span>Copiar Selección</span>
+                                {copied ? <Check size={18} /> : <Copy size={18} />}
+                                <span>{copied ? 'Copiado' : 'Copiar al portapapeles'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={async () => { const replaced = await handleReplaceFromClipboard(); if (replaced) setIsMobileMenuOpen(false); }}
+                                disabled={isEditorLocked || isReplacingFromClipboard}
+                                className="mt-3 w-full py-5 bg-[var(--accent-soft)] text-[var(--accent-main)] border border-[var(--accent-main)]/25 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] flex items-center justify-center gap-3 active:scale-95 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                                {isReplacingFromClipboard ? <Loader2 size={18} className="animate-spin" /> : <ClipboardPaste size={18} />}
+                                <span>{isReplacingFromClipboard ? 'Guardando…' : 'Reemplazar con portapapeles'}</span>
                             </button>
                         </div>
 
