@@ -17,8 +17,9 @@ service cloud.firestore {
     // --- COLECCIÓN: users ---
     // Aquí es donde guardas los datos del perfil de cada usuario
     match /users/{userId} {
-      // Cualquiera autenticado puede leer perfiles
-      allow read: if isAuthenticated();
+      // El perfil contiene configuración privada (incluyendo claves de IA),
+      // por lo que solo su dueño puede leerlo.
+      allow read: if isAuthenticated() && request.auth.uid == userId;
       
       // Para crear su propio perfil solo necesita estar autenticado (así no se bloquea al registrarse)
       allow create: if isAuthenticated() && request.auth.uid == userId;

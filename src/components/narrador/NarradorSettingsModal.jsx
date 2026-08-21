@@ -42,9 +42,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
     const [isSaving, setIsSaving] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
     const [cloudinaryCloudName, setCloudinaryCloudName] = useState(aiConfig.cloudinaryCloudName || '');
-    const [cloudinaryApiKey, setCloudinaryApiKey] = useState(aiConfig.cloudinaryApiKey || '');
     const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState(aiConfig.cloudinaryUploadPreset || '');
-    const [showCloudinaryApiKey, setShowCloudinaryApiKey] = useState(false);
     const [keepPermanent, setKeepPermanent] = useState(false);
     const [folderName, setFolderName] = useState('');
     const [isClearCacheConfirmOpen, setIsClearCacheConfirmOpen] = useState(false);
@@ -67,7 +65,6 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
             setAutoContinue(cfg.narradorAutoContinue || false);
             setIsVoiceMenuOpen(false);
             setCloudinaryCloudName(cfg.cloudinaryCloudName || '');
-            setCloudinaryApiKey(cfg.cloudinaryApiKey || '');
             setCloudinaryUploadPreset(cfg.cloudinaryUploadPreset || '');
             lastSavedConfigRef.current = JSON.stringify({
                 geminiApiKey: cfg.geminiApiKey || '',
@@ -98,7 +95,9 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
             geminiLiveModel: model,
             narradorAutoContinue: autoContinue,
             cloudinaryCloudName: cloudinaryCloudName.trim(),
-            cloudinaryApiKey: cloudinaryApiKey.trim(),
+            // La API key no se usa en cargas unsigned y no debe persistirse
+            // en el perfil que vive en Firestore.
+            cloudinaryApiKey: '',
             cloudinaryUploadPreset: cloudinaryUploadPreset.trim(),
         };
         const serializedConfig = JSON.stringify(nextConfig);
@@ -120,7 +119,7 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
             }
         }, 800);
         return () => clearTimeout(timer);
-    }, [apiKey, voice, speed, tone, model, autoContinue, cloudinaryCloudName, cloudinaryApiKey, cloudinaryUploadPreset, isOpen, profile]);
+    }, [apiKey, voice, speed, tone, model, autoContinue, cloudinaryCloudName, cloudinaryUploadPreset, isOpen, profile]);
 
     // Load cache stats
     useEffect(() => {
@@ -144,7 +143,6 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
         aiConfig: {
             ...(profileRef.current?.aiConfig || {}),
             cloudinaryCloudName: cloudinaryCloudName.trim(),
-            cloudinaryApiKey: cloudinaryApiKey.trim(),
             cloudinaryUploadPreset: cloudinaryUploadPreset.trim()
         }
     });
@@ -474,23 +472,8 @@ const NarradorSettingsModal = ({ isOpen, onClose, onCacheCleared, activeChapter 
                             className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-sky-500/20 outline-none text-[var(--text-main)]"
                         />
                     </div>
-                    <div className="relative">
-                        <input
-                            type={showCloudinaryApiKey ? 'text' : 'password'}
-                            value={cloudinaryApiKey}
-                            onChange={(event) => setCloudinaryApiKey(event.target.value)}
-                            placeholder="Cloudinary API key (opcional)"
-                            className="w-full bg-[var(--bg-editor)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 pr-14 text-xs font-mono focus:ring-2 focus:ring-sky-500/20 outline-none text-[var(--text-main)]"
-                        />
-                        <button
-                            onClick={() => setShowCloudinaryApiKey((previous) => !previous)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                        >
-                            {showCloudinaryApiKey ? 'Ocultar' : 'Ver'}
-                        </button>
-                    </div>
                     <p className="text-[9px] text-[var(--text-muted)] font-medium italic">
-                        Usa un Upload preset unsigned. La limpieza remota no forma parte de esta versión.
+                        Usa un Upload preset unsigned. La API key de Cloudinary no se necesita ni se guarda en esta aplicación. La limpieza remota no forma parte de esta versión.
                     </p>
                     {!cloudConfigured && (
                         <p className="text-[9px] text-amber-600 font-medium flex items-start gap-1.5">

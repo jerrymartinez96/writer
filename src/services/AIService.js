@@ -509,7 +509,7 @@ export const AIService = {
         if (settings?.reasoningMode) {
             body.thinking = { type: "enabled" };
             if (settings?.reasoningEffort) {
-                body.reasoning_effort = settings.reasoningEffort; // 'high' o 'max'
+                body.reasoning_effort = settings.reasoningEffort; // 'high'
             }
         } else {
             body.thinking = { type: "disabled" };

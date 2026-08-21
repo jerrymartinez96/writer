@@ -1,4 +1,4 @@
-import { applyPlainTextPatch } from './plainText';
+import { applyPlainTextPatch, toEditorHtml } from './plainText';
 
 // Deterministic, dependency-free fingerprint for optimistic concurrency checks.
 export const fingerprintText = (value = '') => {
@@ -18,7 +18,7 @@ export const validateOperationAgainstDocument = (operation, document) => {
     }
     if (operation.action === 'review' || operation.action === 'fact' || operation.action === 'create') return { valid: true, nextContent: document.content };
     const nextContent = operation.action === 'replace'
-        ? operation.replacementText
+        ? toEditorHtml(operation.replacementText)
         : applyPlainTextPatch(document.content, operation.originalText, operation.replacementText);
     if (nextContent === null) return { valid: false, stale: true, reason: `El fragmento original de «${document.title}» ya no coincide.` };
     if (typeof nextContent !== 'string') return { valid: false, reason: 'La operación no produjo texto válido.' };

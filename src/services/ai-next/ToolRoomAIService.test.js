@@ -7,7 +7,7 @@ vi.mock('../AIService', () => ({
     COHERENCE_AUDIT_SCHEMA: { type: 'function', function: { name: 'reportar_incoherencias' } },
 }));
 
-const profile = { deepseekApiKey: 'test-key', aiConfig: { defaultModel: 'deepseek-v4', reasoningMode: true, reasoningEffort: 'max' } };
+const profile = { deepseekApiKey: 'test-key', aiConfig: { defaultModel: 'deepseek-v4', reasoningMode: true, reasoningEffort: 'high' } };
 
 describe('ToolRoomAIService', () => {
     beforeEach(() => vi.resetAllMocks());
@@ -25,7 +25,7 @@ describe('ToolRoomAIService', () => {
 
         expect(result).toEqual({ summary: 'Mejora aplicada', replacement: 'Nuevo texto', risk: 'low' });
         expect(AIService.sendMessage).toHaveBeenCalledTimes(1);
-        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ model: 'deepseek-v4', reasoningMode: true, reasoningEffort: 'max' }));
+        expect(AIService.sendMessage.mock.calls[0][2]).toEqual(expect.objectContaining({ model: 'deepseek-v4', reasoningMode: true, reasoningEffort: 'high' }));
         const prompt = AIService.sendMessage.mock.calls[0][0];
         expect(prompt).toContain('Contenido original editable:');
         expect(prompt).toContain('Contexto de apoyo no editable:');

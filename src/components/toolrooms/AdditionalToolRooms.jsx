@@ -44,6 +44,7 @@ const NarratorRoom = () => {
     const toast = useToast();
     const [isPlayerOpen, setIsPlayerOpen] = useState(true);
     const [isChapterPickerOpen, setIsChapterPickerOpen] = useState(false);
+    const [isCloudSyncing, setIsCloudSyncing] = useState(false);
     const playableChapters = useMemo(() => chapters.filter((chapter) => !chapter.isVolume), [chapters]);
     const selectedChapterId = state.chapterId || launch?.context?.chapterIds?.[0] || activeChapter?.id || null;
     const listedSelectedChapter = playableChapters.find((chapter) => chapter.id === selectedChapterId);
@@ -61,6 +62,7 @@ const NarratorRoom = () => {
     }, [activeBook?.id, chapterReady, lazyLoadChapters, selectedChapterId]);
 
     const handleSelectChapter = useCallback((chapter) => {
+        if (isCloudSyncing) return;
         const chapterId = typeof chapter === 'string' ? chapter : chapter?.id;
         if (!chapterId) return;
         const chapterReference = playableChapters.find((item) => item.id === chapterId);
@@ -70,7 +72,7 @@ const NarratorRoom = () => {
         // porque esa acción global cambia la vista al editor. La precarga se
         // dispara al cambiar el ID y dejamos la vista del Narrador intacta.
         updateRoomState('narrator', { chapterId });
-    }, [playableChapters, updateRoomState]);
+    }, [isCloudSyncing, playableChapters, updateRoomState]);
     const handleChapterPickerChange = (event) => {
         const chapter = playableChapters.find((item) => item.id === event.target.value);
         if (!chapter) return;
@@ -118,8 +120,9 @@ const NarratorRoom = () => {
                                         type="button"
                                         aria-haspopup="listbox"
                                         aria-expanded={isChapterPickerOpen}
+                                        disabled={isCloudSyncing}
                                         onClick={() => setIsChapterPickerOpen((value) => !value)}
-                                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] px-3 py-3 text-left text-sm font-bold outline-none transition-colors hover:border-violet-500 focus:border-violet-500"
+                                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border-main)] bg-[var(--bg-app)] px-3 py-3 text-left text-sm font-bold outline-none transition-colors hover:border-violet-500 focus:border-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         <span className="min-w-0 truncate">{selectedChapterIndex + 1}. {selectedChapter.title}</span>
                                         <ChevronDown size={15} className={`shrink-0 text-[var(--text-muted)] transition-transform ${isChapterPickerOpen ? 'rotate-180' : ''}`} />
@@ -146,6 +149,7 @@ const NarratorRoom = () => {
                                     segments={currentSegments}
                                     onCacheChanged={narrador.refreshCacheStats}
                                     onSegmentCached={narrador.markSegmentCached}
+                                    onSyncStateChange={setIsCloudSyncing}
                                 />
                             </section>
 

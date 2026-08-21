@@ -5,7 +5,7 @@
 import Dexie from 'dexie';
 
 const DB_NAME = 'narrador_cache_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 días
 
 let db = null;
@@ -16,9 +16,16 @@ const getDb = () => {
     db.version(1).stores({
         segments: 'key, bookId, chapterId, textHash, timestamp'
     });
-    db.version(DB_VERSION).stores({
+    db.version(2).stores({
         segments: 'key, bookId, chapterId, textHash, variantKey, timestamp',
         permanentSegments: 'key, bookId, chapterId, textHash, variantKey, timestamp',
+        settings: 'key'
+    });
+    db.version(DB_VERSION).stores({
+        // El índice compuesto permite consultar un capítulo sin recorrer la
+        // caché completa cuando una biblioteca tiene muchos audios.
+        segments: 'key, [bookId+chapterId], bookId, chapterId, textHash, variantKey, timestamp',
+        permanentSegments: 'key, [bookId+chapterId], bookId, chapterId, textHash, variantKey, timestamp',
         settings: 'key'
     });
     return Promise.resolve(db);
@@ -241,10 +248,21 @@ export const saveSegmentToNarradorDirectory = async (bookId, chapterId, segmentI
     }
 };
 
-/** Elimina únicamente la versión cacheada de un segmento. */
-export const invalidateCachedSegment = async (bookId, chapterId, segmentIndex) => {
+/** Elimina una variante concreta del segmento; sin variante conserva el modo legado que elimina todas. */
+export const invalidateCachedSegment = async (bookId, chapterId, segmentIndex, variantKey = null) => {
     try {
         const d = await getDb();
+        if (variantKey) {
+            const key = getSegmentKey(bookId, chapterId, segmentIndex, variantKey);
+            await d.segments.delete(key);
+            await d.permanentSegments.delete(key);
+            if (variantKey === 'default') {
+                const legacyKey = getLegacySegmentKey(bookId, chapterId, segmentIndex);
+                await d.segments.delete(legacyKey);
+                await d.permanentSegments.delete(legacyKey);
+            }
+            return true;
+        }
         const prefix = `${bookId}_${chapterId}_${segmentIndex}__`;
         await d.segments.where('key').startsWith(prefix).delete();
         await d.permanentSegments.where('key').startsWith(prefix).delete();
@@ -288,18 +306,22 @@ export const saveCachedSegment = async (bookId, chapterId, segmentIndex, textHas
 export const getCachedNarradorSegments = async ({ bookId, chapterId } = {}) => {
     try {
         const d = await getDb();
+        const getScopedEntries = (table) => {
+            if (bookId && chapterId) return table.where('[bookId+chapterId]').equals([bookId, chapterId]).toArray();
+            if (bookId) return table.where('bookId').equals(bookId).toArray();
+            if (chapterId) return table.where('chapterId').equals(chapterId).toArray();
+            return table.toArray();
+        };
         const [temporary, permanent] = await Promise.all([
-            d.segments.toArray(),
-            d.permanentSegments.toArray()
+            getScopedEntries(d.segments),
+            getScopedEntries(d.permanentSegments)
         ]);
         const entries = new Map();
         temporary
-            .filter((entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId))
             .forEach((entry) => entries.set(entry.key, { ...entry, permanent: false }));
         permanent
-            .filter((entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId))
             .forEach((entry) => entries.set(entry.key, { ...entry, permanent: true }));
-        return Array.from(entries.values());
+        return Array.from(entries.values()).sort((a, b) => a.segmentIndex - b.segmentIndex);
     } catch (err) {
         console.warn('[NarradorCache] list cached segments error:', err);
         return [];
@@ -318,8 +340,9 @@ export const clearNarradorCache = async (bookId, chapterId) => {
             return false;
         }
         const d = await getDb();
-        await d.segments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
-        await d.permanentSegments.filter((entry) => entry.bookId === bookId && entry.chapterId === chapterId).delete();
+        const scope = [bookId, chapterId];
+        await d.segments.where('[bookId+chapterId]').equals(scope).delete();
+        await d.permanentSegments.where('[bookId+chapterId]').equals(scope).delete();
         return true;
     } catch (err) {
         console.warn('[NarradorCache] clear error:', err);
@@ -333,13 +356,18 @@ export const clearNarradorCache = async (bookId, chapterId) => {
 export const getNarradorCacheSize = async (bookId, chapterId) => {
     try {
         const d = await getDb();
-        const isInScope = (entry) => (!bookId || entry.bookId === bookId) && (!chapterId || entry.chapterId === chapterId);
+        const getScopedEntries = (table) => {
+            if (bookId && chapterId) return table.where('[bookId+chapterId]').equals([bookId, chapterId]).toArray();
+            if (bookId) return table.where('bookId').equals(bookId).toArray();
+            if (chapterId) return table.where('chapterId').equals(chapterId).toArray();
+            return table.toArray();
+        };
         const [temporaryEntries, permanentEntries] = await Promise.all([
-            d.segments.toArray(),
-            d.permanentSegments.toArray()
+            getScopedEntries(d.segments),
+            getScopedEntries(d.permanentSegments)
         ]);
-        const temporary = temporaryEntries.filter(isInScope);
-        const permanent = permanentEntries.filter(isInScope);
+        const temporary = temporaryEntries;
+        const permanent = permanentEntries;
         const temporaryBytes = temporary.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
         const permanentBytes = permanent.reduce((sum, e) => sum + (e.pcmData?.byteLength || 0), 0);
         return {

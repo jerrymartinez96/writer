@@ -43,7 +43,7 @@ const SettingsView = () => {
     const [deepseekApiKey, setDeepseekApiKey] = useState(aiConfig.deepseekApiKey || profile?.deepseekApiKey || '');
     const [selectedModel, setSelectedModel] = useState(aiConfig.defaultModel || 'deepseek-v4-flash');
     const [reasoningMode, setReasoningMode] = useState(aiConfig.reasoningMode ?? false);
-    const [reasoningEffort, setReasoningEffort] = useState(aiConfig.reasoningEffort || 'high');
+    const [reasoningEffort, setReasoningEffort] = useState('high');
     const [inputTokenCost, setInputTokenCost] = useState(aiConfig.inputTokenCost ?? 0.14);
     const [outputTokenCost, setOutputTokenCost] = useState(aiConfig.outputTokenCost ?? 0.28);
     const [showApiKey, setShowApiKey] = useState(false);
@@ -85,7 +85,7 @@ const SettingsView = () => {
             setDeepseekApiKey(cfg.deepseekApiKey || profile.deepseekApiKey || '');
             setSelectedModel(cfg.defaultModel || 'deepseek-v4-flash');
             setReasoningMode(cfg.reasoningMode ?? false);
-            setReasoningEffort(cfg.reasoningEffort || 'high');
+            setReasoningEffort('high');
             setInputTokenCost(cfg.inputTokenCost ?? 0.14);
             setOutputTokenCost(cfg.outputTokenCost ?? 0.28);
 
@@ -665,24 +665,9 @@ const SettingsView = () => {
                                         <p className="text-[9px] text-[var(--text-muted)] font-medium">
                                             Controla el presupuesto de tokens dedicados a la computación del pensamiento interno.
                                         </p>
-                                        <div className="flex gap-2 mt-1">
-                                            {[
-                                                { id: 'high', label: 'Alto (High)', desc: 'Equilibrio óptimo' },
-                                                { id: 'max', label: 'Máximo (Max)', desc: 'Análisis extremo' }
-                                            ].map(opt => (
-                                                <button
-                                                    key={opt.id}
-                                                    onClick={() => setReasoningEffort(opt.id)}
-                                                    className={`flex-1 p-2 rounded-lg border text-left transition-all ${
-                                                        reasoningEffort === opt.id
-                                                            ? 'bg-indigo-500/15 border-indigo-500 text-indigo-600 font-bold'
-                                                            : 'bg-[var(--bg-app)] border-[var(--border-main)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                                                    }`}
-                                                >
-                                                    <span className="block text-[10px] uppercase font-black tracking-wider leading-none">{opt.label}</span>
-                                                    <span className="block text-[8px] opacity-75 mt-0.5 font-medium">{opt.desc}</span>
-                                                </button>
-                                            ))}
+                                        <div className="mt-1 rounded-lg border border-indigo-500 bg-indigo-500/15 p-2 text-indigo-600">
+                                            <span className="block text-[10px] uppercase font-black tracking-wider leading-none">Alto (High)</span>
+                                            <span className="block text-[8px] opacity-75 mt-0.5 font-medium">Nivel único para completar respuestas y herramientas con estabilidad.</span>
                                         </div>
                                     </div>
                                 )}

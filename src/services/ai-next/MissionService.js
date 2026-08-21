@@ -17,18 +17,76 @@ export const MISSION_SCOPES = [
 ];
 
 import { buildRegisteredPrompt } from './PromptRegistry';
-import { parseAndValidate } from './StructuredResponse';
+import { parseStructuredResponse, validateStructuredResponse } from './StructuredResponse';
 
 const getApiKey = (profile) => profile?.aiConfig?.deepseekApiKey || profile?.deepseekApiKey || window.localStorage.getItem('deepseekApiKey') || '';
 
-const structuredCall = async ({ profile, prompt, schema, temperature = 0.1, max_tokens = 7000 }) => {
+const normalizeToken = (value) => String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const normalizeRisk = (value, fallback = undefined) => ({ low: 'low', bajo: 'low', baja: 'low', medium: 'medium', medio: 'medium', media: 'medium', high: 'high', alto: 'high', alta: 'high' }[normalizeToken(value)] || fallback);
+const normalizeImpactAction = (value) => ({ modify: 'modify', modificar: 'modify', modifica: 'modify', review: 'review', revisar: 'review', revision: 'review', inform: 'inform', informar: 'inform', info: 'inform', ignore: 'ignore', ignorar: 'ignore' }[normalizeToken(value)] || 'review');
+const normalizeConfidence = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.min(1, value));
+    const parsed = Number(String(value || '').trim().replace(',', '.').replace('%', ''));
+    if (!Number.isFinite(parsed)) return 0.5;
+    return Math.max(0, Math.min(1, parsed > 1 ? parsed / 100 : parsed));
+};
+
+// Estas correcciones solo convierten representaciones equivalentes o aplican
+// valores conservadores de solo revisión; no crean cambios narrativos.
+const normalizeImpactResponse = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    return {
+        ...value,
+        risk: normalizeRisk(value.risk, 'medium'),
+        confidence: normalizeConfidence(value.confidence),
+        warnings: Array.isArray(value.warnings) ? value.warnings : [],
+        affectedDocuments: Array.isArray(value.affectedDocuments)
+            ? value.affectedDocuments.map((document) => ({
+                ...document,
+                impact: normalizeRisk(document?.impact, 'medium'),
+                action: normalizeImpactAction(document?.action),
+            }))
+            : value.affectedDocuments,
+    };
+};
+
+const compactText = (value) => toPlainText(value).replace(/\s+/g, ' ').trim();
+const hasExactEvidence = (evidence, content) => {
+    const quoted = compactText(evidence);
+    return quoted.length > 1 && compactText(content).includes(quoted);
+};
+
+const structuredCall = async ({ profile, prompt, schema, temperature = 0.1, max_tokens = 7000, normalizeResponse = (value) => value }) => {
     const apiKey = getApiKey(profile);
     if (!apiKey) throw new Error('Configura una API Key de DeepSeek antes de analizar la misión.');
-    const raw = await AIService.sendMessage(prompt, apiKey, getStructuredAIOptions(profile, schema, {
+    // El Constructor Global siempre privilegia un único análisis razonado y
+    // estructurado. Evitamos reintentos automáticos que duplican coste y pueden
+    // producir respuestas de menor calidad; el escritor decide si reintenta.
+    const reasoningProfile = {
+        ...profile,
+        aiConfig: {
+            ...(profile?.aiConfig || {}),
+            reasoningMode: true,
+            reasoningEffort: 'high',
+        },
+    };
+    const requestOptions = {
         temperature,
         max_tokens,
-    }));
-    return parseAndValidate(raw, schema, 'respuesta del Constructor Global');
+    };
+    const reasoningOptions = getStructuredAIOptions(reasoningProfile, schema, requestOptions);
+    const parse = (raw) => validateStructuredResponse(normalizeResponse(parseStructuredResponse(raw, 'respuesta del Constructor Global')), schema, 'respuesta del Constructor Global');
+    try {
+        const raw = await AIService.sendMessage(prompt, apiKey, reasoningOptions);
+        return parse(raw);
+    } catch (error) {
+        const message = String(error?.message || 'No se recibió una respuesta utilizable.');
+        const isStructuredFailure = message.includes('respuesta vacía')
+            || message.includes('respuesta del Constructor Global inválida')
+            || message.includes('respuesta del Constructor Global no cumple el contrato');
+        if (!isStructuredFailure) throw error;
+        throw new Error(`${message} La petición no se reintentó automáticamente. Revisa el detalle y usa «Reanalizar solicitud» cuando quieras volver a ejecutarla.`);
+    }
 };
 
 const IMPACT_TOOL = {
@@ -38,7 +96,7 @@ const IMPACT_TOOL = {
         description: 'Devuelve el análisis estructurado del impacto de una modificación narrativa.',
         parameters: { type: 'object', properties: {
             summary: { type: 'string' }, recommendedScope: { type: 'string', enum: ['automatic', 'active', 'selected', 'all'] }, risk: { type: 'string', enum: ['low', 'medium', 'high'] }, confidence: { type: 'number' },
-            affectedDocuments: { type: 'array', items: { type: 'object', properties: { documentId: { type: 'string' }, title: { type: 'string' }, impact: { type: 'string', enum: ['high', 'medium', 'low'] }, action: { type: 'string', enum: ['modify', 'review', 'inform', 'ignore'] }, reason: { type: 'string' } }, required: ['documentId', 'impact', 'action', 'reason'] } },
+            affectedDocuments: { type: 'array', items: { type: 'object', properties: { documentId: { type: 'string' }, title: { type: 'string' }, impact: { type: 'string', enum: ['high', 'medium', 'low'] }, action: { type: 'string', enum: ['modify', 'review', 'inform', 'ignore'] }, reason: { type: 'string' }, evidence: { type: 'string', description: 'Fragmento literal y exacto del documento que sustenta este impacto.' } }, required: ['documentId', 'impact', 'action', 'reason'] } },
             canonFacts: { type: 'array', items: { type: 'object' } }, relations: { type: 'array', items: { type: 'object' } }, warnings: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
         }, required: ['summary', 'risk', 'confidence', 'affectedDocuments', 'warnings'] },
     },
@@ -76,8 +134,10 @@ const VERIFICATION_TOOL = {
 };
 
 const normalizeDocument = (document) => ({
-    id: String(document.id || ''), type: String(document.type || 'document'), title: String(document.title || document.name || document.id || 'Documento'), content: toPlainText(document.content || document.description || ''),
+    id: String(document.id || ''), type: String(document.type || 'document'), title: String(document.title || document.name || document.id || 'Documento'), content: String(document.content || document.description || ''),
 });
+
+const toPromptDocuments = (documents = []) => documents.map((document) => ({ ...document, content: toPlainText(document.content || '') }));
 
 export const buildMissionDocuments = ({ chapters = [], worldItems = [], characters = [], activeChapter = null, scope = 'automatic', selectedIds = [] }) => {
     const all = [
@@ -91,19 +151,37 @@ export const buildMissionDocuments = ({ chapters = [], worldItems = [], characte
     return all;
 };
 
+// `chapters` may initially contain metadata only. The caller loads their full
+// content asynchronously and then overlays it here before the AI sees it.
+export const mergeLoadedMissionChapters = (documents = [], loadedChapters = []) => {
+    const loadedById = new Map((loadedChapters || []).map((chapter) => [String(chapter.id || ''), chapter]));
+    return documents.map((document) => {
+        if (document.type !== 'chapter') return document;
+        const loaded = loadedById.get(String(document.id));
+        return loaded ? { ...document, content: String(loaded.content || '') } : document;
+    });
+};
+
 export const requestMissionImpact = async ({ profile, mission, documents }) => {
-    const prompt = buildRegisteredPrompt('globalImpact', { mission, documents });
-    const result = await structuredCall({ profile, prompt, schema: IMPACT_TOOL, temperature: 0.1, max_tokens: 7000 });
+    const prompt = buildRegisteredPrompt('globalImpact', { mission, documents: toPromptDocuments(documents) });
+    const result = await structuredCall({ profile, prompt, schema: IMPACT_TOOL, temperature: 0.1, max_tokens: 25000, normalizeResponse: normalizeImpactResponse });
     const allowed = new Set(documents.map((document) => document.id));
+    const reportedDocuments = Array.isArray(result.affectedDocuments) ? result.affectedDocuments : [];
+    const verifiedDocuments = reportedDocuments
+        .filter((item) => allowed.has(String(item.documentId)))
+        .filter((item) => hasExactEvidence(item.evidence, documents.find((document) => document.id === String(item.documentId))?.content || ''));
+    const discardedEvidenceCount = reportedDocuments.length - verifiedDocuments.length;
+    const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
+    if (discardedEvidenceCount > 0) warnings.push(`${discardedEvidenceCount} documento(s) no se muestran como afectados porque la IA no aportó una cita literal verificable.`);
     return {
-        summary: String(result.summary || 'Impacto listo para revisar.'), recommendedScope: MISSION_SCOPES.some((item) => item.id === result.recommendedScope) ? result.recommendedScope : mission.scope, risk: ['low', 'medium', 'high'].includes(result.risk) ? result.risk : 'medium', confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0.5)),
-        affectedDocuments: Array.isArray(result.affectedDocuments) ? result.affectedDocuments.filter((item) => allowed.has(String(item.documentId))).map((item) => ({ documentId: String(item.documentId), title: String(item.title || documents.find((doc) => doc.id === item.documentId)?.title || item.documentId), impact: ['high', 'medium', 'low'].includes(item.impact) ? item.impact : 'medium', action: ['modify', 'review', 'inform', 'ignore'].includes(item.action) ? item.action : 'review', reason: String(item.reason || '') })) : [],
-        canonFacts: Array.isArray(result.canonFacts) ? result.canonFacts : [], relations: Array.isArray(result.relations) ? result.relations : [], warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [], questions: Array.isArray(result.questions) ? result.questions.map(String) : [], sourceDocumentIds: documents.map((document) => document.id),
+        summary: reportedDocuments.length > 0 && verifiedDocuments.length === 0 ? 'No se encontraron citas textuales verificables que sustenten cambios en los documentos revisados.' : String(result.summary || 'Impacto listo para revisar.'), recommendedScope: MISSION_SCOPES.some((item) => item.id === result.recommendedScope) ? result.recommendedScope : mission.scope, risk: ['low', 'medium', 'high'].includes(result.risk) ? result.risk : 'medium', confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0.5)),
+        affectedDocuments: verifiedDocuments.map((item) => ({ documentId: String(item.documentId), title: String(item.title || documents.find((doc) => doc.id === item.documentId)?.title || item.documentId), impact: ['high', 'medium', 'low'].includes(item.impact) ? item.impact : 'medium', action: ['modify', 'review', 'inform', 'ignore'].includes(item.action) ? item.action : 'review', reason: String(item.reason || ''), evidence: compactText(item.evidence) })),
+        canonFacts: Array.isArray(result.canonFacts) ? result.canonFacts : [], relations: Array.isArray(result.relations) ? result.relations : [], warnings, questions: Array.isArray(result.questions) ? result.questions.map(String) : [], sourceDocumentIds: documents.map((document) => document.id),
     };
 };
 
 export const requestMissionAlternatives = async ({ profile, mission, documents, impact }) => {
-    const prompt = buildRegisteredPrompt('globalAlternatives', { mission, impact, documents });
+    const prompt = buildRegisteredPrompt('globalAlternatives', { mission, impact, documents: toPromptDocuments(documents) });
     const result = await structuredCall({ profile, prompt, schema: ALTERNATIVES_TOOL, temperature: 0.35, max_tokens: 8000 });
     const allowed = new Set(documents.map((document) => document.id));
     const types = ['conservative', 'transformative', 'compensatory'];
@@ -113,7 +191,7 @@ export const requestMissionAlternatives = async ({ profile, mission, documents, 
 };
 
 export const requestMissionOperations = async ({ profile, mission, documents, impact, alternative }) => {
-    const prompt = buildRegisteredPrompt('globalOperations', { mission, impact, alternative, documents });
+    const prompt = buildRegisteredPrompt('globalOperations', { mission, impact, alternative, documents: toPromptDocuments(documents) });
     const result = await structuredCall({ profile, prompt, schema: OPERATIONS_TOOL, temperature: 0.15, max_tokens: 9000 });
     const allowed = new Set(documents.map((document) => document.id));
     const operations = Array.isArray(result.operations) ? result.operations.filter((operation) => allowed.has(String(operation.documentId)) || operation.action === 'create').map((operation, index) => ({
@@ -123,7 +201,7 @@ export const requestMissionOperations = async ({ profile, mission, documents, im
 };
 
 export const requestMissionVerification = async ({ profile, mission, documents, operations }) => {
-    const prompt = buildRegisteredPrompt('globalVerification', { mission, operations, documents });
+    const prompt = buildRegisteredPrompt('globalVerification', { mission, operations, documents: toPromptDocuments(documents) });
     const result = await structuredCall({ profile, prompt, schema: VERIFICATION_TOOL, temperature: 0.05, max_tokens: 6000 });
     return { passed: Boolean(result.passed), summary: String(result.summary || ''), findings: Array.isArray(result.findings) ? result.findings : [], pendingReview: Array.isArray(result.pendingReview) ? result.pendingReview.map(String) : [] };
 };

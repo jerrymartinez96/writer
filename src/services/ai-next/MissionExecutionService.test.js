@@ -30,6 +30,16 @@ describe('MissionExecutionService', () => {
         expect(result.nextContent).toContain('entreabierta');
     });
 
+    it('conserva la estructura HTML y los párrafos al aplicar un parche', () => {
+        const document = { id: 'chapter-1', title: 'Capítulo 1', content: '<p>La puerta estaba cerrada.</p><p>El pasillo seguía vacío.</p>' };
+        const [operation] = prepareOperations([{ id: 'op-html', documentId: 'chapter-1', action: 'patch', originalText: 'cerrada', replacementText: 'entreabierta' }], [document]);
+
+        const result = validateOperationAgainstDocument(operation, document);
+
+        expect(result.valid).toBe(true);
+        expect(result.nextContent).toBe('<p>La puerta estaba entreabierta.</p><p>El pasillo seguía vacío.</p>');
+    });
+
     it('revierte las operaciones ya aplicadas cuando una posterior falla', async () => {
         const documents = [
             { id: 'a', title: 'A', content: 'uno' },

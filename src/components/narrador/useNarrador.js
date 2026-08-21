@@ -17,6 +17,11 @@ import { buildNarradorAudioVariant } from '../../services/NarradorAudioIdentity'
 
 const PROGRESS_PREFIX = 'narrador_progress_';
 
+const isSameAudioScope = (left, right) => Boolean(left && right)
+    && left.bookId === right.bookId
+    && left.chapterId === right.chapterId
+    && left.variantKey === right.variantKey;
+
 const buildSystemInstruction = (bookTitle, synopsis, tone) => {
     const toneMap = {
         auto: 'Infiere el tono de la sinopsis de la obra automáticamente.',
@@ -225,36 +230,42 @@ export const useNarrador = ({
         return buildNarradorAudioVariant(profileRef.current);
     }, []);
 
-    const markSegmentCached = useCallback((segmentIndex, isCached = true) => {
+    const getCurrentAudioScope = useCallback(() => ({
+        bookId: activeBookRef.current?.id || '',
+        chapterId: activeChapterRef.current?.id || '',
+        variantKey: buildAudioVariant()
+    }), [buildAudioVariant]);
+
+    const markSegmentCached = useCallback((segmentIndex, isCached = true, sourceScope = null) => {
+        if (sourceScope && !isSameAudioScope(sourceScope, getCurrentAudioScope())) return;
         setCachedSegmentIndexes(previous => {
             const next = new Set(previous);
             if (isCached) next.add(segmentIndex);
             else next.delete(segmentIndex);
             return next;
         });
-    }, []);
+    }, [getCurrentAudioScope]);
 
     const refreshSegmentCacheStatus = useCallback(async () => {
-        const bookId = activeBookRef.current?.id;
-        const chapterId = activeChapterRef.current?.id;
+        const scope = getCurrentAudioScope();
+        const { bookId, chapterId, variantKey } = scope;
         const currentSegments = segmentsRef.current;
         if (!bookId || !chapterId || currentSegments.length === 0) {
-            setCachedSegmentIndexes(new Set());
+            if (isSameAudioScope(scope, getCurrentAudioScope())) setCachedSegmentIndexes(new Set());
             return;
         }
-        const variantKey = buildAudioVariant();
         const cachedIndexes = await Promise.all(currentSegments.map(async (segment, index) => {
             const cached = await getCachedSegment(bookId, chapterId, index, segment.hash, variantKey);
             return cached ? index : null;
         }));
-        setCachedSegmentIndexes(new Set(cachedIndexes.filter(index => index !== null)));
-    }, [buildAudioVariant]);
+        if (isSameAudioScope(scope, getCurrentAudioScope())) {
+            setCachedSegmentIndexes(new Set(cachedIndexes.filter(index => index !== null)));
+        }
+    }, [getCurrentAudioScope]);
 
-    const persistGeneratedAudio = useCallback(async (segmentIndex, segment, pcmData) => {
-        const bookId = activeBookRef.current?.id;
-        const chapterId = activeChapterRef.current?.id;
+    const persistGeneratedAudio = useCallback(async (segmentIndex, segment, pcmData, sourceScope = getCurrentAudioScope()) => {
+        const { bookId, chapterId, variantKey } = sourceScope;
         if (!bookId || !chapterId) return;
-        const variantKey = buildAudioVariant();
         await saveCachedSegment(bookId, chapterId, segmentIndex, segment.hash, pcmData, variantKey);
         const storage = await getNarradorStorageSettings();
         if (storage.keepPermanent) {
@@ -263,8 +274,8 @@ export const useNarrador = ({
         if (storage.directoryHandle && storage.keepPermanent) {
             await saveSegmentToNarradorDirectory(bookId, chapterId, segmentIndex, pcmData);
         }
-        markSegmentCached(segmentIndex);
-    }, [buildAudioVariant, markSegmentCached]);
+        markSegmentCached(segmentIndex, true, sourceScope);
+    }, [getCurrentAudioScope, markSegmentCached]);
 
     const stopPreparationSession = useCallback(() => {
         preparationRejectRef.current?.(new Error('Preparación cancelada.'));
@@ -351,8 +362,10 @@ export const useNarrador = ({
             return;
         }
 
+        const preparationScope = getCurrentAudioScope();
+
         const cached = await Promise.all(prepared.map((segment, index) =>
-            getCachedSegment(activeBookRef.current?.id, activeChapterRef.current?.id, index, segment.hash, buildAudioVariant())
+            getCachedSegment(preparationScope.bookId, preparationScope.chapterId, index, segment.hash, preparationScope.variantKey)
         ));
         const cachedBeforeRun = cached.filter(Boolean).length;
         const pending = prepared.map((_, index) => index).filter(index => !cached[index]);
@@ -369,7 +382,9 @@ export const useNarrador = ({
         const backgroundIndexes = targetIndexes.filter(index => !initialSet.has(index));
 
         if (targetIndexes.length === 0) {
-            setCachedSegmentIndexes(new Set(prepared.map((_, index) => index)));
+            if (isSameAudioScope(preparationScope, getCurrentAudioScope())) {
+                setCachedSegmentIndexes(new Set(prepared.map((_, index) => index)));
+            }
             toastRef.current?.info('El capítulo ya está preparado.');
             setTimeout(() => startNarrationRef.current?.(0), 0);
             return;
@@ -433,7 +448,7 @@ export const useNarrador = ({
                 try {
                     session.sendText(segment.text, index, async (pcmData) => {
                         try {
-                            await persistGeneratedAudio(index, segment, pcmData);
+                            await persistGeneratedAudio(index, segment, pcmData, preparationScope);
                             finish(resolve);
                         } catch (error) {
                             finish(reject, error);
@@ -508,7 +523,7 @@ export const useNarrador = ({
         };
 
         void runPreparation();
-    }, [buildGeminiContext, buildAudioVariant, isPreparing, persistGeneratedAudio, prepareChapterSegments, refreshSegmentCacheStatus, stopAllAudio, stopPreparationSession]);
+    }, [buildGeminiContext, getCurrentAudioScope, isPreparing, persistGeneratedAudio, prepareChapterSegments, refreshSegmentCacheStatus, stopAllAudio, stopPreparationSession]);
 
     const cancelPreparation = useCallback(() => {
         preparationRunRef.current += 1;
@@ -533,7 +548,7 @@ export const useNarrador = ({
 
     useEffect(() => {
         refreshSegmentCacheStatus();
-    }, [activeChapter?.id, profileData?.aiConfig?.geminiLiveModel, profileData?.aiConfig?.narradorTone, profileData?.aiConfig?.narradorVoice, refreshSegmentCacheStatus, segments.length]);
+    }, [activeChapter?.id, activeChapter?.isLoaded, activeChapter?.content, profileData?.aiConfig?.geminiLiveModel, profileData?.aiConfig?.narradorTone, profileData?.aiConfig?.narradorVoice, refreshSegmentCacheStatus, segments.length]);
 
     const getWebVoices = useCallback(() => {
         if (!('speechSynthesis' in window)) return [];
@@ -661,13 +676,12 @@ export const useNarrador = ({
                     try {
                         const segment = segmentsRef.current[next];
                         if (segment) {
+                            const playbackScope = getCurrentAudioScope();
                             sentSegmentsRef.current.add(next);
                             GeminiLiveService.sendText(segment.text, next, async (pcmData) => {
-                                const bookId = activeBookRef.current?.id;
-                                const chapterId = activeChapterRef.current?.id;
-                                if (bookId && chapterId) {
+                                if (playbackScope.bookId && playbackScope.chapterId) {
                                     try {
-                                    await persistGeneratedAudio(next, segment, pcmData);
+                                        await persistGeneratedAudio(next, segment, pcmData, playbackScope);
                                     } catch { /* ignore */ }
                                 }
                             });
@@ -683,12 +697,11 @@ export const useNarrador = ({
                                 });
                                 const segment = segmentsRef.current[next];
                                 if (segment) {
+                                    const playbackScope = getCurrentAudioScope();
                                     GeminiLiveService.sendText(segment.text, next, async (pcmData) => {
-                                        const bookId = activeBookRef.current?.id;
-                                        const chapterId = activeChapterRef.current?.id;
-                                        if (bookId && chapterId) {
+                                        if (playbackScope.bookId && playbackScope.chapterId) {
                                             try {
-                                            await persistGeneratedAudio(next, segment, pcmData);
+                                                await persistGeneratedAudio(next, segment, pcmData, playbackScope);
                                             } catch { /* ignore */ }
                                         }
                                     });
@@ -727,7 +740,7 @@ export const useNarrador = ({
                 if (toastRef.current) toastRef.current.success('¡Capítulo narrado completamente! 🎉');
             }
         }
-    }, [buildGeminiContext, clearProgress, clearTranscript, persistGeneratedAudio, playCachedSegment, saveProgress, waitForCachedSegment]);
+    }, [buildGeminiContext, clearProgress, clearTranscript, getCurrentAudioScope, persistGeneratedAudio, playCachedSegment, saveProgress, waitForCachedSegment]);
 
     useEffect(() => {
         handleSegmentCompleteRef.current = handleSegmentComplete;
@@ -781,6 +794,7 @@ export const useNarrador = ({
         if (statusRef.current === 'speaking' || statusRef.current === 'connecting') return;
 
         const runId = ++playbackRunRef.current;
+        const playbackScope = getCurrentAudioScope();
         const cfg = profileRef.current?.aiConfig || {};
         const useGemini = !!cfg.geminiApiKey;
         const motor = forceMotor || (useGemini ? 'gemini' : 'web-speech');
@@ -809,11 +823,10 @@ export const useNarrador = ({
         try {
             if (motor === 'gemini') {
                 if (forceRegenerate) {
-                    const bookId = activeBookRef.current?.id;
-                    const chapterId = activeChapterRef.current?.id;
+                    const { bookId, chapterId } = playbackScope;
                     if (bookId && chapterId) {
-                        await invalidateCachedSegment(bookId, chapterId, startIndex);
-                        markSegmentCached(startIndex, false);
+                        await invalidateCachedSegment(bookId, chapterId, startIndex, playbackScope.variantKey);
+                        markSegmentCached(startIndex, false, playbackScope);
                     }
                 }
                 const played = await playCachedSegment(startIndex, runId);
@@ -847,11 +860,9 @@ export const useNarrador = ({
                 setCurrentTranscriptForSegment(startIndex);
 
                 GeminiLiveService.sendText(segment.text, startIndex, async (pcmData) => {
-                    const bookId = activeBookRef.current?.id;
-                    const chapterId = activeChapterRef.current?.id;
-                    if (bookId && chapterId) {
+                    if (playbackScope.bookId && playbackScope.chapterId) {
                         try {
-                            await persistGeneratedAudio(startIndex, segment, pcmData);
+                            await persistGeneratedAudio(startIndex, segment, pcmData, playbackScope);
                         } catch { /* ignore */ }
                     }
                 });
@@ -882,7 +893,7 @@ export const useNarrador = ({
             clearTranscript();
             if (toastRef.current) toastRef.current.error(err.message || 'No se pudo iniciar la narración.');
         }
-    }, [buildGeminiContext, clearTranscript, handleSegmentComplete, markSegmentCached, persistGeneratedAudio, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
+    }, [buildGeminiContext, clearTranscript, getCurrentAudioScope, handleSegmentComplete, markSegmentCached, persistGeneratedAudio, playCachedSegment, prepareChapterSegments, saveProgress, setCurrentTranscriptForSegment, speakWithWebSpeech]);
 
     startNarrationRef.current = startNarration;
 
@@ -1023,7 +1034,7 @@ export const useNarrador = ({
             autoContinueRef.current = false;
             setTimeout(() => startNarration(0), 0);
         }
-    }, [activeChapter?.id, checkSavedProgress, clearTranscript, narrationSegments, prepareChapterSegments, startNarration, stopAllAudio, stopPreparationSession]);
+    }, [activeChapter?.id, activeChapter?.isLoaded, activeChapter?.content, checkSavedProgress, clearTranscript, narrationSegments, prepareChapterSegments, startNarration, stopAllAudio, stopPreparationSession]);
 
     useEffect(() => {
         const wasFocusMode = previousFocusModeRef.current;

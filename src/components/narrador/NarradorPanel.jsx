@@ -11,15 +11,19 @@ import NarradorSettingsModal from './NarradorSettingsModal';
 
 const SegmentList = ({ segments, currentSegmentIndex, status, cachedSegmentIndexes, isPreparing, preparationIndex, skipToSegment, regenerateSegment }) => {
     const segmentRefs = useRef(new Map());
+    const listRef = useRef(null);
 
     useEffect(() => {
         if (currentSegmentIndex < 0 || !['connecting', 'speaking', 'paused'].includes(status)) return;
         const activeSegment = segmentRefs.current.get(currentSegmentIndex);
-        activeSegment?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const list = listRef.current;
+        if (!activeSegment || !list) return;
+        const targetTop = activeSegment.offsetTop - ((list.clientHeight - activeSegment.offsetHeight) / 2);
+        list.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
     }, [currentSegmentIndex, status]);
 
     return (
-        <div className="max-h-64 overflow-y-auto space-y-1 pr-1" style={{ overflowAnchor: 'none' }}>
+        <div ref={listRef} className="max-h-64 overflow-y-auto space-y-1 pr-1" style={{ overflowAnchor: 'none' }}>
             {segments.map((segment, index) => {
                 const preparing = isPreparing && preparationIndex === index && !cachedSegmentIndexes.has(index);
                 const generating = preparing || (status === 'connecting' && index === currentSegmentIndex);
@@ -447,7 +451,10 @@ const NarradorPanel = ({
                     isOpen={isSettingsOpen}
                     onClose={() => setIsSettingsOpen(false)}
                     activeChapter={activeChapter}
-                    onCacheCleared={refreshCacheStats}
+                    onCacheCleared={() => {
+                        refreshCacheStats();
+                        narrador.refreshSegmentCacheStatus();
+                    }}
                 />
             </>
         );
@@ -670,7 +677,10 @@ const NarradorPanel = ({
                 isOpen={isSettingsOpen}
                 onClose={() => setIsSettingsOpen(false)}
                 activeChapter={activeChapter}
-                onCacheCleared={refreshCacheStats}
+                onCacheCleared={() => {
+                    refreshCacheStats();
+                    narrador.refreshSegmentCacheStatus();
+                }}
             />
         </>
     );

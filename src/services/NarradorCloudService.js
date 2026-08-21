@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import {
-    getCachedNarradorSegments,
+    getCachedChapterSegments,
     getCachedSegment,
     pcmToWavBlob,
     savePermanentSegment,
@@ -30,8 +30,32 @@ import {
 } from './NarradorAudioIdentity';
 
 const ASSETS_COLLECTION = 'narrationAssets';
+const PENDING_UPLOAD_PREFIX = 'narrador_cloud_pending_';
 
 const getUid = () => auth.currentUser?.uid || '';
+
+const getPendingUploadKey = (uid, assetId) => `${PENDING_UPLOAD_PREFIX}${uid}_${assetId}`;
+
+const readPendingUpload = (uid, assetId) => {
+    try {
+        const saved = window.localStorage.getItem(getPendingUploadKey(uid, assetId));
+        return saved ? JSON.parse(saved) : null;
+    } catch {
+        return null;
+    }
+};
+
+const savePendingUpload = (uid, assetId, metadata) => {
+    try {
+        window.localStorage.setItem(getPendingUploadKey(uid, assetId), JSON.stringify(metadata));
+    } catch { /* El reintento seguirá siendo seguro dentro de la sesión actual. */ }
+};
+
+const clearPendingUpload = (uid, assetId) => {
+    try {
+        window.localStorage.removeItem(getPendingUploadKey(uid, assetId));
+    } catch { /* ignore */ }
+};
 
 const getErrorDetails = (error) => ({
     name: error?.name || 'Error',
@@ -56,8 +80,7 @@ export const getNarradorCloudConfig = (profile) => {
     const cfg = profile?.aiConfig || {};
     return {
         cloudName: String(cfg.cloudinaryCloudName || '').trim(),
-        uploadPreset: String(cfg.cloudinaryUploadPreset || '').trim(),
-        apiKey: String(cfg.cloudinaryApiKey || '').trim()
+        uploadPreset: String(cfg.cloudinaryUploadPreset || '').trim()
     };
 };
 
@@ -104,14 +127,6 @@ export const uploadNarradorSegment = async ({
 }) => {
     const config = requireUploadConfig(profile);
     const uid = getUid();
-    console.info('[NarradorCloud] Iniciando fragmento', {
-        authenticated: Boolean(uid),
-        bookId,
-        chapterId,
-        segmentIndex,
-        variantKey,
-        pcmBytes: pcmData?.byteLength || 0
-    });
     const { assetId, reference } = getAssetReference({ uid, bookId, chapterId, segmentIndex, textHash, variantKey });
     let existing;
     try {
@@ -126,13 +141,53 @@ export const uploadNarradorSegment = async ({
         throw error;
     }
     if (existing.exists() && existing.data()?.status === 'ready' && existing.data()?.secureUrl) {
-        console.info('[NarradorCloud] Fragmento ya respaldado; se omite', {
+        return { assetId, ...existing.data(), skipped: true };
+    }
+
+    const recoveredMetadata = readPendingUpload(uid, assetId);
+    if (recoveredMetadata?.secureUrl) {
+        try {
+            const metadata = {
+                ...recoveredMetadata,
+                status: 'ready',
+                lastError: null,
+                updatedAt: serverTimestamp(),
+                createdAt: existing.exists() ? existing.data()?.createdAt || serverTimestamp() : serverTimestamp()
+            };
+            await setDoc(reference, metadata, { merge: true });
+            clearPendingUpload(uid, assetId);
+            return { assetId, ...metadata, skipped: true, recovered: true };
+        } catch (error) {
+            logCloudError('No se pudo recuperar la metadata pendiente del fragmento', error, { bookId, chapterId, segmentIndex, assetId });
+            throw error;
+        }
+    }
+
+    // Registrar primero la intención evita subir archivos si Firestore no está
+    // autorizado y deja trazabilidad si la red se corta durante la subida.
+    const pendingMetadata = {
+        uid,
+        bookId,
+        chapterId,
+        chapterTitle,
+        segmentIndex,
+        textHash,
+        variantKey,
+        cloudName: config.cloudName,
+        status: 'uploading',
+        updatedAt: serverTimestamp(),
+        createdAt: existing.exists() ? existing.data()?.createdAt || serverTimestamp() : serverTimestamp()
+    };
+    try {
+        await setDoc(reference, pendingMetadata, { merge: true });
+    } catch (error) {
+        logCloudError('Firestore rechazó preparar la metadata del fragmento', error, {
             bookId,
             chapterId,
             segmentIndex,
             assetId
         });
-        return { assetId, ...existing.data(), skipped: true };
+        throw error;
     }
 
     const wavBlob = pcmToWavBlob(pcmData);
@@ -140,20 +195,21 @@ export const uploadNarradorSegment = async ({
     formData.append('file', wavBlob, `${assetId}.wav`);
     formData.append('upload_preset', config.uploadPreset);
 
-    const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/video/upload`, {
-        method: 'POST',
-        body: formData
-    });
-    const result = await readJsonResponse(response);
-    console.info('[NarradorCloud] Cloudinary aceptó el fragmento', {
-        bookId,
-        chapterId,
-        segmentIndex,
-        assetId,
-        publicId: result.public_id || null,
-        resourceType: result.resource_type || null,
-        bytes: result.bytes || wavBlob.size
-    });
+    let result;
+    try {
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/video/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        result = await readJsonResponse(response);
+    } catch (error) {
+        try {
+            await setDoc(reference, { status: 'failed', lastError: error?.message || 'Cloudinary rechazó la operación.', updatedAt: serverTimestamp() }, { merge: true });
+        } catch (metadataError) {
+            logCloudError('No se pudo registrar el error de subida en Firestore', metadataError, { bookId, chapterId, segmentIndex, assetId });
+        }
+        throw error;
+    }
     const metadata = {
         uid,
         bookId,
@@ -169,9 +225,25 @@ export const uploadNarradorSegment = async ({
         format: result.format || 'wav',
         bytes: result.bytes || wavBlob.size,
         status: 'ready',
+        lastError: null,
         updatedAt: serverTimestamp(),
         createdAt: existing.exists() ? existing.data()?.createdAt || serverTimestamp() : serverTimestamp()
     };
+    savePendingUpload(uid, assetId, {
+        uid,
+        bookId,
+        chapterId,
+        chapterTitle,
+        segmentIndex,
+        textHash,
+        variantKey,
+        cloudName: config.cloudName,
+        publicId: result.public_id || '',
+        secureUrl: result.secure_url || '',
+        resourceType: result.resource_type || 'video',
+        format: result.format || 'wav',
+        bytes: result.bytes || wavBlob.size
+    });
     try {
         await setDoc(reference, metadata, { merge: true });
     } catch (error) {
@@ -184,22 +256,12 @@ export const uploadNarradorSegment = async ({
         });
         throw error;
     }
-    console.info('[NarradorCloud] Metadata guardada en Firestore', {
-        bookId,
-        chapterId,
-        segmentIndex,
-        assetId
-    });
+    clearPendingUpload(uid, assetId);
     return { assetId, ...metadata, skipped: false };
 };
 
 export const getCachedNarradorChapterAssets = async ({ bookId, chapterId }) => {
     const uid = getUid();
-    console.info('[NarradorCloud] Consultando metadata de respaldo', {
-        authenticated: Boolean(uid),
-        bookId,
-        chapterId
-    });
     const assetsQuery = query(getAssetsCollection(uid), where('bookId', '==', bookId));
     let snapshot;
     try {
@@ -211,14 +273,33 @@ export const getCachedNarradorChapterAssets = async ({ bookId, chapterId }) => {
         });
         throw error;
     }
-    console.info('[NarradorCloud] Metadata de respaldo consultada', {
-        bookId,
-        chapterId,
-        documentsFound: snapshot.size
-    });
     return snapshot.docs
         .map((assetDoc) => ({ assetId: assetDoc.id, ...assetDoc.data() }))
         .filter((asset) => asset.chapterId === chapterId && asset.status === 'ready' && asset.secureUrl);
+};
+
+export const getNarradorCloudChapterStatus = async ({
+    bookId,
+    chapterId,
+    segments = [],
+    variantKey = 'default'
+}) => {
+    const [assets, local] = await Promise.all([
+        getCachedNarradorChapterAssets({ bookId, chapterId }),
+        getCachedChapterSegments(bookId, chapterId, segments, variantKey)
+    ]);
+    const assetKeys = new Set(assets.map(buildNarradorAssetMatchKey));
+    const cloudIndexes = segments
+        .map((segment, index) => assetKeys.has(buildNarradorAssetMatchKey({ segmentIndex: index, textHash: segment.hash, variantKey })) ? index : null)
+        .filter((index) => index !== null);
+    const cloudIndexSet = new Set(cloudIndexes);
+    return {
+        total: segments.length,
+        localReady: local.segments.length,
+        cloudReady: cloudIndexes.length,
+        localMissingIndexes: local.missingIndexes,
+        cloudMissingIndexes: segments.map((_, index) => index).filter((index) => !cloudIndexSet.has(index))
+    };
 };
 
 export const uploadCachedNarradorChapter = async ({
@@ -226,16 +307,19 @@ export const uploadCachedNarradorChapter = async ({
     bookId,
     chapterId,
     chapterTitle = '',
+    segments = [],
+    variantKey = buildNarradorAudioVariant(profile),
     onProgress
 }) => {
-    const localSegments = await getCachedNarradorSegments({ bookId, chapterId });
-    console.info('[NarradorCloud] Iniciando respaldo del capítulo', {
-        bookId,
-        chapterId,
-        localSegments: localSegments.length
-    });
+    const localCache = await getCachedChapterSegments(bookId, chapterId, segments, variantKey);
+    const localSegments = localCache.segments.map(({ index, segment, cached }) => ({
+        segmentIndex: index,
+        textHash: segment.hash,
+        variantKey,
+        pcmData: cached.pcmData
+    }));
     if (localSegments.length === 0) {
-        return { total: 0, uploaded: 0, skipped: 0, failed: 0 };
+        return { total: 0, uploaded: 0, skipped: 0, failed: 0, missing: localCache.missingIndexes.length, errors: [] };
     }
 
     let uploaded = 0;
@@ -253,7 +337,7 @@ export const uploadCachedNarradorChapter = async ({
                 chapterTitle,
                 segmentIndex: entry.segmentIndex,
                 textHash: entry.textHash,
-                variantKey: entry.variantKey || 'default',
+                variantKey: entry.variantKey,
                 pcmData: entry.pcmData
             });
             if (result.skipped) skipped += 1;
@@ -265,15 +349,13 @@ export const uploadCachedNarradorChapter = async ({
                 bookId,
                 chapterId,
                 segmentIndex: entry.segmentIndex,
-                variantKey: entry.variantKey || 'default'
+                variantKey: entry.variantKey
             });
         }
         onProgress?.({ completed: index + 1, total: localSegments.length, uploaded, skipped, failed, errors });
     }
 
-    const summary = { total: localSegments.length, uploaded, skipped, failed, errors };
-    console.info('[NarradorCloud] Respaldo del capítulo finalizado', { bookId, chapterId, ...summary });
-    return summary;
+    return { total: localSegments.length, uploaded, skipped, failed, missing: localCache.missingIndexes.length, errors };
 };
 
 export const downloadNarradorChapterToCache = async ({
@@ -285,12 +367,6 @@ export const downloadNarradorChapterToCache = async ({
     onProgress,
     onSegmentCached
 }) => {
-    console.info('[NarradorCloud] Iniciando descarga del capítulo', {
-        bookId,
-        chapterId,
-        requestedSegments: segments.length,
-        variantKey
-    });
     const assets = await getCachedNarradorChapterAssets({ bookId, chapterId });
     const assetsByKey = new Map(assets.map((asset) => [
         buildNarradorAssetMatchKey(asset),
@@ -315,7 +391,7 @@ export const downloadNarradorChapterToCache = async ({
             const local = await getCachedSegment(bookId, chapterId, index, segment.hash, variantKey);
             if (local?.pcmData) {
                 skipped += 1;
-                onSegmentCached?.(index);
+                onSegmentCached?.(index, { bookId, chapterId, variantKey });
             } else if (!asset) {
                 missing += 1;
             } else {
@@ -325,7 +401,7 @@ export const downloadNarradorChapterToCache = async ({
                 const saved = await savePermanentSegment(bookId, chapterId, index, segment.hash, pcmData, variantKey);
                 if (!saved) throw new Error(`No se pudo guardar el fragmento ${index + 1} en la caché local.`);
                 downloaded += 1;
-                onSegmentCached?.(index);
+                onSegmentCached?.(index, { bookId, chapterId, variantKey });
             }
         } catch (error) {
             failed += 1;
@@ -341,9 +417,7 @@ export const downloadNarradorChapterToCache = async ({
         onProgress?.({ completed: index + 1, total, downloaded, skipped, missing, failed, errors });
     }
 
-    const summary = { total, downloaded, skipped, missing, failed, errors };
-    console.info('[NarradorCloud] Descarga del capítulo finalizada', { bookId, chapterId, ...summary });
-    return summary;
+    return { total, downloaded, skipped, missing, failed, errors };
 };
 
 export default {
@@ -351,6 +425,7 @@ export default {
     isNarradorCloudConfigured,
     uploadNarradorSegment,
     getCachedNarradorChapterAssets,
+    getNarradorCloudChapterStatus,
     uploadCachedNarradorChapter,
     downloadNarradorChapterToCache
 };
