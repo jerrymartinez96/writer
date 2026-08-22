@@ -153,7 +153,7 @@ const AuditToolRoom = () => {
     const launch = useToolRoomLaunch('audit');
     const { activeBook, profile, chapters = [], worldItems = [], characters = [], lazyLoadChapters, updateChapter, updateWorldItem, updateCharacter, selectChapter, setActiveView } = useData();
     const { getRoomState, updateProcess, openToolRoom } = useToolRooms();
-    const storedProcess = launch?.prompt ? {} : (getRoomState('audit').process || {});
+    const storedProcess = launch ? {} : (getRoomState('audit').process || {});
     const launchContext = launch?.context || {};
     const hasLaunchContext = ['chapterIds', 'characterIds', 'worldItemIds'].some((key) => launchContext[key]?.length);
     const savedAuditType = storedProcess.auditType;

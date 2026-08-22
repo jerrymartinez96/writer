@@ -29,9 +29,11 @@ const CoWriterRoom = () => {
     const launchedState = useMemo(() => ({
         ...state,
         selectedCharacterId: launch?.context?.characterIds?.[0] || state.selectedCharacterId,
-        designer: launch?.prompt && launch.workflow === 'designer'
-            ? { launchObjective: launch.prompt, idea: launch.prompt }
-            : { ...(state.designer || {}), ...(launch?.prompt ? { launchObjective: launch.prompt } : {}) },
+        designer: {
+            ...(state.designer || {}),
+            ...(launch ? { launchObjective: launch.prompt || '' } : {}),
+            ...(launch?.prompt && launch.workflow === 'designer' ? { idea: launch.prompt } : {}),
+        },
     }), [launch, state]);
     const selectedChapter = chapters.find((chapter) => chapter.id === launchedState.chapterId) || activeChapter || null;
 
